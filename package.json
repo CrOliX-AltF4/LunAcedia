@@ -1,0 +1,59 @@
+{
+  "name": "lunacedia",
+  "version": "0.1.0",
+  "description": "Information infrastructure for the Lun ecosystem — aggregates events from GitHub, Email, Calendar, RSS, HA and pushes them to connected clients",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx source/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
+    "*.{json,md,yaml,yml}": ["prettier --write"]
+  },
+  "keywords": ["jarvis", "notifications", "automation", "natsume", "lun-ecosystem"],
+  "author": "CrOliX-AltF4",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CrOliX-AltF4/LunAcedia.git"
+  },
+  "homepage": "https://github.com/CrOliX-AltF4/LunAcedia#readme",
+  "bugs": {
+    "url": "https://github.com/CrOliX-AltF4/LunAcedia/issues"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.14",
+    "@vitest/coverage-v8": "^4.1.4",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.1.4"
+  },
+  "dependencies": {
+    "dotenv": "^17.0.0",
+    "ws": "^8.18.2"
+  }
+}
