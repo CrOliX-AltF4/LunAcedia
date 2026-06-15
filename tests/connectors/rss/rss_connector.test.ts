@@ -20,12 +20,15 @@ const RSS_FEED = `<?xml version="1.0"?>
 </channel></rss>`;
 
 beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-        ok: true,
-        text: () => Promise.resolve(RSS_FEED),
-    }));
-    process.env["RSS_FEEDS"]    = JSON.stringify(["https://example.com/feed.xml"]);
-    process.env["RSS_ENABLED"]  = "true";
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+            ok: true,
+            text: () => Promise.resolve(RSS_FEED),
+        }),
+    );
+    process.env["RSS_FEEDS"] = JSON.stringify(["https://example.com/feed.xml"]);
+    process.env["RSS_ENABLED"] = "true";
     process.env["RSS_MAX_AGE_HOURS"] = "24";
 });
 
@@ -80,15 +83,19 @@ describe("RssConnector", () => {
     });
 
     it("should strip HTML tags from description", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-            ok: true,
-            text: () => Promise.resolve(`<rss version="2.0"><channel>
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                text: () =>
+                    Promise.resolve(`<rss version="2.0"><channel>
                 <item>
                     <title>Test</title><link>https://x.com/1</link><guid>x-1</guid>
                     <pubDate>${new Date().toUTCString()}</pubDate>
                     <description><![CDATA[<p>Hello <b>world</b></p>]]></description>
                 </item></channel></rss>`),
-        }));
+            }),
+        );
         const connector = new RssConnector();
         const events = await connector.poll();
         expect(events[0]!.body).not.toContain("<p>");

@@ -3,10 +3,13 @@ import { getGoogleToken, clearGoogleTokenCache } from "../../source/auth/google_
 
 beforeEach(() => {
     clearGoogleTokenCache();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-        ok:   true,
-        json: () => Promise.resolve({ access_token: "test-token", expires_in: 3600 }),
-    }));
+    vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ access_token: "test-token", expires_in: 3600 }),
+        }),
+    );
 });
 
 afterEach(() => vi.unstubAllGlobals());

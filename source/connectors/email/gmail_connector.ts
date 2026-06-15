@@ -6,11 +6,14 @@ import type { EmailRule } from "./email_rules.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-interface MessageHeader { name: string; value: string }
+interface MessageHeader {
+    name: string;
+    value: string;
+}
 interface GmailMessageMeta {
-    id:           string;
+    id: string;
     internalDate: string;
-    payload:      { headers: MessageHeader[] };
+    payload: { headers: MessageHeader[] };
 }
 
 /**
@@ -28,14 +31,14 @@ export class GmailConnector implements IConnector {
     readonly name = "Gmail";
     readonly preferredPollIntervalMs: number;
 
-    private readonly clientId:     string;
+    private readonly clientId: string;
     private readonly clientSecret: string;
     private readonly refreshToken: string;
-    private readonly maxAgeMs:     number;
-    private readonly rules:        EmailRule[];
+    private readonly maxAgeMs: number;
+    private readonly rules: EmailRule[];
 
     constructor() {
-        this.clientId     = process.env["GMAIL_CLIENT_ID"]     ?? "";
+        this.clientId = process.env["GMAIL_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GMAIL_CLIENT_SECRET"] ?? "";
         this.refreshToken = process.env["GMAIL_REFRESH_TOKEN"] ?? "";
 
@@ -60,7 +63,7 @@ export class GmailConnector implements IConnector {
         }
 
         const authHeaders = { Authorization: `Bearer ${token}` };
-        const cutoff      = Date.now() - this.maxAgeMs;
+        const cutoff = Date.now() - this.maxAgeMs;
 
         let ids: string[];
         try {
@@ -73,7 +76,7 @@ export class GmailConnector implements IConnector {
                 console.warn(`[Gmail] list messages returned ${resp.status}`);
                 return [];
             }
-            const data = await resp.json() as { messages?: Array<{ id: string }> };
+            const data = (await resp.json()) as { messages?: Array<{ id: string }> };
             ids = (data.messages ?? []).map((m) => m.id);
         } catch (e) {
             console.error("[Gmail] list error:", (e as Error).message);
@@ -85,32 +88,32 @@ export class GmailConnector implements IConnector {
             try {
                 const resp = await fetch(
                     `${GMAIL_API}/messages/${id}?format=metadata` +
-                    `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+                        `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
                     { headers: authHeaders },
                 );
                 if (!resp.ok) continue;
 
-                const msg = await resp.json() as GmailMessageMeta;
+                const msg = (await resp.json()) as GmailMessageMeta;
                 const header = (name: string) =>
-                    msg.payload.headers
-                        .find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
+                    msg.payload.headers.find((h) => h.name.toLowerCase() === name.toLowerCase())
+                        ?.value ?? "";
 
                 const ts = parseInt(msg.internalDate, 10);
                 if (ts < cutoff) continue;
 
-                const from     = header("From");
-                const subject  = header("Subject") || "(no subject)";
+                const from = header("From");
+                const subject = header("Subject") || "(no subject)";
                 const priority = classifyEmail(from, subject, this.rules);
 
                 events.push({
-                    type:      "email.received",
+                    type: "email.received",
                     ts,
-                    source:    "email",
-                    title:     subject,
-                    body:      from,
+                    source: "email",
+                    title: subject,
+                    body: from,
                     priority,
                     dedupeKey: `email-${id}`,
-                    meta:      { from, messageId: id },
+                    meta: { from, messageId: id },
                 });
             } catch {
                 // skip individual message errors silently

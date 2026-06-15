@@ -1,38 +1,38 @@
 name: Stale
 
 on:
-  schedule:
-    - cron: '0 9 * * 1'
-  workflow_dispatch:
+    schedule:
+        - cron: "0 9 * * 1"
+    workflow_dispatch:
 
 permissions:
-  issues: write
-  pull-requests: write
+    issues: write
+    pull-requests: write
 
 jobs:
-  stale:
-    name: Mark and close stale issues and PRs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/stale@v9
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          days-before-issue-stale: 60
-          days-before-issue-close: 14
-          stale-issue-label: stale
-          stale-issue-message: |
-            This issue has been automatically marked as stale (60 days inactive).
-            It will be closed in 14 days unless there is new activity.
-          close-issue-message: |
-            Closed after 14 days of inactivity. Reopen if still relevant.
-          days-before-pr-stale: 30
-          days-before-pr-close: 7
-          stale-pr-label: stale
-          stale-pr-message: |
-            This PR has been automatically marked as stale (30 days inactive).
-            It will be closed in 7 days unless there is new activity.
-          close-pr-message: |
-            Closed after 7 days of inactivity. Reopen if work is ongoing.
-          exempt-issue-labels: 'pinned,security,roadmap'
-          exempt-pr-labels: 'pinned,security'
-          exempt-all-assignees: true
+    stale:
+        name: Mark and close stale issues and PRs
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/stale@v9
+              with:
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+                  days-before-issue-stale: 60
+                  days-before-issue-close: 14
+                  stale-issue-label: stale
+                  stale-issue-message: |
+                      This issue has been automatically marked as stale (60 days inactive).
+                      It will be closed in 14 days unless there is new activity.
+                  close-issue-message: |
+                      Closed after 14 days of inactivity. Reopen if still relevant.
+                  days-before-pr-stale: 30
+                  days-before-pr-close: 7
+                  stale-pr-label: stale
+                  stale-pr-message: |
+                      This PR has been automatically marked as stale (30 days inactive).
+                      It will be closed in 7 days unless there is new activity.
+                  close-pr-message: |
+                      Closed after 7 days of inactivity. Reopen if work is ongoing.
+                  exempt-issue-labels: "pinned,security,roadmap"
+                  exempt-pr-labels: "pinned,security"
+                  exempt-all-assignees: true

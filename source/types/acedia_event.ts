@@ -24,13 +24,13 @@ export type AcediaEventPriority = "urgent" | "normal" | "info";
  * The consumer (Natsume) decides what an event means for the user.
  */
 export interface AcediaEvent {
-    type:      AcediaEventType;
-    ts:        number;
-    source:    AcediaEventSource;
-    title:     string;
-    body?:     string;
-    url?:      string;
-    priority:  AcediaEventPriority;
+    type: AcediaEventType;
+    ts: number;
+    source: AcediaEventSource;
+    title: string;
+    body?: string;
+    url?: string;
+    priority: AcediaEventPriority;
     dedupeKey: string;
-    meta?:     Record<string, unknown>;
+    meta?: Record<string, unknown>;
 }

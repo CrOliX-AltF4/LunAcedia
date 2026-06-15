@@ -1,7 +1,7 @@
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 
-const DEDUP_TTL_MS   = 7 * 24 * 60 * 60 * 1000; // 7 days
+const DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const URGENT_POLL_MS = 60_000;
 
 type EventHandler = (event: AcediaEvent) => void;
@@ -13,10 +13,10 @@ type EventHandler = (event: AcediaEvent) => void;
  * Standalone: no dependency on Natsume. Handlers are registered by the WS server.
  */
 export class IngestionHub {
-    private readonly handlers   = new Set<EventHandler>();
-    private readonly seen       = new Map<string, number>(); // dedupeKey → ts
-    private urgentTimer:  ReturnType<typeof setInterval> | null = null;
-    private normalTimer:  ReturnType<typeof setInterval> | null = null;
+    private readonly handlers = new Set<EventHandler>();
+    private readonly seen = new Map<string, number>(); // dedupeKey → ts
+    private urgentTimer: ReturnType<typeof setInterval> | null = null;
+    private normalTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
 
     constructor(private readonly connectors: IConnector[]) {}
@@ -45,8 +45,14 @@ export class IngestionHub {
     }
 
     stop(): void {
-        if (this.urgentTimer) { clearInterval(this.urgentTimer); this.urgentTimer = null; }
-        if (this.normalTimer) { clearInterval(this.normalTimer); this.normalTimer = null; }
+        if (this.urgentTimer) {
+            clearInterval(this.urgentTimer);
+            this.urgentTimer = null;
+        }
+        if (this.normalTimer) {
+            clearInterval(this.normalTimer);
+            this.normalTimer = null;
+        }
         this.started = false;
     }
 
@@ -83,7 +89,11 @@ export class IngestionHub {
 
         this.seen.set(event.dedupeKey, event.ts);
         for (const handler of this.handlers) {
-            try { handler(event); } catch { /* never throw from dispatch */ }
+            try {
+                handler(event);
+            } catch {
+                /* never throw from dispatch */
+            }
         }
     }
 

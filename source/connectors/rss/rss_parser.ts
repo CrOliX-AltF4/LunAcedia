@@ -1,8 +1,8 @@
 ﻿export interface RssItem {
-    title:       string;
-    link:        string;
-    guid:        string;
-    pubDate:     Date | null;
+    title: string;
+    link: string;
+    guid: string;
+    pubDate: Date | null;
     description: string;
 }
 
@@ -33,13 +33,13 @@ export function parseFeed(xml: string): RssItem[] {
     if (isAtom) {
         return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((m) => {
             const entry = m[1]!;
-            const link  = attr(entry, "link", "href") || text(entry, "link");
-            const guid  = text(entry, "id") || link;
+            const link = attr(entry, "link", "href") || text(entry, "link");
+            const guid = text(entry, "id") || link;
             return {
-                title:       text(entry, "title"),
+                title: text(entry, "title"),
                 link,
                 guid,
-                pubDate:     parseDate(text(entry, "updated") || text(entry, "published")),
+                pubDate: parseDate(text(entry, "updated") || text(entry, "published")),
                 description: text(entry, "summary") || text(entry, "content"),
             };
         });
@@ -51,10 +51,10 @@ export function parseFeed(xml: string): RssItem[] {
         const link = text(item, "link") || attr(item, "link", "href");
         const guid = text(item, "guid") || link;
         return {
-            title:       text(item, "title"),
+            title: text(item, "title"),
             link,
             guid,
-            pubDate:     parseDate(text(item, "pubDate") || text(item, "dc:date")),
+            pubDate: parseDate(text(item, "pubDate") || text(item, "dc:date")),
             description: text(item, "description"),
         };
     });

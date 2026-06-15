@@ -4,11 +4,11 @@ import type { IConnector } from "../../source/connectors/connector_interface.js"
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 const baseEvent: AcediaEvent = {
-    type:      "github.push",
-    ts:        Date.now(),
-    source:    "github",
-    title:     "New push",
-    priority:  "normal",
+    type: "github.push",
+    ts: Date.now(),
+    source: "github",
+    title: "New push",
+    priority: "normal",
     dedupeKey: "gh-push-1",
 };
 

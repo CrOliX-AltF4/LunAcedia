@@ -4,11 +4,11 @@ import { AcediaWsServer } from "../../source/ws/acedia_ws_server.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 const testEvent: AcediaEvent = {
-    type:      "github.push",
-    ts:        Date.now(),
-    source:    "github",
-    title:     "Push to main",
-    priority:  "normal",
+    type: "github.push",
+    ts: Date.now(),
+    source: "github",
+    title: "Push to main",
+    priority: "normal",
     dedupeKey: "test-1",
 };
 

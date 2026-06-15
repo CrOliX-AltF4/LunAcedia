@@ -5,13 +5,13 @@ import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.j
 const GCAL_API = "https://www.googleapis.com/calendar/v3";
 
 interface CalEvent {
-    id:           string;
-    summary?:     string;
+    id: string;
+    summary?: string;
     description?: string;
-    htmlLink?:    string;
-    location?:    string;
-    start:        { dateTime?: string; date?: string };
-    end:          { dateTime?: string; date?: string };
+    htmlLink?: string;
+    location?: string;
+    start: { dateTime?: string; date?: string };
+    end: { dateTime?: string; date?: string };
 }
 
 interface CalListResponse {
@@ -44,15 +44,15 @@ export class GcalConnector implements IConnector {
     readonly name = "GCal";
     readonly preferredPollIntervalMs: number;
 
-    private readonly clientId:        string;
-    private readonly clientSecret:    string;
-    private readonly refreshToken:    string;
-    private readonly calendars:       string[];
-    private readonly lookaheadMs:     number;
+    private readonly clientId: string;
+    private readonly clientSecret: string;
+    private readonly refreshToken: string;
+    private readonly calendars: string[];
+    private readonly lookaheadMs: number;
     private readonly defaultPriority: AcediaEventPriority;
 
     constructor() {
-        this.clientId     = process.env["GCAL_CLIENT_ID"]     ?? "";
+        this.clientId = process.env["GCAL_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GCAL_CLIENT_SECRET"] ?? "";
         this.refreshToken = process.env["GCAL_REFRESH_TOKEN"] ?? "";
 
@@ -65,7 +65,9 @@ export class GcalConnector implements IConnector {
         this.calendars = parseCalendars(process.env["GCAL_CALENDARS"] ?? '["primary"]');
 
         const raw = process.env["GCAL_PRIORITY"] ?? "normal";
-        this.defaultPriority = (["urgent", "normal", "info"].includes(raw) ? raw : "normal") as AcediaEventPriority;
+        this.defaultPriority = (
+            ["urgent", "normal", "info"].includes(raw) ? raw : "normal"
+        ) as AcediaEventPriority;
     }
 
     async poll(): Promise<AcediaEvent[]> {
@@ -73,7 +75,12 @@ export class GcalConnector implements IConnector {
 
         let token: string;
         try {
-            token = await getGoogleToken(this.clientId, this.clientSecret, this.refreshToken, "gcal");
+            token = await getGoogleToken(
+                this.clientId,
+                this.clientSecret,
+                this.refreshToken,
+                "gcal",
+            );
         } catch (e) {
             console.error("[GCal] token refresh error:", (e as Error).message);
             return [];
@@ -91,7 +98,7 @@ export class GcalConnector implements IConnector {
     }
 
     private async pollCalendar(
-        calId:   string,
+        calId: string,
         timeMin: string,
         timeMax: string,
         headers: Record<string, string>,
@@ -116,24 +123,24 @@ export class GcalConnector implements IConnector {
             return [];
         }
 
-        const data   = await resp.json() as CalListResponse;
+        const data = (await resp.json()) as CalListResponse;
         const events = data.items ?? [];
 
         return events.map((ev): AcediaEvent => {
             const startRaw = ev.start.dateTime ?? ev.start.date ?? "";
-            const endRaw   = ev.end.dateTime   ?? ev.end.date   ?? "";
-            const ts       = startRaw ? new Date(startRaw).getTime() : Date.now();
+            const endRaw = ev.end.dateTime ?? ev.end.date ?? "";
+            const ts = startRaw ? new Date(startRaw).getTime() : Date.now();
 
             return {
-                type:      "calendar.upcoming",
+                type: "calendar.upcoming",
                 ts,
-                source:    "calendar",
-                title:     ev.summary ?? "(no title)",
-                body:      ev.description?.slice(0, 200).trim(),
-                url:       ev.htmlLink,
-                priority:  this.defaultPriority,
+                source: "calendar",
+                title: ev.summary ?? "(no title)",
+                body: ev.description?.slice(0, 200).trim(),
+                url: ev.htmlLink,
+                priority: this.defaultPriority,
                 dedupeKey: `cal-${ev.id}`,
-                meta:      { calendarId: calId, start: startRaw, end: endRaw, location: ev.location },
+                meta: { calendarId: calId, start: startRaw, end: endRaw, location: ev.location },
             };
         });
     }

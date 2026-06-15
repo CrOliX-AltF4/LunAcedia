@@ -1,43 +1,43 @@
 version: 2
 updates:
-  - package-ecosystem: npm
-    directory: /
-    target-branch: master
-    schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
-      timezone: Europe/Paris
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - automated
-    groups:
-      dev-tooling:
-        patterns:
-          - 'eslint*'
-          - 'prettier*'
-          - 'typescript*'
-          - 'husky'
-          - 'lint-staged'
-          - 'commitlint*'
-          - '@commitlint*'
-          - 'vitest*'
-          - '@vitest*'
-          - 'tsx'
-    ignore:
-      - dependency-name: '*'
-        update-types: ['version-update:semver-major']
+    - package-ecosystem: npm
+      directory: /
+      target-branch: master
+      schedule:
+          interval: weekly
+          day: monday
+          time: "09:00"
+          timezone: Europe/Paris
+      open-pull-requests-limit: 5
+      labels:
+          - dependencies
+          - automated
+      groups:
+          dev-tooling:
+              patterns:
+                  - "eslint*"
+                  - "prettier*"
+                  - "typescript*"
+                  - "husky"
+                  - "lint-staged"
+                  - "commitlint*"
+                  - "@commitlint*"
+                  - "vitest*"
+                  - "@vitest*"
+                  - "tsx"
+      ignore:
+          - dependency-name: "*"
+            update-types: ["version-update:semver-major"]
 
-  - package-ecosystem: github-actions
-    directory: /
-    target-branch: master
-    schedule:
-      interval: weekly
-      day: monday
-      time: '09:00'
-      timezone: Europe/Paris
-    labels:
-      - dependencies
-      - github-actions
-      - automated
+    - package-ecosystem: github-actions
+      directory: /
+      target-branch: master
+      schedule:
+          interval: weekly
+          day: monday
+          time: "09:00"
+          timezone: Europe/Paris
+      labels:
+          - dependencies
+          - github-actions
+          - automated

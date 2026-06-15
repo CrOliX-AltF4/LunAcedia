@@ -5,7 +5,7 @@ describe("parseRules", () => {
     it("should parse a valid rules array", () => {
         const raw = JSON.stringify([
             { senderPattern: "boss@corp.com", priority: "urgent" },
-            { senderPattern: "newsletter",    priority: "info"   },
+            { senderPattern: "newsletter", priority: "info" },
         ]);
         expect(parseRules(raw)).toHaveLength(2);
     });
@@ -29,7 +29,9 @@ describe("parseRules", () => {
     });
 
     it("should preserve optional label field", () => {
-        const raw = JSON.stringify([{ senderPattern: "a@a.com", priority: "normal", label: "Work" }]);
+        const raw = JSON.stringify([
+            { senderPattern: "a@a.com", priority: "normal", label: "Work" },
+        ]);
         const rules = parseRules(raw);
         expect(rules[0]!.label).toBe("Work");
     });
@@ -38,8 +40,8 @@ describe("parseRules", () => {
 describe("classifyEmail", () => {
     const rules = [
         { senderPattern: "boss@corp.com", priority: "urgent" as const },
-        { senderPattern: "@corp.com",     priority: "normal" as const },
-        { senderPattern: "newsletter",    priority: "info"   as const },
+        { senderPattern: "@corp.com", priority: "normal" as const },
+        { senderPattern: "newsletter", priority: "info" as const },
     ];
 
     it("should match first rule (boss@corp.com → urgent)", () => {

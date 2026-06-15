@@ -3,8 +3,8 @@ import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.
 import { parseFeed } from "./rss_parser.js";
 
 interface FeedConfig {
-    url:      string;
-    label?:   string;
+    url: string;
+    label?: string;
     priority?: AcediaEventPriority;
 }
 
@@ -12,9 +12,7 @@ function parseFeedConfigs(raw: string): FeedConfig[] {
     try {
         const parsed = JSON.parse(raw) as unknown[];
         return parsed.map((item) =>
-            typeof item === "string"
-                ? { url: item }
-                : (item as FeedConfig),
+            typeof item === "string" ? { url: item } : (item as FeedConfig),
         );
     } catch {
         return [];
@@ -35,8 +33,8 @@ export class RssConnector implements IConnector {
     readonly name = "RSS";
     readonly preferredPollIntervalMs: number;
 
-    private readonly feeds:      FeedConfig[];
-    private readonly maxAgeMs:   number;
+    private readonly feeds: FeedConfig[];
+    private readonly maxAgeMs: number;
 
     constructor() {
         this.feeds = parseFeedConfigs(process.env["RSS_FEEDS"] ?? "[]");
@@ -51,9 +49,7 @@ export class RssConnector implements IConnector {
     async poll(): Promise<AcediaEvent[]> {
         if (this.feeds.length === 0) return [];
 
-        const results = await Promise.allSettled(
-            this.feeds.map((feed) => this.pollFeed(feed)),
-        );
+        const results = await Promise.allSettled(this.feeds.map((feed) => this.pollFeed(feed)));
 
         return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
     }
@@ -74,9 +70,9 @@ export class RssConnector implements IConnector {
             return [];
         }
 
-        const items  = parseFeed(xml);
+        const items = parseFeed(xml);
         const cutoff = Date.now() - this.maxAgeMs;
-        const label  = feed.label ?? new URL(feed.url).hostname;
+        const label = feed.label ?? new URL(feed.url).hostname;
 
         return items
             .filter((item) => {
@@ -85,15 +81,18 @@ export class RssConnector implements IConnector {
                 return true;
             })
             .map((item) => ({
-                type:      "rss.item" as const,
-                ts:        item.pubDate?.getTime() ?? Date.now(),
-                source:    "rss" as const,
-                title:     `[${label}] ${item.title}`,
-                body:      item.description
-                    ? item.description.replace(/<[^>]+>/g, "").slice(0, 200).trim()
+                type: "rss.item" as const,
+                ts: item.pubDate?.getTime() ?? Date.now(),
+                source: "rss" as const,
+                title: `[${label}] ${item.title}`,
+                body: item.description
+                    ? item.description
+                          .replace(/<[^>]+>/g, "")
+                          .slice(0, 200)
+                          .trim()
                     : undefined,
-                url:       item.link,
-                priority:  feed.priority ?? "info",
+                url: item.link,
+                priority: feed.priority ?? "info",
                 dedupeKey: `rss-${Buffer.from(item.guid).toString("base64").slice(0, 32)}`,
             }));
     }

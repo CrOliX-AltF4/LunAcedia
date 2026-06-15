@@ -13,8 +13,8 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
  * Heartbeat: sends system.heartbeat every 30s to keep connections alive.
  */
 export class AcediaWsServer {
-    private wss:             WebSocketServer | null = null;
-    private heartbeatTimer:  ReturnType<typeof setInterval> | null = null;
+    private wss: WebSocketServer | null = null;
+    private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     private readonly secret: string | null;
 
     constructor() {
@@ -37,11 +37,11 @@ export class AcediaWsServer {
 
         this.heartbeatTimer = setInterval(() => {
             this.broadcast({
-                type:      "system.heartbeat",
-                ts:        Date.now(),
-                source:    "system",
-                title:     "heartbeat",
-                priority:  "info",
+                type: "system.heartbeat",
+                ts: Date.now(),
+                source: "system",
+                title: "heartbeat",
+                priority: "info",
                 dedupeKey: `hb-${Date.now()}`,
             });
         }, HEARTBEAT_INTERVAL_MS);
@@ -58,7 +58,10 @@ export class AcediaWsServer {
     }
 
     stop(): void {
-        if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
         this.wss?.close();
         this.wss = null;
     }

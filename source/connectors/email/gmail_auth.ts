@@ -1,7 +1,7 @@
 ﻿import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 
 export async function getAccessToken(
-    clientId:     string,
+    clientId: string,
     clientSecret: string,
     refreshToken: string,
 ): Promise<string> {

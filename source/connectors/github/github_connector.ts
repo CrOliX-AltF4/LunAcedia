@@ -3,9 +3,9 @@ import type { AcediaEvent } from "../../types/acedia_event.js";
 import { formatThread, formatFailedCheckRun } from "./github_formatter.js";
 
 interface GitHubThread {
-    id:         string;
-    reason:     string;
-    unread:     boolean;
+    id: string;
+    reason: string;
+    unread: boolean;
     subject: { title: string; type: string; url?: string };
     repository: { full_name: string };
 }
@@ -13,7 +13,7 @@ interface GitHubThread {
 export class GitHubConnector implements IConnector {
     readonly name = "GitHub";
 
-    private readonly token:        string;
+    private readonly token: string;
     private readonly excludeRepos: Set<string>;
     private readonly watchedRepos: string[] | "*";
     readonly preferredPollIntervalMs: number;

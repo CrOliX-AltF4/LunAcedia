@@ -3,18 +3,27 @@ import { GcalConnector } from "../../../source/connectors/calendar/gcal_connecto
 import { clearGoogleTokenCache } from "../../../source/auth/google_oauth.js";
 
 const START = new Date(Date.now() + 60 * 60 * 1_000).toISOString();
-const END   = new Date(Date.now() + 90 * 60 * 1_000).toISOString();
+const END = new Date(Date.now() + 90 * 60 * 1_000).toISOString();
 
 function calEvent(id: string, summary?: string, extra?: Record<string, unknown>) {
-    return { id, summary, start: { dateTime: START }, end: { dateTime: END },
-             htmlLink: `https://calendar.google.com/event/${id}`, ...extra };
+    return {
+        id,
+        summary,
+        start: { dateTime: START },
+        end: { dateTime: END },
+        htmlLink: `https://calendar.google.com/event/${id}`,
+        ...extra,
+    };
 }
 
 function makeFetch(events: object[], calId = "primary") {
     return vi.fn().mockImplementation((url: string) => {
         const u = String(url);
         if (u.includes("oauth2.googleapis.com")) {
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "tok", expires_in: 3600 }) });
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ access_token: "tok", expires_in: 3600 }),
+            });
         }
         if (u.includes(`/calendars/${encodeURIComponent(calId)}/events`)) {
             return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: events }) });
@@ -25,17 +34,23 @@ function makeFetch(events: object[], calId = "primary") {
 
 beforeEach(() => {
     clearGoogleTokenCache();
-    process.env["GCAL_CLIENT_ID"]       = "client-id";
-    process.env["GCAL_CLIENT_SECRET"]   = "client-secret";
-    process.env["GCAL_REFRESH_TOKEN"]   = "refresh-token";
-    process.env["GCAL_CALENDARS"]       = '["primary"]';
+    process.env["GCAL_CLIENT_ID"] = "client-id";
+    process.env["GCAL_CLIENT_SECRET"] = "client-secret";
+    process.env["GCAL_REFRESH_TOKEN"] = "refresh-token";
+    process.env["GCAL_CALENDARS"] = '["primary"]';
     process.env["GCAL_LOOKAHEAD_HOURS"] = "24";
 });
 
 afterEach(() => {
     vi.unstubAllGlobals();
-    ["GCAL_CLIENT_ID","GCAL_CLIENT_SECRET","GCAL_REFRESH_TOKEN",
-     "GCAL_CALENDARS","GCAL_LOOKAHEAD_HOURS","GCAL_PRIORITY"].forEach((k) => delete process.env[k]);
+    [
+        "GCAL_CLIENT_ID",
+        "GCAL_CLIENT_SECRET",
+        "GCAL_REFRESH_TOKEN",
+        "GCAL_CALENDARS",
+        "GCAL_LOOKAHEAD_HOURS",
+        "GCAL_PRIORITY",
+    ].forEach((k) => delete process.env[k]);
 });
 
 describe("GcalConnector", () => {
@@ -81,13 +96,19 @@ describe("GcalConnector", () => {
     });
 
     it("should use (no title) for events without summary", async () => {
-        vi.stubGlobal("fetch", makeFetch([{ id: "ev1", start: { dateTime: START }, end: { dateTime: END } }]));
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "ev1", start: { dateTime: START }, end: { dateTime: END } }]),
+        );
         const events = await new GcalConnector().poll();
         expect(events[0]!.title).toBe("(no title)");
     });
 
     it("should truncate description to 200 chars", async () => {
-        vi.stubGlobal("fetch", makeFetch([calEvent("ev1", "Mtg", { description: "x".repeat(300) })]));
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([calEvent("ev1", "Mtg", { description: "x".repeat(300) })]),
+        );
         const events = await new GcalConnector().poll();
         expect(events[0]!.body).toHaveLength(200);
     });
@@ -98,12 +119,18 @@ describe("GcalConnector", () => {
     });
 
     it("should return empty array when calendar returns non-ok", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
-            if (String(url).includes("oauth2.googleapis.com")) {
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            }
-            return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) });
-        }));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                if (String(url).includes("oauth2.googleapis.com")) {
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                }
+                return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) });
+            }),
+        );
         expect(await new GcalConnector().poll()).toHaveLength(0);
     });
 
@@ -120,16 +147,28 @@ describe("GcalConnector", () => {
 
     it("should poll multiple calendars and merge results", async () => {
         process.env["GCAL_CALENDARS"] = '["primary","work@group.calendar.google.com"]';
-        vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
-            const u = String(url);
-            if (u.includes("oauth2.googleapis.com")) {
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            }
-            if (u.includes(encodeURIComponent("work@group.calendar.google.com"))) {
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [calEvent("ev2", "Work Meeting")] }) });
-            }
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [calEvent("ev1", "Personal")] }) });
-        }));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                const u = String(url);
+                if (u.includes("oauth2.googleapis.com")) {
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                }
+                if (u.includes(encodeURIComponent("work@group.calendar.google.com"))) {
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ items: [calEvent("ev2", "Work Meeting")] }),
+                    });
+                }
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ items: [calEvent("ev1", "Personal")] }),
+                });
+            }),
+        );
         const events = await new GcalConnector().poll();
         expect(events).toHaveLength(2);
         expect(events.map((e) => e.title).sort()).toEqual(["Personal", "Work Meeting"]);

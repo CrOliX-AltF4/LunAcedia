@@ -2,8 +2,8 @@
 
 export interface EmailRule {
     senderPattern: string;
-    priority:      AcediaEventPriority;
-    label?:        string;
+    priority: AcediaEventPriority;
+    label?: string;
 }
 
 export function parseRules(raw: string): EmailRule[] {
@@ -11,8 +11,7 @@ export function parseRules(raw: string): EmailRule[] {
         const parsed = JSON.parse(raw) as unknown[];
         return parsed.filter(
             (r): r is EmailRule =>
-                typeof r === "object" && r !== null &&
-                "senderPattern" in r && "priority" in r,
+                typeof r === "object" && r !== null && "senderPattern" in r && "priority" in r,
         );
     } catch {
         return [];
@@ -25,9 +24,9 @@ export function parseRules(raw: string): EmailRule[] {
  * Rule: substring match (case-insensitive) — never regex, never LLM.
  */
 export function classifyEmail(
-    from:    string,
+    from: string,
     subject: string,
-    rules:   EmailRule[],
+    rules: EmailRule[],
 ): AcediaEventPriority {
     const haystack = `${from} ${subject}`.toLowerCase();
     for (const rule of rules) {
