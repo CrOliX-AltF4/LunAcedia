@@ -2,6 +2,7 @@
 import { GitHubConnector } from "./connectors/github/github_connector.js";
 import { RssConnector }    from "./connectors/rss/rss_connector.js";
 import { GmailConnector }  from "./connectors/email/gmail_connector.js";
+import { GcalConnector }   from "./connectors/calendar/gcal_connector.js";
 import type { IConnector } from "./connectors/connector_interface.js";
 import { IngestionHub }    from "./hub/ingestion_hub.js";
 import { AcediaWsServer }  from "./ws/acedia_ws_server.js";
@@ -12,9 +13,10 @@ const connectors: IConnector[] = [];
 if (process.env["GITHUB_ENABLED"] === "true") connectors.push(new GitHubConnector());
 if (process.env["RSS_ENABLED"]    === "true") connectors.push(new RssConnector());
 if (process.env["GMAIL_ENABLED"]  === "true") connectors.push(new GmailConnector());
+if (process.env["GCAL_ENABLED"]   === "true") connectors.push(new GcalConnector());
 
 if (connectors.length === 0) {
-    console.warn("[LunAcedia] No connectors enabled. Set GITHUB_ENABLED=true or GMAIL_ENABLED=true in .env");
+    console.warn("[LunAcedia] No connectors enabled — set GITHUB_ENABLED, GMAIL_ENABLED, GCAL_ENABLED, or RSS_ENABLED in .env");
 }
 
 const hub    = new IngestionHub(connectors);
