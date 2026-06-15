@@ -11,9 +11,10 @@ export type AcediaEventType =
     | "email.received"
     | "rss.item"
     | "ha.state_changed"
+    | "tasks.due"
     | "system.heartbeat";
 
-export type AcediaEventSource = "github" | "calendar" | "email" | "rss" | "ha" | "system";
+export type AcediaEventSource = "github" | "calendar" | "email" | "rss" | "ha" | "tasks" | "system";
 
 export type AcediaEventPriority = "urgent" | "normal" | "info";
 
