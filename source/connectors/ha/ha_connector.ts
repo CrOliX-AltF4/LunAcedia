@@ -58,13 +58,9 @@ export class HaConnector implements IConnector {
     async poll(): Promise<AcediaEvent[]> {
         if (!this.baseUrl || !this.token || this.entities.length === 0) return [];
 
-        const results = await Promise.allSettled(
-            this.entities.map((id) => this.pollEntity(id)),
-        );
+        const results = await Promise.allSettled(this.entities.map((id) => this.pollEntity(id)));
 
-        return results.flatMap((r) =>
-            r.status === "fulfilled" && r.value ? [r.value] : [],
-        );
+        return results.flatMap((r) => (r.status === "fulfilled" && r.value ? [r.value] : []));
     }
 
     private async pollEntity(entityId: string): Promise<AcediaEvent | null> {

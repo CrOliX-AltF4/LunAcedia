@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GitHubConnector } from "../../../source/connectors/github/github_connector.js";
 
-function makeThread(overrides: Partial<{
-    id: string;
-    reason: string;
-    unread: boolean;
-    repoName: string;
-    title: string;
-    type: string;
-    url: string;
-}> = {}) {
+function makeThread(
+    overrides: Partial<{
+        id: string;
+        reason: string;
+        unread: boolean;
+        repoName: string;
+        title: string;
+        type: string;
+        url: string;
+    }> = {},
+) {
     return {
         id: overrides.id ?? "t1",
         reason: overrides.reason ?? "mention",
@@ -59,12 +61,18 @@ describe("GitHubConnector", () => {
     });
 
     it("should return empty array on 304 Not Modified", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 304, ok: false, headers: { get: () => null } }));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({ status: 304, ok: false, headers: { get: () => null } }),
+        );
         expect(await new GitHubConnector().poll()).toHaveLength(0);
     });
 
     it("should return empty array on non-ok response", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, headers: { get: () => null } }));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({ ok: false, status: 500, headers: { get: () => null } }),
+        );
         expect(await new GitHubConnector().poll()).toHaveLength(0);
     });
 
@@ -163,11 +171,15 @@ describe("GitHubConnector", () => {
     });
 
     it("should store Last-Modified header and send If-Modified-Since on next poll", async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+            .fn()
             .mockResolvedValueOnce({
                 ok: true,
                 status: 200,
-                headers: { get: (h: string) => (h === "Last-Modified" ? "Mon, 16 Jun 2026 10:00:00 GMT" : null) },
+                headers: {
+                    get: (h: string) =>
+                        h === "Last-Modified" ? "Mon, 16 Jun 2026 10:00:00 GMT" : null,
+                },
                 json: () => Promise.resolve([]),
             })
             .mockResolvedValueOnce({
@@ -182,7 +194,9 @@ describe("GitHubConnector", () => {
         await connector.poll();
         await connector.poll();
 
-        const secondCallHeaders = (fetchMock.mock.calls[1] as [string, { headers: Record<string, string> }])[1].headers;
+        const secondCallHeaders = (
+            fetchMock.mock.calls[1] as [string, { headers: Record<string, string> }]
+        )[1].headers;
         expect(secondCallHeaders["If-Modified-Since"]).toBe("Mon, 16 Jun 2026 10:00:00 GMT");
     });
 
@@ -203,10 +217,12 @@ describe("GitHubConnector", () => {
                         json: () => Promise.resolve([ciThread]),
                     });
                 }
-                return Promise.resolve(makeCheckRuns([
-                    { id: 1, name: "typecheck", conclusion: "failure" },
-                    { id: 2, name: "test", conclusion: "success" },
-                ]));
+                return Promise.resolve(
+                    makeCheckRuns([
+                        { id: 1, name: "typecheck", conclusion: "failure" },
+                        { id: 2, name: "test", conclusion: "success" },
+                    ]),
+                );
             }),
         );
 
@@ -233,7 +249,9 @@ describe("GitHubConnector", () => {
                         json: () => Promise.resolve([ciThread]),
                     });
                 }
-                return Promise.resolve(makeCheckRuns([{ id: 1, name: "test", conclusion: "success" }]));
+                return Promise.resolve(
+                    makeCheckRuns([{ id: 1, name: "test", conclusion: "success" }]),
+                );
             }),
         );
 

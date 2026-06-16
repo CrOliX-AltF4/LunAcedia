@@ -50,7 +50,10 @@ describe("HaConnector", () => {
     });
 
     it("should emit event on first poll (no previous state)", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")),
+        );
         const connector = new HaConnector();
         const events = await connector.poll();
         expect(events).toHaveLength(1);
@@ -61,7 +64,10 @@ describe("HaConnector", () => {
     });
 
     it("should NOT emit when state has not changed since last poll", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")),
+        );
         const connector = new HaConnector();
         await connector.poll(); // first poll — emits
         const events = await connector.poll(); // second poll — same state
@@ -69,7 +75,8 @@ describe("HaConnector", () => {
     });
 
     it("should emit again when state changes", async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+            .fn()
             .mockResolvedValueOnce(makeStateResponse("light.living_room", "off"))
             .mockResolvedValueOnce(makeStateResponse("light.living_room", "on"));
         vi.stubGlobal("fetch", fetchMock);
@@ -83,7 +90,8 @@ describe("HaConnector", () => {
     });
 
     it("should include prevState → newState in body after first poll", async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+            .fn()
             .mockResolvedValueOnce(makeStateResponse("binary_sensor.motion", "off"))
             .mockResolvedValueOnce(makeStateResponse("binary_sensor.motion", "on"));
         vi.stubGlobal("fetch", fetchMock);
@@ -96,14 +104,20 @@ describe("HaConnector", () => {
     });
 
     it("should use dedupeKey with ha- prefix, entityId, state, and ts", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")),
+        );
         const connector = new HaConnector();
         const events = await connector.poll();
         expect(events[0]!.dedupeKey).toBe(`ha-light.living_room-on-${LAST_CHANGED_TS}`);
     });
 
     it("should include meta with entityId, state, prevState, attributes", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")),
+        );
         const connector = new HaConnector();
         const events = await connector.poll();
         const meta = events[0]!.meta!;
@@ -114,7 +128,10 @@ describe("HaConnector", () => {
 
     it("should respect HA_PRIORITY env", async () => {
         process.env["HA_PRIORITY"] = "urgent";
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(makeStateResponse("light.living_room", "on")),
+        );
         const events = await new HaConnector().poll();
         expect(events[0]!.priority).toBe("urgent");
     });
@@ -124,7 +141,8 @@ describe("HaConnector", () => {
         vi.stubGlobal(
             "fetch",
             vi.fn().mockImplementation((url: string) => {
-                if (String(url).includes("room1")) return Promise.resolve(makeStateResponse("light.room1", "on"));
+                if (String(url).includes("room1"))
+                    return Promise.resolve(makeStateResponse("light.room1", "on"));
                 return Promise.resolve(makeStateResponse("light.room2", "off"));
             }),
         );
