@@ -2,7 +2,8 @@ import http from "node:http";
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { EventStore } from "../store/event_store.js";
 import type { FcmSender } from "../push/fcm_sender.js";
-import type { AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
+import type { IAIProvider } from "../ai/ai_provider.js";
+import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
@@ -40,6 +41,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/events/:dedupeKey
  *   GET  /api/stats
  *   POST /api/actions              body: ConnectorAction & { connector: string }
+ *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
+ *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
  */
@@ -51,6 +54,7 @@ export class AcediaApiServer {
         private readonly store: EventStore,
         private readonly connectors: IConnector[],
         private readonly fcm: FcmSender | null,
+        private readonly ai: IAIProvider,
         private readonly secret: string | undefined,
     ) {}
 
@@ -85,6 +89,7 @@ export class AcediaApiServer {
                 uptime: Math.floor((Date.now() - this.startedAt) / 1000),
                 connectors: this.connectors.map((c) => c.name),
                 events: this.store.size,
+                ai: this.ai.mode,
             });
         }
 
@@ -161,6 +166,47 @@ export class AcediaApiServer {
             } catch (e) {
                 console.error("[API] action error:", (e as Error).message);
                 return json(res, 500, { error: "Action failed" });
+            }
+        }
+
+        // POST /api/chat
+        if (method === "POST" && path === "/api/chat") {
+            if (this.ai.mode === "none") {
+                return json(res, 503, { error: "AI_PROVIDER not configured" });
+            }
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const text = (body as Record<string, unknown>)["text"];
+            if (typeof text !== "string" || text.trim().length === 0) {
+                return json(res, 400, { error: "Body must be { text: string }" });
+            }
+            try {
+                const response = await this.ai.chat(text.trim());
+                return json(res, 200, { response });
+            } catch (e) {
+                console.error("[API] chat error:", (e as Error).message);
+                return json(res, 502, { error: "AI provider error" });
+            }
+        }
+
+        // GET /api/digest
+        if (method === "GET" && path === "/api/digest") {
+            if (this.ai.mode === "none") {
+                return json(res, 503, { error: "AI_PROVIDER not configured" });
+            }
+            const limitParam = url.searchParams.get("limit");
+            const limit = limitParam ? Math.min(parseInt(limitParam, 10), 100) : 20;
+            const { events } = this.store.query({ limit, offset: 0 });
+            try {
+                const response = await this.ai.digest(events as AcediaEvent[]);
+                return json(res, 200, { response, count: events.length });
+            } catch (e) {
+                console.error("[API] digest error:", (e as Error).message);
+                return json(res, 502, { error: "AI provider error" });
             }
         }
 
