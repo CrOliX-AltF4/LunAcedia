@@ -70,24 +70,24 @@ npm start
 
 ## Connectors
 
-| Connector      | Env flag          | What it polls                                |
-| -------------- | ----------------- | -------------------------------------------- |
-| GitHub         | `GITHUB_ENABLED`  | Notifications API + failed CI check-runs     |
-| Gmail          | `GMAIL_ENABLED`   | Unread INBOX via Gmail REST API (OAuth2)     |
-| GCal           | `GCAL_ENABLED`    | Upcoming events via Google Calendar (OAuth2) |
-| Google Tasks   | `GTASKS_ENABLED`  | Due tasks via Google Tasks API (OAuth2)      |
-| RSS            | `RSS_ENABLED`     | RSS 2.0 + Atom feeds, zero dependencies      |
-| Home Assistant | `HA_ENABLED`      | State changes via HA REST API                |
+| Connector      | Env flag         | What it polls                                |
+| -------------- | ---------------- | -------------------------------------------- |
+| GitHub         | `GITHUB_ENABLED` | Notifications API + failed CI check-runs     |
+| Gmail          | `GMAIL_ENABLED`  | Unread INBOX via Gmail REST API (OAuth2)     |
+| GCal           | `GCAL_ENABLED`   | Upcoming events via Google Calendar (OAuth2) |
+| Google Tasks   | `GTASKS_ENABLED` | Due tasks via Google Tasks API (OAuth2)      |
+| RSS            | `RSS_ENABLED`    | RSS 2.0 + Atom feeds, zero dependencies      |
+| Home Assistant | `HA_ENABLED`     | State changes via HA REST API                |
 
 ### Actions
 
 Connectors that support it can execute actions back on the source:
 
-| Connector | Action `kind` | Effect |
-|---|---|---|
-| Gmail | `reply` | Sends a reply in the same thread |
-| Google Tasks | `complete` | Marks a task as completed |
-| Google Calendar | `update` | Patches event fields (title, description, location) |
+| Connector       | Action `kind` | Effect                                              |
+| --------------- | ------------- | --------------------------------------------------- |
+| Gmail           | `reply`       | Sends a reply in the same thread                    |
+| Google Tasks    | `complete`    | Marks a task as completed                           |
+| Google Calendar | `update`      | Patches event fields (title, description, location) |
 
 ```http
 POST /api/actions
@@ -127,34 +127,34 @@ The server sends `{"type":"ping"}` every 30 seconds as a heartbeat.
 
 ### Events
 
-| Method | Route | Description |
-|---|---|---|
-| `GET` | `/api/health` | Server status, uptime, connector list, AI mode (no auth) |
-| `GET` | `/api/events` | Paginated event list (`?source=` `?priority=` `?since=` `?limit=` `?offset=`) |
-| `GET` | `/api/events/:dedupeKey` | Single event by deduplication key |
-| `GET` | `/api/stats` | Event counts by source |
+| Method | Route                    | Description                                                                   |
+| ------ | ------------------------ | ----------------------------------------------------------------------------- |
+| `GET`  | `/api/health`            | Server status, uptime, connector list, AI mode (no auth)                      |
+| `GET`  | `/api/events`            | Paginated event list (`?source=` `?priority=` `?since=` `?limit=` `?offset=`) |
+| `GET`  | `/api/events/:dedupeKey` | Single event by deduplication key                                             |
+| `GET`  | `/api/stats`             | Event counts by source                                                        |
 
 ### Actions
 
-| Method | Route | Body |
-|---|---|---|
+| Method | Route          | Body                                             |
+| ------ | -------------- | ------------------------------------------------ |
 | `POST` | `/api/actions` | `{ connector: string, action: ConnectorAction }` |
 
 ### AI butler
 
 Available when `AI_PROVIDER` is not `none`.
 
-| Method | Route | Description |
-|---|---|---|
-| `POST` | `/api/chat` | `{ text: string }` → `{ response: string }` — free chat with the butler |
-| `GET` | `/api/digest` | `?limit=20` → `{ response: string, count: number }` — synthesize recent events |
+| Method | Route         | Description                                                                    |
+| ------ | ------------- | ------------------------------------------------------------------------------ |
+| `POST` | `/api/chat`   | `{ text: string }` → `{ response: string }` — free chat with the butler        |
+| `GET`  | `/api/digest` | `?limit=20` → `{ response: string, count: number }` — synthesize recent events |
 
 ### Push notifications (FCM)
 
-| Method | Route | Body |
-|---|---|---|
-| `POST` | `/api/devices/push-token` | `{ token: string }` — register Android FCM token |
-| `DELETE` | `/api/devices/push-token` | Unregister current token |
+| Method   | Route                     | Body                                             |
+| -------- | ------------------------- | ------------------------------------------------ |
+| `POST`   | `/api/devices/push-token` | `{ token: string }` — register Android FCM token |
+| `DELETE` | `/api/devices/push-token` | Unregister current token                         |
 
 ---
 
@@ -162,12 +162,12 @@ Available when `AI_PROVIDER` is not `none`.
 
 LunAcedia can optionally synthesize events and answer questions via a configurable AI provider.
 
-| `AI_PROVIDER` | Behaviour |
-|---|---|
-| `none` (default) | No AI — `/api/chat` and `/api/digest` return 503 |
-| `openai` | GPT-4o-mini (configurable via `AI_MODEL`) |
-| `ollama` | Local Ollama instance (configurable via `OLLAMA_URL` and `AI_MODEL`) |
-| `natsume` | Delegates to Natsume Core `/api/core/synthesize` — uses Natsume's LLM, LTM, and personality |
+| `AI_PROVIDER`    | Behaviour                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| `none` (default) | No AI — `/api/chat` and `/api/digest` return 503                                            |
+| `openai`         | GPT-4o-mini (configurable via `AI_MODEL`)                                                   |
+| `ollama`         | Local Ollama instance (configurable via `OLLAMA_URL` and `AI_MODEL`)                        |
+| `natsume`        | Delegates to Natsume Core `/api/core/synthesize` — uses Natsume's LLM, LTM, and personality |
 
 The butler system prompt is loaded from `characters/butler.json` (configurable). Default: formal, concise, fact-focused.
 
@@ -179,41 +179,41 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 
 ### Core
 
-| Variable        | Default   | Description                                    |
-| --------------- | --------- | ---------------------------------------------- |
-| `PORT`          | `4000`    | WebSocket server port                          |
-| `HTTP_PORT`     | `4001`    | HTTP REST API port                             |
-| `ACEDIA_SECRET` | _(empty)_ | Bearer token for auth (empty = disabled)       |
+| Variable        | Default   | Description                              |
+| --------------- | --------- | ---------------------------------------- |
+| `PORT`          | `4000`    | WebSocket server port                    |
+| `HTTP_PORT`     | `4001`    | HTTP REST API port                       |
+| `ACEDIA_SECRET` | _(empty)_ | Bearer token for auth (empty = disabled) |
 
 ### Connectors
 
-| Variable           | Default | Description              |
-| ------------------ | ------- | ------------------------ |
-| `GITHUB_ENABLED`   | `false` | Enable GitHub connector  |
-| `GMAIL_ENABLED`    | `false` | Enable Gmail connector   |
-| `GCAL_ENABLED`     | `false` | Enable GCal connector    |
-| `GTASKS_ENABLED`   | `false` | Enable Tasks connector   |
-| `RSS_ENABLED`      | `false` | Enable RSS connector     |
-| `HA_ENABLED`       | `false` | Enable Home Assistant    |
+| Variable         | Default | Description             |
+| ---------------- | ------- | ----------------------- |
+| `GITHUB_ENABLED` | `false` | Enable GitHub connector |
+| `GMAIL_ENABLED`  | `false` | Enable Gmail connector  |
+| `GCAL_ENABLED`   | `false` | Enable GCal connector   |
+| `GTASKS_ENABLED` | `false` | Enable Tasks connector  |
+| `RSS_ENABLED`    | `false` | Enable RSS connector    |
+| `HA_ENABLED`     | `false` | Enable Home Assistant   |
 
 ### AI butler
 
-| Variable             | Default                  | Description                                          |
-| -------------------- | ------------------------ | ---------------------------------------------------- |
-| `AI_PROVIDER`        | `none`                   | `none` \| `openai` \| `ollama` \| `natsume`          |
-| `AI_MODEL`           | `gpt-4o-mini` / `llama3.2` | Model name (openai/ollama only)                   |
-| `OPENAI_API_KEY`     | _(required if openai)_   | OpenAI API key                                       |
-| `OLLAMA_URL`         | `http://localhost:11434` | Ollama base URL                                      |
-| `NATSUME_CORE_URL`   | _(required if natsume)_  | Natsume Core URL (e.g. `http://nas:3333`)            |
-| `NATSUME_CORE_SECRET`| _(required if natsume)_  | Natsume Core bearer token (`ADMIN_SECRET`)           |
+| Variable              | Default                    | Description                                 |
+| --------------------- | -------------------------- | ------------------------------------------- |
+| `AI_PROVIDER`         | `none`                     | `none` \| `openai` \| `ollama` \| `natsume` |
+| `AI_MODEL`            | `gpt-4o-mini` / `llama3.2` | Model name (openai/ollama only)             |
+| `OPENAI_API_KEY`      | _(required if openai)_     | OpenAI API key                              |
+| `OLLAMA_URL`          | `http://localhost:11434`   | Ollama base URL                             |
+| `NATSUME_CORE_URL`    | _(required if natsume)_    | Natsume Core URL (e.g. `http://nas:3333`)   |
+| `NATSUME_CORE_SECRET` | _(required if natsume)_    | Natsume Core bearer token (`ADMIN_SECRET`)  |
 
 ### Push (FCM)
 
-| Variable                       | Default        | Description                       |
-| ------------------------------ | -------------- | --------------------------------- |
-| `FIREBASE_PROJECT_ID`          | _(empty)_      | Firebase project ID               |
-| `FIREBASE_SERVICE_ACCOUNT_KEY` | _(empty)_      | Base64-encoded service account JSON |
-| `ACEDIA_FCM_FILTER`            | `urgent,normal`| Priority levels that trigger push |
+| Variable                       | Default         | Description                         |
+| ------------------------------ | --------------- | ----------------------------------- |
+| `FIREBASE_PROJECT_ID`          | _(empty)_       | Firebase project ID                 |
+| `FIREBASE_SERVICE_ACCOUNT_KEY` | _(empty)_       | Base64-encoded service account JSON |
+| `ACEDIA_FCM_FILTER`            | `urgent,normal` | Priority levels that trigger push   |
 
 ---
 
