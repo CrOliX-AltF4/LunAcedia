@@ -19,19 +19,22 @@ export class FcmSender {
 
     static fromEnv(): FcmSender | null {
         const projectId = process.env["FIREBASE_PROJECT_ID"];
-        const keyB64    = process.env["FIREBASE_SERVICE_ACCOUNT_KEY"];
+        const keyB64 = process.env["FIREBASE_SERVICE_ACCOUNT_KEY"];
         if (!projectId || !keyB64) return null;
 
         let key: object;
         try {
             key = JSON.parse(Buffer.from(keyB64, "base64").toString("utf-8")) as object;
         } catch {
-            console.error("[FCM] FIREBASE_SERVICE_ACCOUNT_KEY is not valid base64 JSON — FCM disabled");
+            console.error(
+                "[FCM] FIREBASE_SERVICE_ACCOUNT_KEY is not valid base64 JSON — FCM disabled",
+            );
             return null;
         }
 
         try {
-            if (getApps().length === 0) initializeApp({ credential: cert(key as Parameters<typeof cert>[0]) });
+            if (getApps().length === 0)
+                initializeApp({ credential: cert(key as Parameters<typeof cert>[0]) });
         } catch (e) {
             console.error("[FCM] Firebase init error:", (e as Error).message);
             return null;
@@ -46,8 +49,12 @@ export class FcmSender {
         return new FcmSender(filter.length > 0 ? filter : FILTER_DEFAULT);
     }
 
-    setToken(token: string | null): void { this.token = token; }
-    getToken(): string | null            { return this.token; }
+    setToken(token: string | null): void {
+        this.token = token;
+    }
+    getToken(): string | null {
+        return this.token;
+    }
 
     async send(event: AcediaEvent): Promise<void> {
         if (!this.token) return;
@@ -58,13 +65,13 @@ export class FcmSender {
                 token: this.token,
                 notification: {
                     title: `[${event.source}] ${event.title}`,
-                    body:  event.body ?? event.title,
+                    body: event.body ?? event.title,
                 },
                 data: {
-                    type:       event.type,
-                    source:     event.source,
-                    dedupeKey:  event.dedupeKey,
-                    priority:   event.priority,
+                    type: event.type,
+                    source: event.source,
+                    dedupeKey: event.dedupeKey,
+                    priority: event.priority,
                 },
                 android: { priority: "high" },
             });

@@ -1,11 +1,11 @@
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 
 export interface EventQuery {
-    source?:   AcediaEventSource;
+    source?: AcediaEventSource;
     priority?: AcediaEventPriority;
-    since?:    number;
-    limit?:    number;
-    offset?:   number;
+    since?: number;
+    limit?: number;
+    offset?: number;
 }
 
 /**
@@ -26,9 +26,9 @@ export class EventStore {
     query(opts: EventQuery = {}): { events: AcediaEvent[]; total: number } {
         const { source, priority, since, limit = 50, offset = 0 } = opts;
         const filtered = this.buf.filter((e) => {
-            if (source   && e.source   !== source)   return false;
+            if (source && e.source !== source) return false;
             if (priority && e.priority !== priority) return false;
-            if (since    && e.ts       <  since)     return false;
+            if (since && e.ts < since) return false;
             return true;
         });
         // Most recent first
@@ -51,5 +51,7 @@ export class EventStore {
         return counts;
     }
 
-    get size(): number { return this.buf.length; }
+    get size(): number {
+        return this.buf.length;
+    }
 }

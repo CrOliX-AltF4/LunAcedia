@@ -4,12 +4,12 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 function makeEvent(overrides: Partial<AcediaEvent> = {}): AcediaEvent {
     return {
-        type:       "email.received",
-        ts:         Date.now(),
-        source:     "email",
-        title:      "Test event",
-        priority:   "normal",
-        dedupeKey:  `email-${Math.random()}`,
+        type: "email.received",
+        ts: Date.now(),
+        source: "email",
+        title: "Test event",
+        priority: "normal",
+        dedupeKey: `email-${Math.random()}`,
         ...overrides,
     };
 }
@@ -39,7 +39,7 @@ describe("EventStore", () => {
 
     it("should return events most-recent-first", () => {
         const store = new EventStore();
-        const old   = makeEvent({ dedupeKey: "old", ts: 1000 });
+        const old = makeEvent({ dedupeKey: "old", ts: 1000 });
         const fresh = makeEvent({ dedupeKey: "fresh", ts: 2000 });
         store.push(old);
         store.push(fresh);
@@ -50,7 +50,7 @@ describe("EventStore", () => {
 
     it("should filter by source", () => {
         const store = new EventStore();
-        store.push(makeEvent({ source: "email",    dedupeKey: "e1" }));
+        store.push(makeEvent({ source: "email", dedupeKey: "e1" }));
         store.push(makeEvent({ source: "calendar", dedupeKey: "c1" }));
         const { events } = store.query({ source: "email" });
         expect(events).toHaveLength(1);
@@ -60,7 +60,7 @@ describe("EventStore", () => {
     it("should filter by priority", () => {
         const store = new EventStore();
         store.push(makeEvent({ priority: "urgent", dedupeKey: "u1" }));
-        store.push(makeEvent({ priority: "info",   dedupeKey: "i1" }));
+        store.push(makeEvent({ priority: "info", dedupeKey: "i1" }));
         const { events } = store.query({ priority: "urgent" });
         expect(events).toHaveLength(1);
         expect(events[0]!.priority).toBe("urgent");
@@ -85,8 +85,8 @@ describe("EventStore", () => {
 
     it("should return total count reflecting filters", () => {
         const store = new EventStore();
-        store.push(makeEvent({ source: "email",  dedupeKey: "e1" }));
-        store.push(makeEvent({ source: "email",  dedupeKey: "e2" }));
+        store.push(makeEvent({ source: "email", dedupeKey: "e1" }));
+        store.push(makeEvent({ source: "email", dedupeKey: "e2" }));
         store.push(makeEvent({ source: "github", dedupeKey: "g1" }));
         const { total } = store.query({ source: "email" });
         expect(total).toBe(2);
@@ -94,8 +94,8 @@ describe("EventStore", () => {
 
     it("should return stats by source", () => {
         const store = new EventStore();
-        store.push(makeEvent({ source: "email",    dedupeKey: "e1" }));
-        store.push(makeEvent({ source: "email",    dedupeKey: "e2" }));
+        store.push(makeEvent({ source: "email", dedupeKey: "e1" }));
+        store.push(makeEvent({ source: "email", dedupeKey: "e2" }));
         store.push(makeEvent({ source: "calendar", dedupeKey: "c1" }));
         const stats = store.stats();
         expect(stats["email"]).toBe(2);
@@ -104,7 +104,7 @@ describe("EventStore", () => {
 
     it("should return the last pushed event for duplicate dedupeKey", () => {
         const store = new EventStore();
-        const first  = makeEvent({ dedupeKey: "dup", title: "First" });
+        const first = makeEvent({ dedupeKey: "dup", title: "First" });
         const second = makeEvent({ dedupeKey: "dup", title: "Second" });
         store.push(first);
         store.push(second);

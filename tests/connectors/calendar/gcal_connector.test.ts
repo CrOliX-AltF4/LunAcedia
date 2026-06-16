@@ -185,7 +185,7 @@ describe("GcalConnector", () => {
 describe("GcalConnector.executeAction — update", () => {
     beforeEach(() => {
         clearGoogleTokenCache();
-        process.env["GCAL_CLIENT_ID"]     = "cid";
+        process.env["GCAL_CLIENT_ID"] = "cid";
         process.env["GCAL_CLIENT_SECRET"] = "csec";
         process.env["GCAL_REFRESH_TOKEN"] = "rtoken";
     });
@@ -194,8 +194,13 @@ describe("GcalConnector.executeAction — update", () => {
     it("should PATCH the event with mapped fields", async () => {
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             const u = String(url);
-            if (u.includes("oauth2")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            if (opts?.method === "PATCH") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "PATCH")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
             return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
@@ -204,7 +209,9 @@ describe("GcalConnector.executeAction — update", () => {
             sourceId: "primary/event-123",
             fields: { title: "New Title", description: "New desc" },
         });
-        const patchCall = mockFetch.mock.calls.find(([, o]: [string, RequestInit]) => o?.method === "PATCH");
+        const patchCall = mockFetch.mock.calls.find(
+            ([, o]: [string, RequestInit]) => o?.method === "PATCH",
+        );
         expect(patchCall).toBeDefined();
         expect(String(patchCall![0]!)).toContain("primary");
         expect(String(patchCall![0]!)).toContain("event-123");

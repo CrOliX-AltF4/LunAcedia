@@ -149,17 +149,20 @@ export class GmailConnector implements IConnector {
                 { headers: { Authorization: `Bearer ${token}` } },
             );
             if (!resp.ok) {
-                console.warn(`[Gmail] reply: fetch message ${action.sourceId} returned ${resp.status}`);
+                console.warn(
+                    `[Gmail] reply: fetch message ${action.sourceId} returned ${resp.status}`,
+                );
                 return;
             }
             const msg = (await resp.json()) as GmailMessageMeta & {
                 payload: { headers: MessageHeader[] };
             };
-            threadId  = msg.threadId;
+            threadId = msg.threadId;
             const h = (n: string) =>
-                msg.payload.headers.find((x) => x.name.toLowerCase() === n.toLowerCase())?.value ?? "";
+                msg.payload.headers.find((x) => x.name.toLowerCase() === n.toLowerCase())?.value ??
+                "";
             toAddress = h("From");
-            subject   = h("Subject") ? `Re: ${h("Subject")}` : "Re:";
+            subject = h("Subject") ? `Re: ${h("Subject")}` : "Re:";
             messageId = h("Message-Id");
         } catch (e) {
             console.error("[Gmail] reply: fetch error:", (e as Error).message);

@@ -4,16 +4,16 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 // ── Firebase mocks (hoisted) ──────────────────────────────────────────────────
 
 const h = vi.hoisted(() => ({
-    mockSend:    vi.fn().mockResolvedValue("msg-id"),
+    mockSend: vi.fn().mockResolvedValue("msg-id"),
     mockGetApps: vi.fn().mockReturnValue([]),
-    mockInit:    vi.fn(),
-    mockCert:    vi.fn().mockReturnValue({}),
+    mockInit: vi.fn(),
+    mockCert: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock("firebase-admin/app", () => ({
     initializeApp: h.mockInit,
-    cert:          h.mockCert,
-    getApps:       h.mockGetApps,
+    cert: h.mockCert,
+    getApps: h.mockGetApps,
 }));
 
 vi.mock("firebase-admin/messaging", () => ({
@@ -28,9 +28,13 @@ const SA_KEY = Buffer.from(JSON.stringify({ type: "service_account" })).toString
 
 function makeEvent(overrides: Partial<AcediaEvent> = {}): AcediaEvent {
     return {
-        type: "email.received", ts: Date.now(), source: "email",
-        title: "New mail", body: "From Alice",
-        priority: "urgent", dedupeKey: "email-1",
+        type: "email.received",
+        ts: Date.now(),
+        source: "email",
+        title: "New mail",
+        body: "From Alice",
+        priority: "urgent",
+        dedupeKey: "email-1",
         ...overrides,
     };
 }
@@ -56,20 +60,20 @@ describe("FcmSender.fromEnv", () => {
     });
 
     it("should return a FcmSender when both env vars are present", () => {
-        process.env["FIREBASE_PROJECT_ID"]          = "proj";
+        process.env["FIREBASE_PROJECT_ID"] = "proj";
         process.env["FIREBASE_SERVICE_ACCOUNT_KEY"] = SA_KEY;
         expect(FcmSender.fromEnv()).not.toBeNull();
     });
 
     it("should return null when FIREBASE_SERVICE_ACCOUNT_KEY is invalid base64 JSON", () => {
-        process.env["FIREBASE_PROJECT_ID"]          = "proj";
+        process.env["FIREBASE_PROJECT_ID"] = "proj";
         process.env["FIREBASE_SERVICE_ACCOUNT_KEY"] = "not-valid!!!";
         expect(FcmSender.fromEnv()).toBeNull();
     });
 
     it("should not re-initialize Firebase when app already exists", () => {
         h.mockGetApps.mockReturnValue([{}]);
-        process.env["FIREBASE_PROJECT_ID"]          = "proj";
+        process.env["FIREBASE_PROJECT_ID"] = "proj";
         process.env["FIREBASE_SERVICE_ACCOUNT_KEY"] = SA_KEY;
         FcmSender.fromEnv();
         expect(h.mockInit).not.toHaveBeenCalled();
@@ -82,7 +86,7 @@ describe("FcmSender.send", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         h.mockGetApps.mockReturnValue([]);
-        process.env["FIREBASE_PROJECT_ID"]          = "proj";
+        process.env["FIREBASE_PROJECT_ID"] = "proj";
         process.env["FIREBASE_SERVICE_ACCOUNT_KEY"] = SA_KEY;
     });
 
@@ -118,7 +122,9 @@ describe("FcmSender.send", () => {
     it("should build correct FCM payload", async () => {
         const sender = FcmSender.fromEnv()!;
         sender.setToken("token-xyz");
-        await sender.send(makeEvent({ title: "Mail", body: "From Bob", source: "email", dedupeKey: "email-99" }));
+        await sender.send(
+            makeEvent({ title: "Mail", body: "From Bob", source: "email", dedupeKey: "email-99" }),
+        );
         const payload = h.mockSend.mock.calls[0]![0];
         expect(payload.token).toBe("token-xyz");
         expect(payload.notification.title).toContain("email");
@@ -130,7 +136,14 @@ describe("FcmSender.send", () => {
     it("should use title as body when event.body is absent", async () => {
         const sender = FcmSender.fromEnv()!;
         sender.setToken("tok");
-        const event: AcediaEvent = { type: "tasks.due", ts: Date.now(), source: "tasks", title: "Do laundry", priority: "urgent", dedupeKey: "task-1" };
+        const event: AcediaEvent = {
+            type: "tasks.due",
+            ts: Date.now(),
+            source: "tasks",
+            title: "Do laundry",
+            priority: "urgent",
+            dedupeKey: "task-1",
+        };
         await sender.send(event);
         const payload = h.mockSend.mock.calls[0]![0];
         expect(payload.notification.body).toBe("Do laundry");

@@ -108,12 +108,17 @@ export class GcalConnector implements IConnector {
             console.warn("[GCal] update: sourceId must be '{calendarId}/{eventId}'");
             return;
         }
-        const calId   = action.sourceId.slice(0, slash);
+        const calId = action.sourceId.slice(0, slash);
         const eventId = action.sourceId.slice(slash + 1);
 
         let token: string;
         try {
-            token = await getGoogleToken(this.clientId, this.clientSecret, this.refreshToken, "gcal");
+            token = await getGoogleToken(
+                this.clientId,
+                this.clientSecret,
+                this.refreshToken,
+                "gcal",
+            );
         } catch (e) {
             console.error("[GCal] action token error:", (e as Error).message);
             return;
@@ -121,9 +126,9 @@ export class GcalConnector implements IConnector {
 
         // Map generic `fields` to GCal event patch body (summary = title, description = body)
         const patch: Record<string, string> = {};
-        if (action.fields["title"])       patch["summary"]     = action.fields["title"];
+        if (action.fields["title"]) patch["summary"] = action.fields["title"];
         if (action.fields["description"]) patch["description"] = action.fields["description"];
-        if (action.fields["location"])    patch["location"]     = action.fields["location"];
+        if (action.fields["location"]) patch["location"] = action.fields["location"];
 
         try {
             const resp = await fetch(
@@ -188,7 +193,13 @@ export class GcalConnector implements IConnector {
                 url: ev.htmlLink,
                 priority: this.defaultPriority,
                 dedupeKey: `cal-${ev.id}`,
-                meta: { calendarId: calId, eventId: ev.id, start: startRaw, end: endRaw, location: ev.location },
+                meta: {
+                    calendarId: calId,
+                    eventId: ev.id,
+                    start: startRaw,
+                    end: endRaw,
+                    location: ev.location,
+                },
             };
         });
     }

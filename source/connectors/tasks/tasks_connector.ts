@@ -115,7 +115,12 @@ export class TasksConnector implements IConnector {
 
         let token: string;
         try {
-            token = await getGoogleToken(this.clientId, this.clientSecret, this.refreshToken, "gtasks");
+            token = await getGoogleToken(
+                this.clientId,
+                this.clientSecret,
+                this.refreshToken,
+                "gtasks",
+            );
         } catch (e) {
             console.error("[Tasks] action token error:", (e as Error).message);
             return;

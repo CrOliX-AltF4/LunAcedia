@@ -5,7 +5,7 @@ import type { FcmSender } from "../push/fcm_sender.js";
 import type { AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 
-const SOURCES  = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
+const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -17,10 +17,15 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
 function readBody(req: http.IncomingMessage): Promise<unknown> {
     return new Promise((resolve, reject) => {
         let raw = "";
-        req.on("data", (chunk: Buffer) => { raw += chunk.toString(); });
+        req.on("data", (chunk: Buffer) => {
+            raw += chunk.toString();
+        });
         req.on("end", () => {
-            try { resolve(raw ? JSON.parse(raw) : {}); }
-            catch { reject(new Error("invalid JSON")); }
+            try {
+                resolve(raw ? JSON.parse(raw) : {});
+            } catch {
+                reject(new Error("invalid JSON"));
+            }
         });
         req.on("error", reject);
     });
@@ -43,10 +48,10 @@ export class AcediaApiServer {
     private readonly startedAt = Date.now();
 
     constructor(
-        private readonly store:      EventStore,
+        private readonly store: EventStore,
         private readonly connectors: IConnector[],
-        private readonly fcm:        FcmSender | null,
-        private readonly secret:     string | undefined,
+        private readonly fcm: FcmSender | null,
+        private readonly secret: string | undefined,
     ) {}
 
     start(port: number): void {
@@ -70,16 +75,16 @@ export class AcediaApiServer {
 
     private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         const method = req.method ?? "GET";
-        const url    = new URL(req.url ?? "/", "http://localhost");
-        const path   = url.pathname;
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const path = url.pathname;
 
         // Health check — no auth required
         if (method === "GET" && path === "/api/health") {
             return json(res, 200, {
-                status:     "ok",
-                uptime:     Math.floor((Date.now() - this.startedAt) / 1000),
+                status: "ok",
+                uptime: Math.floor((Date.now() - this.startedAt) / 1000),
                 connectors: this.connectors.map((c) => c.name),
-                events:     this.store.size,
+                events: this.store.size,
             });
         }
 
@@ -89,18 +94,21 @@ export class AcediaApiServer {
 
         // GET /api/events
         if (method === "GET" && path === "/api/events") {
-            const source   = url.searchParams.get("source");
+            const source = url.searchParams.get("source");
             const priority = url.searchParams.get("priority");
-            const since    = url.searchParams.get("since");
-            const limit    = url.searchParams.get("limit");
-            const offset   = url.searchParams.get("offset");
+            const since = url.searchParams.get("since");
+            const limit = url.searchParams.get("limit");
+            const offset = url.searchParams.get("offset");
 
             const result = this.store.query({
-                source:   source && SOURCES.has(source)     ? (source as AcediaEventSource)     : undefined,
-                priority: priority && PRIORITIES.has(priority) ? (priority as AcediaEventPriority) : undefined,
-                since:    since  ? parseInt(since, 10)  : undefined,
-                limit:    limit  ? parseInt(limit, 10)  : 50,
-                offset:   offset ? parseInt(offset, 10) : 0,
+                source: source && SOURCES.has(source) ? (source as AcediaEventSource) : undefined,
+                priority:
+                    priority && PRIORITIES.has(priority)
+                        ? (priority as AcediaEventPriority)
+                        : undefined,
+                since: since ? parseInt(since, 10) : undefined,
+                limit: limit ? parseInt(limit, 10) : 50,
+                offset: offset ? parseInt(offset, 10) : 0,
             });
             return json(res, 200, result);
         }
@@ -108,7 +116,7 @@ export class AcediaApiServer {
         // GET /api/events/:dedupeKey
         const eventMatch = path.match(/^\/api\/events\/(.+)$/);
         if (method === "GET" && eventMatch) {
-            const key   = decodeURIComponent(eventMatch[1]!);
+            const key = decodeURIComponent(eventMatch[1]!);
             const event = this.store.get(key);
             return event ? json(res, 200, event) : json(res, 404, { error: "Not found" });
         }
@@ -121,15 +129,20 @@ export class AcediaApiServer {
         // POST /api/actions
         if (method === "POST" && path === "/api/actions") {
             let body: unknown;
-            try { body = await readBody(req); }
-            catch { return json(res, 400, { error: "Invalid JSON" }); }
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
 
             const b = body as Record<string, unknown>;
             const connectorName = b["connector"];
-            const action        = b["action"] as ConnectorAction | undefined;
+            const action = b["action"] as ConnectorAction | undefined;
 
             if (typeof connectorName !== "string" || !action || typeof action.kind !== "string") {
-                return json(res, 400, { error: "Body must be { connector: string, action: ConnectorAction }" });
+                return json(res, 400, {
+                    error: "Body must be { connector: string, action: ConnectorAction }",
+                });
             }
 
             const connector = this.connectors.find((c) => c.name === connectorName);
@@ -137,7 +150,9 @@ export class AcediaApiServer {
                 return json(res, 404, { error: `Connector '${connectorName}' not found` });
             }
             if (!connector.executeAction) {
-                return json(res, 400, { error: `Connector '${connectorName}' does not support actions` });
+                return json(res, 400, {
+                    error: `Connector '${connectorName}' does not support actions`,
+                });
             }
 
             try {
@@ -153,8 +168,11 @@ export class AcediaApiServer {
         if (method === "POST" && path === "/api/devices/push-token") {
             if (!this.fcm) return json(res, 503, { error: "FCM not configured" });
             let body: unknown;
-            try { body = await readBody(req); }
-            catch { return json(res, 400, { error: "Invalid JSON" }); }
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
 
             const token = (body as Record<string, unknown>)["token"];
             if (typeof token !== "string" || token.length === 0) {

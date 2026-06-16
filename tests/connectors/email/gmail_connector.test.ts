@@ -186,15 +186,29 @@ describe("GmailConnector", () => {
             vi.fn().mockImplementation((url: string) => {
                 const u = String(url);
                 if (u.includes("oauth2.googleapis.com"))
-                    return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
                 if (u.includes("/messages?q="))
-                    return Promise.resolve({ ok: true, json: () => Promise.resolve({ messages: [{ id: "msg1" }] }) });
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ messages: [{ id: "msg1" }] }),
+                    });
                 return Promise.resolve({
                     ok: true,
-                    json: () => Promise.resolve({
-                        id: "msg1", threadId: "thread-1", internalDate: FRESH_TS,
-                        payload: { headers: [{ name: "From", value: "a@a.com" }, { name: "Subject", value: "Hi" }] },
-                    }),
+                    json: () =>
+                        Promise.resolve({
+                            id: "msg1",
+                            threadId: "thread-1",
+                            internalDate: FRESH_TS,
+                            payload: {
+                                headers: [
+                                    { name: "From", value: "a@a.com" },
+                                    { name: "Subject", value: "Hi" },
+                                ],
+                            },
+                        }),
                 });
             }),
         );
@@ -215,25 +229,38 @@ describe("GmailConnector.executeAction — reply", () => {
     it("should send a reply via Gmail API", async () => {
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             const u = String(url);
-            if (u.includes("oauth2")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            if (u.includes("/messages/msg1?")) return Promise.resolve({
-                ok: true,
-                json: () => Promise.resolve({
-                    id: "msg1", threadId: "thread-1", internalDate: FRESH_TS,
-                    payload: { headers: [
-                        { name: "From", value: "alice@example.com" },
-                        { name: "Subject", value: "Hello" },
-                        { name: "Message-Id", value: "<orig@example.com>" },
-                    ]},
-                }),
-            });
-            if (u.includes("/messages/send") && opts?.method === "POST") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (u.includes("/messages/msg1?"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            id: "msg1",
+                            threadId: "thread-1",
+                            internalDate: FRESH_TS,
+                            payload: {
+                                headers: [
+                                    { name: "From", value: "alice@example.com" },
+                                    { name: "Subject", value: "Hello" },
+                                    { name: "Message-Id", value: "<orig@example.com>" },
+                                ],
+                            },
+                        }),
+                });
+            if (u.includes("/messages/send") && opts?.method === "POST")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
             return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
         const connector = new GmailConnector();
         await connector.executeAction({ kind: "reply", sourceId: "msg1", body: "Thanks!" });
-        const sendCall = mockFetch.mock.calls.find(([u]: [string]) => String(u).includes("/messages/send"));
+        const sendCall = mockFetch.mock.calls.find(([u]: [string]) =>
+            String(u).includes("/messages/send"),
+        );
         expect(sendCall).toBeDefined();
         const body = JSON.parse(sendCall![1]!.body as string) as { raw: string; threadId: string };
         expect(body.threadId).toBe("thread-1");
