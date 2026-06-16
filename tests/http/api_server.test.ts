@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "node:http";
 import { AcediaApiServer } from "../../source/http/api_server.js";
 import { EventStore } from "../../source/store/event_store.js";
+import { NullAIProvider } from "../../source/ai/null_provider.js";
+import type { IAIProvider } from "../../source/ai/ai_provider.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 import type { ConnectorAction } from "../../source/types/connector_action.js";
@@ -90,26 +92,44 @@ function makeConnector(
     return { name, poll: async () => [], executeAction };
 }
 
+const nullAI = new NullAIProvider();
+
+function makeServer(
+    store: EventStore,
+    connectors: IConnector[] = [],
+    ai: IAIProvider = nullAI,
+    secret: string | undefined = SECRET,
+): AcediaApiServer {
+    return new AcediaApiServer(store, connectors, null, ai, secret);
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("AcediaApiServer — /api/health", () => {
     it("should return 200 without auth", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await get(`http://localhost:${port}/api/health`);
         server.stop();
         expect(res.status).toBe(200);
         expect((res.body as Record<string, unknown>)["status"]).toBe("ok");
     });
+
+    it("should include ai mode in health response", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/health`);
+        server.stop();
+        expect((res.body as Record<string, unknown>)["ai"]).toBe("none");
+    });
 });
 
 describe("AcediaApiServer — auth", () => {
     it("should return 401 without bearer token when secret is set", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events`);
         server.stop();
@@ -118,8 +138,7 @@ describe("AcediaApiServer — auth", () => {
 
     it("should return 200 with correct bearer token", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events`, AUTH);
         server.stop();
@@ -128,8 +147,7 @@ describe("AcediaApiServer — auth", () => {
 
     it("should allow requests without auth when no secret is configured", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, undefined);
+        const server = new AcediaApiServer(new EventStore(), [], null, nullAI, undefined);
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events`);
         server.stop();
@@ -145,7 +163,7 @@ describe("AcediaApiServer — GET /api/events", () => {
     beforeEach(() => {
         port = nextPort();
         store = new EventStore();
-        server = new AcediaApiServer(store, [], null, SECRET);
+        server = makeServer(store);
         server.start(port);
     });
     afterEach(() => server.stop());
@@ -186,8 +204,7 @@ describe("AcediaApiServer — GET /api/events", () => {
 describe("AcediaApiServer — GET /api/events/:dedupeKey", () => {
     it("should return 404 for unknown key", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events/no-such-key`, AUTH);
         server.stop();
@@ -197,7 +214,7 @@ describe("AcediaApiServer — GET /api/events/:dedupeKey", () => {
     it("should return the event for a known key", async () => {
         const port = nextPort();
         const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(store);
         server.start(port);
         store.push(makeEvent({ dedupeKey: "email-42", title: "Found it" }));
         const res = await get(`http://localhost:${port}/api/events/email-42`, AUTH);
@@ -211,7 +228,7 @@ describe("AcediaApiServer — GET /api/stats", () => {
     it("should return stats by source", async () => {
         const port = nextPort();
         const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(store);
         server.start(port);
         store.push(makeEvent({ source: "email", dedupeKey: "e1" }));
         store.push(makeEvent({ source: "email", dedupeKey: "e2" }));
@@ -233,7 +250,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         const conn = makeConnector("Gmail", async () => {
             called = true;
         });
-        const server = new AcediaApiServer(store, [conn], null, SECRET);
+        const server = makeServer(store, [conn]);
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
@@ -247,8 +264,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
 
     it("should return 404 when connector not found", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
@@ -261,9 +277,8 @@ describe("AcediaApiServer — POST /api/actions", () => {
 
     it("should return 400 when connector does not support actions", async () => {
         const port = nextPort();
-        const store = new EventStore();
         const conn = makeConnector("ReadOnly");
-        const server = new AcediaApiServer(store, [conn], null, SECRET);
+        const server = makeServer(new EventStore(), [conn]);
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
@@ -276,8 +291,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
 
     it("should return 400 for missing body fields", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await post(`http://localhost:${port}/api/actions`, {}, AUTH);
         server.stop();
@@ -285,11 +299,104 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 });
 
+describe("AcediaApiServer — POST /api/chat", () => {
+    it("should return 503 when AI provider is none", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/chat`, { text: "hello" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("should return AI response when provider is configured", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue("Butler response"),
+            digest: vi.fn().mockResolvedValue(""),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/chat`, { text: "What's up?" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect((res.body as Record<string, unknown>)["response"]).toBe("Butler response");
+    });
+
+    it("should return 400 when text is missing", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn(), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/chat`, {}, AUTH);
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("should return 502 when AI provider throws", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockRejectedValue(new Error("Network error")),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/chat`, { text: "hello" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(502);
+    });
+});
+
+describe("AcediaApiServer — GET /api/digest", () => {
+    it("should return 503 when AI provider is none", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("should return digest from AI provider", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        const mockAI: IAIProvider = {
+            mode: "natsume",
+            chat: vi.fn(),
+            digest: vi.fn().mockResolvedValue("Today you have 1 email."),
+        };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const body = res.body as { response: string; count: number };
+        expect(body.response).toBe("Today you have 1 email.");
+        expect(body.count).toBe(1);
+    });
+
+    it("should return 502 when AI provider throws", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn(),
+            digest: vi.fn().mockRejectedValue(new Error("Timeout")),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        server.stop();
+        expect(res.status).toBe(502);
+    });
+});
+
 describe("AcediaApiServer — /api/devices/push-token", () => {
     it("should return 503 when FCM is not configured", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/devices/push-token`,
@@ -302,8 +409,7 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
 
     it("should return 404 for unknown routes", async () => {
         const port = nextPort();
-        const store = new EventStore();
-        const server = new AcediaApiServer(store, [], null, SECRET);
+        const server = makeServer(new EventStore());
         server.start(port);
         const res = await get(`http://localhost:${port}/api/nonexistent`, AUTH);
         server.stop();
