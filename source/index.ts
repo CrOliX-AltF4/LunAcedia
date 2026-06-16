@@ -4,6 +4,7 @@ import { RssConnector } from "./connectors/rss/rss_connector.js";
 import { GmailConnector } from "./connectors/email/gmail_connector.js";
 import { GcalConnector } from "./connectors/calendar/gcal_connector.js";
 import { TasksConnector } from "./connectors/tasks/tasks_connector.js";
+import { HaConnector } from "./connectors/ha/ha_connector.js";
 import type { IConnector } from "./connectors/connector_interface.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
@@ -16,10 +17,11 @@ if (process.env["RSS_ENABLED"] === "true") connectors.push(new RssConnector());
 if (process.env["GMAIL_ENABLED"] === "true") connectors.push(new GmailConnector());
 if (process.env["GCAL_ENABLED"] === "true") connectors.push(new GcalConnector());
 if (process.env["GTASKS_ENABLED"] === "true") connectors.push(new TasksConnector());
+if (process.env["HA_ENABLED"] === "true") connectors.push(new HaConnector());
 
 if (connectors.length === 0) {
     console.warn(
-        "[LunAcedia] No connectors enabled — set GITHUB_ENABLED, GMAIL_ENABLED, GCAL_ENABLED, GTASKS_ENABLED, or RSS_ENABLED in .env",
+        "[LunAcedia] No connectors enabled — set GITHUB_ENABLED, GMAIL_ENABLED, GCAL_ENABLED, GTASKS_ENABLED, RSS_ENABLED, or HA_ENABLED in .env",
     );
 }
 
