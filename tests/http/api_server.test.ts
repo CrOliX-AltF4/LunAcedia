@@ -45,18 +45,6 @@ function post(url: string, body: unknown, headers: Record<string, string> = {}):
     });
 }
 
-function del(url: string, headers: Record<string, string> = {}): Promise<{ status: number }> {
-    return new Promise((resolve, reject) => {
-        const parsed = new URL(url);
-        const req = http.request({
-            hostname: parsed.hostname, port: parsed.port, path: parsed.pathname,
-            method: "DELETE", headers,
-        }, (res) => resolve({ status: res.statusCode ?? 0 }));
-        req.on("error", reject);
-        req.end();
-    });
-}
-
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const SECRET = "test-secret";
