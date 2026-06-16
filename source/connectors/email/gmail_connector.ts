@@ -1,5 +1,6 @@
 ﻿import type { IConnector } from "../connector_interface.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
+import type { ConnectorAction } from "../../types/connector_action.js";
 import { getAccessToken, clearTokenCache } from "./gmail_auth.js";
 import { parseRules, classifyEmail } from "./email_rules.js";
 import type { EmailRule } from "./email_rules.js";
@@ -12,6 +13,7 @@ interface MessageHeader {
 }
 interface GmailMessageMeta {
     id: string;
+    threadId: string;
     internalDate: string;
     payload: { headers: MessageHeader[] };
 }
@@ -113,7 +115,7 @@ export class GmailConnector implements IConnector {
                     body: from,
                     priority,
                     dedupeKey: `email-${id}`,
-                    meta: { from, messageId: id },
+                    meta: { from, messageId: id, threadId: msg.threadId },
                 });
             } catch {
                 // skip individual message errors silently
@@ -121,5 +123,77 @@ export class GmailConnector implements IConnector {
         }
 
         return events;
+    }
+
+    async executeAction(action: ConnectorAction): Promise<void> {
+        if (action.kind !== "reply") return;
+        if (!this.clientId || !this.clientSecret || !this.refreshToken) return;
+
+        let token: string;
+        try {
+            token = await getAccessToken(this.clientId, this.clientSecret, this.refreshToken);
+        } catch (e) {
+            console.error("[Gmail] action token error:", (e as Error).message);
+            return;
+        }
+
+        // Fetch original message to get threadId + headers for proper reply
+        let threadId: string;
+        let toAddress: string;
+        let subject: string;
+        let messageId: string;
+        try {
+            const resp = await fetch(
+                `${GMAIL_API}/messages/${action.sourceId}?format=metadata` +
+                    `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-Id`,
+                { headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (!resp.ok) {
+                console.warn(`[Gmail] reply: fetch message ${action.sourceId} returned ${resp.status}`);
+                return;
+            }
+            const msg = (await resp.json()) as GmailMessageMeta & {
+                payload: { headers: MessageHeader[] };
+            };
+            threadId  = msg.threadId;
+            const h = (n: string) =>
+                msg.payload.headers.find((x) => x.name.toLowerCase() === n.toLowerCase())?.value ?? "";
+            toAddress = h("From");
+            subject   = h("Subject") ? `Re: ${h("Subject")}` : "Re:";
+            messageId = h("Message-Id");
+        } catch (e) {
+            console.error("[Gmail] reply: fetch error:", (e as Error).message);
+            return;
+        }
+
+        // Build minimal MIME reply
+        const mime = [
+            `From: me`,
+            `To: ${toAddress}`,
+            `Subject: ${subject}`,
+            `In-Reply-To: ${messageId}`,
+            `References: ${messageId}`,
+            `Content-Type: text/plain; charset=utf-8`,
+            ``,
+            action.body,
+        ].join("\r\n");
+
+        const raw = Buffer.from(mime).toString("base64url");
+
+        try {
+            const resp = await fetch(`${GMAIL_API}/messages/send`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ raw, threadId }),
+            });
+            if (!resp.ok) {
+                console.warn(`[Gmail] reply send returned ${resp.status}`);
+            }
+        } catch (e) {
+            console.error("[Gmail] reply send error:", (e as Error).message);
+        }
     }
 }

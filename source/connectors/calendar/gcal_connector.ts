@@ -1,5 +1,6 @@
 ﻿import type { IConnector } from "../connector_interface.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
+import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 
 const GCAL_API = "https://www.googleapis.com/calendar/v3";
@@ -97,6 +98,53 @@ export class GcalConnector implements IConnector {
         return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
     }
 
+    async executeAction(action: ConnectorAction): Promise<void> {
+        if (action.kind !== "update") return;
+        if (!this.clientId || !this.clientSecret || !this.refreshToken) return;
+
+        // sourceId = "{calendarId}/{eventId}"
+        const slash = action.sourceId.indexOf("/");
+        if (slash === -1) {
+            console.warn("[GCal] update: sourceId must be '{calendarId}/{eventId}'");
+            return;
+        }
+        const calId   = action.sourceId.slice(0, slash);
+        const eventId = action.sourceId.slice(slash + 1);
+
+        let token: string;
+        try {
+            token = await getGoogleToken(this.clientId, this.clientSecret, this.refreshToken, "gcal");
+        } catch (e) {
+            console.error("[GCal] action token error:", (e as Error).message);
+            return;
+        }
+
+        // Map generic `fields` to GCal event patch body (summary = title, description = body)
+        const patch: Record<string, string> = {};
+        if (action.fields["title"])       patch["summary"]     = action.fields["title"];
+        if (action.fields["description"]) patch["description"] = action.fields["description"];
+        if (action.fields["location"])    patch["location"]     = action.fields["location"];
+
+        try {
+            const resp = await fetch(
+                `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
+                {
+                    method: "PATCH",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(patch),
+                },
+            );
+            if (!resp.ok) {
+                console.warn(`[GCal] update returned ${resp.status}`);
+            }
+        } catch (e) {
+            console.error("[GCal] update error:", (e as Error).message);
+        }
+    }
+
     private async pollCalendar(
         calId: string,
         timeMin: string,
@@ -140,7 +188,7 @@ export class GcalConnector implements IConnector {
                 url: ev.htmlLink,
                 priority: this.defaultPriority,
                 dedupeKey: `cal-${ev.id}`,
-                meta: { calendarId: calId, start: startRaw, end: endRaw, location: ev.location },
+                meta: { calendarId: calId, eventId: ev.id, start: startRaw, end: endRaw, location: ev.location },
             };
         });
     }
