@@ -65,6 +65,7 @@
     },
     "dependencies": {
         "dotenv": "^17.0.0",
+        "firebase-admin": "^14.0.0",
         "ws": "^8.18.2"
     }
 }

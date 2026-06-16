@@ -179,4 +179,108 @@ describe("GmailConnector", () => {
         expect(connector.name).toBe("Gmail");
         expect(connector.preferredPollIntervalMs).toBeGreaterThan(0);
     });
+
+    it("should include threadId in meta", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                const u = String(url);
+                if (u.includes("oauth2.googleapis.com"))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                if (u.includes("/messages?q="))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ messages: [{ id: "msg1" }] }),
+                    });
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            id: "msg1",
+                            threadId: "thread-1",
+                            internalDate: FRESH_TS,
+                            payload: {
+                                headers: [
+                                    { name: "From", value: "a@a.com" },
+                                    { name: "Subject", value: "Hi" },
+                                ],
+                            },
+                        }),
+                });
+            }),
+        );
+        const events = await new GmailConnector().poll();
+        expect(events[0]!.meta?.["threadId"]).toBe("thread-1");
+    });
+});
+
+describe("GmailConnector.executeAction — reply", () => {
+    beforeEach(() => {
+        clearTokenCache();
+        process.env["GMAIL_CLIENT_ID"] = "cid";
+        process.env["GMAIL_CLIENT_SECRET"] = "csec";
+        process.env["GMAIL_REFRESH_TOKEN"] = "rtoken";
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("should send a reply via Gmail API", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (u.includes("/messages/msg1?"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            id: "msg1",
+                            threadId: "thread-1",
+                            internalDate: FRESH_TS,
+                            payload: {
+                                headers: [
+                                    { name: "From", value: "alice@example.com" },
+                                    { name: "Subject", value: "Hello" },
+                                    { name: "Message-Id", value: "<orig@example.com>" },
+                                ],
+                            },
+                        }),
+                });
+            if (u.includes("/messages/send") && opts?.method === "POST")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        const connector = new GmailConnector();
+        await connector.executeAction({ kind: "reply", sourceId: "msg1", body: "Thanks!" });
+        const sendCall = mockFetch.mock.calls.find(([u]: [string]) =>
+            String(u).includes("/messages/send"),
+        );
+        expect(sendCall).toBeDefined();
+        const body = JSON.parse(sendCall![1]!.body as string) as { raw: string; threadId: string };
+        expect(body.threadId).toBe("thread-1");
+        const decoded = Buffer.from(body.raw, "base64url").toString();
+        expect(decoded).toContain("Thanks!");
+        expect(decoded).toContain("To: alice@example.com");
+    });
+
+    it("should do nothing when credentials are missing", async () => {
+        delete process.env["GMAIL_CLIENT_ID"];
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await new GmailConnector().executeAction({ kind: "reply", sourceId: "msg1", body: "Hi" });
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should ignore non-reply actions", async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await new GmailConnector().executeAction({ kind: "complete", sourceId: "msg1" });
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
 });

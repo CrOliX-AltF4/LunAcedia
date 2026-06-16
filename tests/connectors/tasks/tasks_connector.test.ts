@@ -154,3 +154,70 @@ describe("TasksConnector", () => {
         expect(c.preferredPollIntervalMs).toBeGreaterThan(0);
     });
 });
+
+describe("TasksConnector.executeAction — complete", () => {
+    beforeEach(() => {
+        clearGoogleTokenCache();
+        process.env["GTASKS_CLIENT_ID"] = "cid";
+        process.env["GTASKS_CLIENT_SECRET"] = "csec";
+        process.env["GTASKS_REFRESH_TOKEN"] = "rtoken";
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("should PATCH task status to completed", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (u.includes("/tasks/") && opts?.method === "PATCH")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await new TasksConnector().executeAction({ kind: "complete", sourceId: "task-abc" });
+        const patchCall = mockFetch.mock.calls.find(
+            ([, o]: [string, RequestInit]) => o?.method === "PATCH",
+        );
+        expect(patchCall).toBeDefined();
+        expect(JSON.parse(patchCall![1]!.body as string)).toEqual({ status: "completed" });
+    });
+
+    it("should accept listId/taskId format in sourceId", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "PATCH")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await new TasksConnector().executeAction({ kind: "complete", sourceId: "mylist/task-xyz" });
+        const patchCall = mockFetch.mock.calls.find(
+            ([, o]: [string, RequestInit]) => o?.method === "PATCH",
+        );
+        expect(String(patchCall![0]!)).toContain("mylist");
+        expect(String(patchCall![0]!)).toContain("task-xyz");
+    });
+
+    it("should do nothing when credentials are missing", async () => {
+        delete process.env["GTASKS_CLIENT_ID"];
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await new TasksConnector().executeAction({ kind: "complete", sourceId: "t1" });
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should ignore non-complete actions", async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await new TasksConnector().executeAction({ kind: "reply", sourceId: "t1", body: "x" });
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+});

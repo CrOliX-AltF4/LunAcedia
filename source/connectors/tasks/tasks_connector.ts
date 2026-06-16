@@ -1,5 +1,6 @@
 ﻿import type { IConnector } from "../connector_interface.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
+import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 
 const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
@@ -106,5 +107,46 @@ export class TasksConnector implements IConnector {
                 meta: { taskId: task.id, due: task.due, overdue, listId: this.listId },
             };
         });
+    }
+
+    async executeAction(action: ConnectorAction): Promise<void> {
+        if (action.kind !== "complete") return;
+        if (!this.clientId || !this.clientSecret || !this.refreshToken) return;
+
+        let token: string;
+        try {
+            token = await getGoogleToken(
+                this.clientId,
+                this.clientSecret,
+                this.refreshToken,
+                "gtasks",
+            );
+        } catch (e) {
+            console.error("[Tasks] action token error:", (e as Error).message);
+            return;
+        }
+
+        // sourceId = "{listId}/{taskId}" or just "{taskId}" (falls back to configured listId)
+        const [first, second] = action.sourceId.split("/");
+        const [listId, taskId] = second ? [first!, second] : [this.listId, first!];
+
+        try {
+            const resp = await fetch(
+                `${TASKS_API}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+                {
+                    method: "PATCH",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ status: "completed" }),
+                },
+            );
+            if (!resp.ok) {
+                console.warn(`[Tasks] complete returned ${resp.status}`);
+            }
+        } catch (e) {
+            console.error("[Tasks] complete error:", (e as Error).message);
+        }
     }
 }
