@@ -13,6 +13,9 @@ _A standalone information infrastructure server. Polls GitHub, Gmail, Calendar, 
 
 </div>
 
+> [!NOTE]
+> Fully standalone — no Natsume dependency required. Natsume can optionally connect as a consumer via the AI butler bridge. Part of the [Lun' ecosystem](https://github.com/CrOliX-AltF4).
+
 ---
 
 ## Quick start
@@ -69,6 +72,18 @@ HA     ──┘
 - `AcediaEvent` carries **facts**: title, source, priority — no interpretation
 - Interpretation belongs to the consumer (Natsume) or the optional AI butler
 - **Asymmetry**: Natsume knows LunAcedia; LunAcedia does not know Natsume
+
+---
+
+## Lun ecosystem
+
+| Project                                                    | Role                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| [LunAtar](https://github.com/CrOliX-AltF4/LunAtar)         | AI dev pipeline — intent → code                           |
+| **LunAcedia**                                              | Information infrastructure — events · actions · AI butler |
+| [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Mobile companion — Android                                |
+| [LunImago](https://github.com/CrOliX-AltF4/LunImago)       | Imitation learning — gameplay → ONNX policy               |
+| LunAnima                                                   | AI companion core — private                               |
 
 ---
 
