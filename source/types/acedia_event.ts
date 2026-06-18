@@ -34,4 +34,5 @@ export interface AcediaEvent {
     priority: AcediaEventPriority;
     dedupeKey: string;
     meta?: Record<string, unknown>;
+    read?: boolean;
 }

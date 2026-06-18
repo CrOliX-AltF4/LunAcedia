@@ -37,8 +37,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *
  * Routes (all require Bearer auth if ACEDIA_SECRET is set, except /api/health):
  *   GET  /api/health
- *   GET  /api/events               ?source= &priority= &since= &limit= &offset=
+ *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
+ *   POST /api/events/read-all      → 204
+ *   POST /api/events/:dedupeKey/read → 204
  *   GET  /api/stats
  *   POST /api/actions              body: ConnectorAction & { connector: string }
  *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
@@ -104,6 +106,7 @@ export class AcediaApiServer {
             const since = url.searchParams.get("since");
             const limit = url.searchParams.get("limit");
             const offset = url.searchParams.get("offset");
+            const unreadParam = url.searchParams.get("unread");
 
             const result = this.store.query({
                 source: source && SOURCES.has(source) ? (source as AcediaEventSource) : undefined,
@@ -114,8 +117,23 @@ export class AcediaApiServer {
                 since: since ? parseInt(since, 10) : undefined,
                 limit: limit ? parseInt(limit, 10) : 50,
                 offset: offset ? parseInt(offset, 10) : 0,
+                unread: unreadParam === "true" ? true : undefined,
             });
             return json(res, 200, result);
+        }
+
+        // POST /api/events/read-all
+        if (method === "POST" && path === "/api/events/read-all") {
+            this.store.markAllRead();
+            return json(res, 204, null);
+        }
+
+        // POST /api/events/:dedupeKey/read
+        const readMatch = path.match(/^\/api\/events\/(.+)\/read$/);
+        if (method === "POST" && readMatch) {
+            const key = decodeURIComponent(readMatch[1]!);
+            this.store.markRead(key);
+            return json(res, 204, null);
         }
 
         // GET /api/events/:dedupeKey
@@ -224,13 +242,13 @@ export class AcediaApiServer {
             if (typeof token !== "string" || token.length === 0) {
                 return json(res, 400, { error: "Body must be { token: string }" });
             }
-            this.fcm.setToken(token);
+            await this.fcm.setToken(token);
             return json(res, 204, null);
         }
 
         // DELETE /api/devices/push-token
         if (method === "DELETE" && path === "/api/devices/push-token") {
-            this.fcm?.setToken(null);
+            if (this.fcm) await this.fcm.setToken(null);
             return json(res, 204, null);
         }
 
