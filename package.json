@@ -1,6 +1,6 @@
 {
     "name": "lunacedia",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Information infrastructure for the Lun ecosystem — aggregates events from GitHub, Email, Calendar, RSS, HA and pushes them to connected clients",
     "type": "module",
     "engines": {
