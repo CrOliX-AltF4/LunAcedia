@@ -12,6 +12,10 @@ export interface EventQuery {
  * In-memory ring buffer for AcediaEvents.
  * Oldest event is evicted when capacity is reached.
  * Thread-safe for single-threaded Node.js use.
+ *
+ * Intentionally non-persistent: events are ephemeral push signals.
+ * Consumers (e.g. Natsume Core) hold their own durable state.
+ * On restart the buffer refills from connector polls within seconds.
  */
 export class EventStore {
     private readonly buf: AcediaEvent[] = [];
