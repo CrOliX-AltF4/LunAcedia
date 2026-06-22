@@ -79,10 +79,10 @@ HA     ──┘
 
 | Project                                                    | Role                                                      |
 | ---------------------------------------------------------- | --------------------------------------------------------- |
-| [LunAtar](https://github.com/CrOliX-AltF4/LunAtar)         | AI dev pipeline — intent → code                           |
+| [LunIra](https://github.com/CrOliX-AltF4/LunIre)           | AI dev pipeline — intent → code                           |
 | **LunAcedia**                                              | Information infrastructure — events · actions · AI butler |
 | [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Mobile companion — Android                                |
-| [LunImago](https://github.com/CrOliX-AltF4/LunImago)       | Imitation learning — gameplay → ONNX policy               |
+| [LunGula](https://github.com/CrOliX-AltF4/LunGula  )       | Imitation learning — gameplay → ONNX policy               |
 | LunAnima                                                   | AI companion core — private                               |
 
 ---
