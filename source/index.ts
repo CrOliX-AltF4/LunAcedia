@@ -37,6 +37,8 @@ const hub = new IngestionHub(connectors);
 const ws = new AcediaWsServer();
 const api = new AcediaApiServer(store, connectors, fcm, ai, process.env["ACEDIA_SECRET"]);
 
+if (fcm) await fcm.load();
+
 ws.start(wsPort);
 api.start(httpPort);
 

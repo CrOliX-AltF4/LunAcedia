@@ -110,4 +110,63 @@ describe("EventStore", () => {
         store.push(second);
         expect(store.get("dup")?.title).toBe("Second");
     });
+
+    it("should filter unread events when unread=true", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.markRead("e1");
+        const { events } = store.query({ unread: true });
+        expect(events).toHaveLength(1);
+        expect(events[0]!.dedupeKey).toBe("e2");
+    });
+
+    it("should return all events when unread is not set", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.markRead("e1");
+        const { events } = store.query();
+        expect(events).toHaveLength(2);
+    });
+});
+
+describe("EventStore.markRead", () => {
+    it("should mark a specific event as read", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.markRead("e1");
+        expect(store.get("e1")?.read).toBe(true);
+    });
+
+    it("should not throw for unknown dedupeKey", () => {
+        const store = new EventStore();
+        expect(() => store.markRead("no-such-key")).not.toThrow();
+    });
+
+    it("should only mark the matching event", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.markRead("e1");
+        expect(store.get("e1")?.read).toBe(true);
+        expect(store.get("e2")?.read).toBeUndefined();
+    });
+});
+
+describe("EventStore.markAllRead", () => {
+    it("should mark all events as read", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.push(makeEvent({ dedupeKey: "e3" }));
+        store.markAllRead();
+        const { events } = store.query({ unread: true });
+        expect(events).toHaveLength(0);
+    });
+
+    it("should not throw on empty store", () => {
+        const store = new EventStore();
+        expect(() => store.markAllRead()).not.toThrow();
+    });
 });

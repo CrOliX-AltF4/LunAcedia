@@ -8,6 +8,10 @@ const h = vi.hoisted(() => ({
     mockGetApps: vi.fn().mockReturnValue([]),
     mockInit: vi.fn(),
     mockCert: vi.fn().mockReturnValue({}),
+    mockReadFile: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
+    mockWriteFile: vi.fn().mockResolvedValue(undefined),
+    mockUnlink: vi.fn().mockResolvedValue(undefined),
+    mockMkdir: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("firebase-admin/app", () => ({
@@ -18,6 +22,19 @@ vi.mock("firebase-admin/app", () => ({
 
 vi.mock("firebase-admin/messaging", () => ({
     getMessaging: () => ({ send: h.mockSend }),
+}));
+
+vi.mock("node:fs/promises", () => ({
+    default: {
+        readFile: h.mockReadFile,
+        writeFile: h.mockWriteFile,
+        unlink: h.mockUnlink,
+        mkdir: h.mockMkdir,
+    },
+    readFile: h.mockReadFile,
+    writeFile: h.mockWriteFile,
+    unlink: h.mockUnlink,
+    mkdir: h.mockMkdir,
 }));
 
 import { FcmSender } from "../../source/push/fcm_sender.js";
@@ -45,6 +62,10 @@ describe("FcmSender.fromEnv", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         h.mockGetApps.mockReturnValue([]);
+        h.mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+        h.mockWriteFile.mockResolvedValue(undefined);
+        h.mockUnlink.mockResolvedValue(undefined);
+        h.mockMkdir.mockResolvedValue(undefined);
         delete process.env["FIREBASE_PROJECT_ID"];
         delete process.env["FIREBASE_SERVICE_ACCOUNT_KEY"];
         delete process.env["ACEDIA_FCM_FILTER"];
@@ -86,6 +107,10 @@ describe("FcmSender.send", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         h.mockGetApps.mockReturnValue([]);
+        h.mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+        h.mockWriteFile.mockResolvedValue(undefined);
+        h.mockUnlink.mockResolvedValue(undefined);
+        h.mockMkdir.mockResolvedValue(undefined);
         process.env["FIREBASE_PROJECT_ID"] = "proj";
         process.env["FIREBASE_SERVICE_ACCOUNT_KEY"] = SA_KEY;
     });
@@ -98,30 +123,30 @@ describe("FcmSender.send", () => {
 
     it("should send for urgent events when token is set", async () => {
         const sender = FcmSender.fromEnv()!;
-        sender.setToken("device-token");
+        await sender.setToken("device-token");
         await sender.send(makeEvent({ priority: "urgent" }));
         expect(h.mockSend).toHaveBeenCalledOnce();
     });
 
     it("should not send for normal events (default filter is urgent only)", async () => {
         const sender = FcmSender.fromEnv()!;
-        sender.setToken("device-token");
+        await sender.setToken("device-token");
         await sender.send(makeEvent({ priority: "normal" }));
         expect(h.mockSend).not.toHaveBeenCalled();
     });
 
-    it("should send for normal events when filter includes normal", () => {
+    it("should send for normal events when filter includes normal", async () => {
         process.env["ACEDIA_FCM_FILTER"] = "urgent,normal";
         const sender = FcmSender.fromEnv()!;
-        sender.setToken("device-token");
-        void sender.send(makeEvent({ priority: "normal" }));
+        await sender.setToken("device-token");
+        await sender.send(makeEvent({ priority: "normal" }));
         delete process.env["ACEDIA_FCM_FILTER"];
         expect(h.mockSend).toHaveBeenCalledOnce();
     });
 
     it("should build correct FCM payload", async () => {
         const sender = FcmSender.fromEnv()!;
-        sender.setToken("token-xyz");
+        await sender.setToken("token-xyz");
         await sender.send(
             makeEvent({ title: "Mail", body: "From Bob", source: "email", dedupeKey: "email-99" }),
         );
@@ -135,7 +160,7 @@ describe("FcmSender.send", () => {
 
     it("should use title as body when event.body is absent", async () => {
         const sender = FcmSender.fromEnv()!;
-        sender.setToken("tok");
+        await sender.setToken("tok");
         const event: AcediaEvent = {
             type: "tasks.due",
             ts: Date.now(),
@@ -152,7 +177,7 @@ describe("FcmSender.send", () => {
     it("should not throw when FCM send fails", async () => {
         h.mockSend.mockRejectedValueOnce(new Error("FCM down"));
         const sender = FcmSender.fromEnv()!;
-        sender.setToken("tok");
+        await sender.setToken("tok");
         await expect(sender.send(makeEvent())).resolves.toBeUndefined();
     });
 });
@@ -160,21 +185,73 @@ describe("FcmSender.send", () => {
 // ── FcmSender token management ────────────────────────────────────────────────
 
 describe("FcmSender token management", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        h.mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+        h.mockWriteFile.mockResolvedValue(undefined);
+        h.mockUnlink.mockResolvedValue(undefined);
+        h.mockMkdir.mockResolvedValue(undefined);
+    });
+
     it("should return null by default", () => {
         const sender = new FcmSender();
         expect(sender.getToken()).toBeNull();
     });
 
-    it("should store and return token", () => {
+    it("should store and return token", async () => {
         const sender = new FcmSender();
-        sender.setToken("my-token");
+        await sender.setToken("my-token");
         expect(sender.getToken()).toBe("my-token");
     });
 
-    it("should clear token on setToken(null)", () => {
+    it("should persist token to disk on setToken", async () => {
         const sender = new FcmSender();
-        sender.setToken("tok");
-        sender.setToken(null);
+        await sender.setToken("persist-me");
+        expect(h.mockWriteFile).toHaveBeenCalledWith(expect.any(String), "persist-me", "utf-8");
+    });
+
+    it("should clear token on setToken(null)", async () => {
+        const sender = new FcmSender();
+        await sender.setToken("tok");
+        await sender.setToken(null);
         expect(sender.getToken()).toBeNull();
+    });
+
+    it("should delete disk file on setToken(null)", async () => {
+        const sender = new FcmSender();
+        await sender.setToken("tok");
+        await sender.setToken(null);
+        expect(h.mockUnlink).toHaveBeenCalled();
+    });
+});
+
+// ── FcmSender.load ────────────────────────────────────────────────────────────
+
+describe("FcmSender.load", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        h.mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+        h.mockWriteFile.mockResolvedValue(undefined);
+        h.mockUnlink.mockResolvedValue(undefined);
+        h.mockMkdir.mockResolvedValue(undefined);
+    });
+
+    it("should restore token from disk when file exists", async () => {
+        h.mockReadFile.mockResolvedValueOnce("restored-token\n");
+        const sender = new FcmSender();
+        await sender.load();
+        expect(sender.getToken()).toBe("restored-token");
+    });
+
+    it("should leave token null when file does not exist", async () => {
+        const sender = new FcmSender();
+        await sender.load();
+        expect(sender.getToken()).toBeNull();
+    });
+
+    it("should not throw when file read fails", async () => {
+        h.mockReadFile.mockRejectedValueOnce(new Error("permission denied"));
+        const sender = new FcmSender();
+        await expect(sender.load()).resolves.toBeUndefined();
     });
 });
