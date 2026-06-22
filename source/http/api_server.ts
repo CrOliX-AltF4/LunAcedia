@@ -154,7 +154,11 @@ export class AcediaApiServer {
 
         // GET /api/stats
         if (method === "GET" && path === "/api/stats") {
-            return json(res, 200, { bySource: this.store.stats(), total: this.store.size, unread: this.store.unreadCount });
+            return json(res, 200, {
+                bySource: this.store.stats(),
+                total: this.store.size,
+                unread: this.store.unreadCount,
+            });
         }
 
         // POST /api/actions
