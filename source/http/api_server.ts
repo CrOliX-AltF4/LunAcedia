@@ -5,6 +5,7 @@ import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
+import { DASHBOARD_HTML } from "./dashboard.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
@@ -84,6 +85,13 @@ export class AcediaApiServer {
         const url = new URL(req.url ?? "/", "http://localhost");
         const path = url.pathname;
 
+        // GET / — web dashboard (no auth required)
+        if (method === "GET" && (path === "/" || path === "/dashboard")) {
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(DASHBOARD_HTML);
+            return;
+        }
+
         // Health check — no auth required
         if (method === "GET" && path === "/api/health") {
             return json(res, 200, {
@@ -146,7 +154,11 @@ export class AcediaApiServer {
 
         // GET /api/stats
         if (method === "GET" && path === "/api/stats") {
-            return json(res, 200, { bySource: this.store.stats(), total: this.store.size });
+            return json(res, 200, {
+                bySource: this.store.stats(),
+                total: this.store.size,
+                unread: this.store.unreadCount,
+            });
         }
 
         // POST /api/actions

@@ -71,4 +71,8 @@ export class EventStore {
     get size(): number {
         return this.buf.length;
     }
+
+    get unreadCount(): number {
+        return this.buf.filter((e) => !e.read).length;
+    }
 }
