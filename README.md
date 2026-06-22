@@ -96,12 +96,12 @@ npm start
 
 ### Clients
 
-| Client | How to connect | Best for |
-|---|---|---|
-| Built-in dashboard | Open `http://host:4001` | Quick visual check, standalone users |
-| [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Set server URL in Settings | Mobile — notifications, read/action on the go |
-| Natsume admin panel | Set `ACEDIA_WS_URL` in Natsume `.env` | Desktop — TTS alerts + manual triage panel |
-| `curl` / any HTTP client | `GET http://host:4001/api/events` | Dev, scripts, automation |
+| Client                                                     | How to connect                        | Best for                                      |
+| ---------------------------------------------------------- | ------------------------------------- | --------------------------------------------- |
+| Built-in dashboard                                         | Open `http://host:4001`               | Quick visual check, standalone users          |
+| [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Set server URL in Settings            | Mobile — notifications, read/action on the go |
+| Natsume admin panel                                        | Set `ACEDIA_WS_URL` in Natsume `.env` | Desktop — TTS alerts + manual triage panel    |
+| `curl` / any HTTP client                                   | `GET http://host:4001/api/events`     | Dev, scripts, automation                      |
 
 ---
 
@@ -121,6 +121,7 @@ LunAcedia uses **refresh tokens** — no browser interaction at runtime. You gen
 **2. Enable the required APIs**
 
 In **APIs & Services → Library**, enable:
+
 - Gmail API
 - Google Calendar API
 - Google Tasks API
@@ -130,9 +131,9 @@ In **APIs & Services → Library**, enable:
 - Go to [developers.google.com/oauthplayground](https://developers.google.com/oauthplayground)
 - Click ⚙️ → check **"Use your own OAuth credentials"** → enter your Client ID + Secret
 - Select these scopes:
-  - `https://www.googleapis.com/auth/gmail.readonly`
-  - `https://www.googleapis.com/auth/calendar.readonly`
-  - `https://www.googleapis.com/auth/tasks.readonly`
+    - `https://www.googleapis.com/auth/gmail.readonly`
+    - `https://www.googleapis.com/auth/calendar.readonly`
+    - `https://www.googleapis.com/auth/tasks.readonly`
 - **Authorize APIs** → sign in → accept (you will see "This app isn't verified" — click **Continue**, you are a test user)
 - **Step 2 → Exchange authorization code for tokens** → copy the `refresh_token`
 
@@ -168,13 +169,13 @@ GTASKS_REFRESH_TOKEN=<same token>
 
 ## Lun ecosystem
 
-| Project                                                     | Role                                                      |
-| ----------------------------------------------------------- | --------------------------------------------------------- |
+| Project                                                    | Role                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
 | [LunIra](https://github.com/CrOliX-AltF4/LunIra)           | AI dev pipeline — intent → code                           |
-| **LunAcedia**                                               | Information infrastructure — events · actions · AI butler |
+| **LunAcedia**                                              | Information infrastructure — events · actions · AI butler |
 | [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Mobile companion — Android                                |
 | [LunGula](https://github.com/CrOliX-AltF4/LunGula)         | Imitation learning — gameplay → ONNX policy               |
-| LunAnima                                                    | AI companion core — private                               |
+| LunAnima                                                   | AI companion core — private                               |
 
 ---
 
