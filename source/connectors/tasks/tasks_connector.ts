@@ -69,8 +69,10 @@ export class TasksConnector implements IConnector {
         const dueMax = new Date();
         dueMax.setHours(23, 59, 59, 999);
 
+        // @default and other @-prefixed special IDs must NOT be percent-encoded — the API returns 503 otherwise
+        const listPath = this.listId.startsWith("@") ? this.listId : encodeURIComponent(this.listId);
         const url =
-            `${TASKS_API}/lists/${encodeURIComponent(this.listId)}/tasks` +
+            `${TASKS_API}/lists/${listPath}/tasks` +
             `?showCompleted=false&showHidden=false` +
             `&dueMax=${encodeURIComponent(dueMax.toISOString())}&maxResults=50`;
 
@@ -131,8 +133,9 @@ export class TasksConnector implements IConnector {
         const [listId, taskId] = second ? [first!, second] : [this.listId, first!];
 
         try {
-            const resp = await fetch(
-                `${TASKS_API}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`,
+            const listPath2 = listId.startsWith("@") ? listId : encodeURIComponent(listId);
+        const resp = await fetch(
+                `${TASKS_API}/lists/${listPath2}/tasks/${encodeURIComponent(taskId)}`,
                 {
                     method: "PATCH",
                     headers: {
