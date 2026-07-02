@@ -59,6 +59,21 @@ describe("GcalConnector", () => {
         expect(await new GcalConnector().poll()).toHaveLength(0);
     });
 
+    it("should warn at construction time when credentials are missing", () => {
+        delete process.env["GCAL_CLIENT_ID"];
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        new GcalConnector();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("GCAL_ENABLED=true"));
+        warnSpy.mockRestore();
+    });
+
+    it("should not warn at construction time when credentials are present", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        new GcalConnector();
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+
     it("should return events from primary calendar", async () => {
         vi.stubGlobal("fetch", makeFetch([calEvent("ev1", "Team Sync")]));
         const events = await new GcalConnector().poll();

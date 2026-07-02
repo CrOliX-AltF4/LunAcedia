@@ -33,8 +33,49 @@ describe("getGoogleToken", () => {
     });
 
     it("should throw when endpoint returns non-ok", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400 }));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: false,
+                status: 400,
+                text: () => Promise.resolve(""),
+            }),
+        );
         await expect(getGoogleToken("cid", "csec", "rtoken", "test")).rejects.toThrow("400");
+    });
+
+    it("should include Google's error/error_description in the thrown message", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: false,
+                status: 400,
+                text: () =>
+                    Promise.resolve(
+                        JSON.stringify({
+                            error: "invalid_grant",
+                            error_description: "Token has been expired or revoked.",
+                        }),
+                    ),
+            }),
+        );
+        await expect(getGoogleToken("cid", "csec", "rtoken", "test")).rejects.toThrow(
+            "invalid_grant: Token has been expired or revoked.",
+        );
+    });
+
+    it("should fall back to raw body text when the error body isn't JSON", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: false,
+                status: 500,
+                text: () => Promise.resolve("upstream error"),
+            }),
+        );
+        await expect(getGoogleToken("cid", "csec", "rtoken", "test")).rejects.toThrow(
+            "upstream error",
+        );
     });
 });
 

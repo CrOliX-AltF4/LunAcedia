@@ -69,6 +69,15 @@ export class GcalConnector implements IConnector {
         this.defaultPriority = (
             ["urgent", "normal", "info"].includes(raw) ? raw : "normal"
         ) as AcediaEventPriority;
+
+        // GCAL_ENABLED=true gates whether this connector is even constructed — if we're
+        // here without credentials, that's a real misconfiguration, not an intentional
+        // disable. poll() silently returning [] every cycle gave no visibility into this.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken) {
+            console.warn(
+                "[GCal] GCAL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed.",
+            );
+        }
     }
 
     async poll(): Promise<AcediaEvent[]> {
