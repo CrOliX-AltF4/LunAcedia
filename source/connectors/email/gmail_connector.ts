@@ -51,6 +51,15 @@ export class GmailConnector implements IConnector {
         this.maxAgeMs = Math.max(1, maxAgeHours) * 3_600_000;
 
         this.rules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
+
+        // GMAIL_ENABLED=true gates whether this connector is even constructed — if we're
+        // here without credentials, that's a real misconfiguration, not an intentional
+        // disable. poll() silently returning [] every cycle gave no visibility into this.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken) {
+            console.warn(
+                "[Gmail] GMAIL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed.",
+            );
+        }
     }
 
     async poll(): Promise<AcediaEvent[]> {

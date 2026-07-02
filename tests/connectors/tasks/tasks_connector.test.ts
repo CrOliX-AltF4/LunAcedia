@@ -54,6 +54,21 @@ describe("TasksConnector", () => {
         expect(await new TasksConnector().poll()).toHaveLength(0);
     });
 
+    it("should warn at construction time when credentials are missing", () => {
+        delete process.env["GTASKS_CLIENT_ID"];
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        new TasksConnector();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("GTASKS_ENABLED=true"));
+        warnSpy.mockRestore();
+    });
+
+    it("should not warn at construction time when credentials are present", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        new TasksConnector();
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+
     it("should return events for tasks due today", async () => {
         vi.stubGlobal("fetch", makeFetch([task("t1", "Write tests", DUE_TODAY)]));
         const events = await new TasksConnector().poll();

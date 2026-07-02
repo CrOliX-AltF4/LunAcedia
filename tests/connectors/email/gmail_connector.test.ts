@@ -69,6 +69,21 @@ describe("GmailConnector", () => {
         expect(await connector.poll()).toHaveLength(0);
     });
 
+    it("should warn at construction time when credentials are missing", () => {
+        delete process.env["GMAIL_CLIENT_ID"];
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        new GmailConnector();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("GMAIL_ENABLED=true"));
+        warnSpy.mockRestore();
+    });
+
+    it("should not warn at construction time when credentials are present", () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        new GmailConnector();
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+
     it("should return events for fresh messages", async () => {
         vi.stubGlobal(
             "fetch",

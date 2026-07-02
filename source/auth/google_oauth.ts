@@ -26,7 +26,23 @@ export async function getGoogleToken(
         }),
     });
 
-    if (!resp.ok) throw new Error(`Google token refresh failed: ${resp.status}`);
+    if (!resp.ok) {
+        // Google's OAuth error body carries the actual reason (invalid_grant, invalid_client,
+        // unauthorized_client, ...) — the HTTP status alone ("400") gives no way to tell a
+        // revoked/expired refresh token apart from a bad client_id or a scope mismatch.
+        const bodyText = await resp.text().catch(() => "");
+        let detail = bodyText;
+        try {
+            const parsed = JSON.parse(bodyText) as { error?: string; error_description?: string };
+            if (parsed.error)
+                detail = `${parsed.error}${parsed.error_description ? `: ${parsed.error_description}` : ""}`;
+        } catch {
+            /* not JSON — fall back to raw body text */
+        }
+        throw new Error(
+            `Google token refresh failed (${resp.status}) for cacheKey="${cacheKey}": ${detail || "(empty response body)"}`,
+        );
+    }
 
     const data = (await resp.json()) as { access_token: string; expires_in: number };
     caches.set(cacheKey, {
