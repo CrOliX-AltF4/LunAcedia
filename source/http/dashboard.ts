@@ -1,3 +1,5 @@
+import { CONNECTOR_REGISTRY } from "../connectors/connector_registry.js";
+
 /** Inline HTML for the LunAcedia web dashboard served at GET /. */
 export const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -80,12 +82,12 @@ button:hover{border-color:var(--accent);color:var(--accent)}
   <span class="chip" data-f="urgent">Urgent</span>
   <span class="chip" data-f="normal">Normal</span>
   <span class="chip" data-f="info">Info</span>
-  <span class="chip" data-f="github">GitHub</span>
-  <span class="chip" data-f="email">Email</span>
-  <span class="chip" data-f="calendar">Calendar</span>
-  <span class="chip" data-f="tasks">Tasks</span>
-  <span class="chip" data-f="rss">RSS</span>
-  <span class="chip" data-f="ha">Home Assistant</span>
+  <span class="chip" data-f="github">${CONNECTOR_REGISTRY.github.label}</span>
+  <span class="chip" data-f="email">${CONNECTOR_REGISTRY.email.label}</span>
+  <span class="chip" data-f="calendar">${CONNECTOR_REGISTRY.calendar.label}</span>
+  <span class="chip" data-f="tasks">${CONNECTOR_REGISTRY.tasks.label}</span>
+  <span class="chip" data-f="rss">${CONNECTOR_REGISTRY.rss.label}</span>
+  <span class="chip" data-f="ha">${CONNECTOR_REGISTRY.ha.label}</span>
 </div>
 
 <div id="list"></div>

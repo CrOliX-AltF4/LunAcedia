@@ -6,6 +6,20 @@ const URGENT_POLL_MS = 60_000;
 
 type EventHandler = (event: AcediaEvent) => void;
 
+export interface ConnectorHealth {
+    slug: string;
+    name: string;
+    /** True only once a poll has actually succeeded and the most recent attempt didn't fail. */
+    connected: boolean;
+    lastSuccessAt: number | null;
+    lastError: string | null;
+}
+
+interface HealthState {
+    lastSuccessAt: number | null;
+    lastError: string | null;
+}
+
 /**
  * Orchestrates all connectors — polls on their preferred interval,
  * deduplicates events, and dispatches to registered handlers.
@@ -15,15 +29,39 @@ type EventHandler = (event: AcediaEvent) => void;
 export class IngestionHub {
     private readonly handlers = new Set<EventHandler>();
     private readonly seen = new Map<string, number>(); // dedupeKey → ts
+    private readonly health = new Map<string, HealthState>(); // connector slug → poll health
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
     private normalTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
 
-    constructor(private readonly connectors: IConnector[]) {}
+    constructor(private readonly connectors: IConnector[]) {
+        for (const c of connectors) {
+            this.health.set(c.slug, { lastSuccessAt: null, lastError: null });
+        }
+    }
 
     onEvent(handler: EventHandler): () => void {
         this.handlers.add(handler);
         return () => this.handlers.delete(handler);
+    }
+
+    /**
+     * Real connectivity, not just "enabled" — connected only reflects a connector that
+     * has actually completed a successful poll and whose most recent attempt didn't fail.
+     * A misconfigured/expired token shows up here instead of silently reporting "connected"
+     * forever the way "present in the connectors array" used to.
+     */
+    getConnectorHealth(): ConnectorHealth[] {
+        return this.connectors.map((c) => {
+            const state = this.health.get(c.slug) ?? { lastSuccessAt: null, lastError: null };
+            return {
+                slug: c.slug,
+                name: c.name,
+                connected: state.lastSuccessAt !== null && state.lastError === null,
+                lastSuccessAt: state.lastSuccessAt,
+                lastError: state.lastError,
+            };
+        });
     }
 
     start(): void {
@@ -66,10 +104,12 @@ export class IngestionHub {
         for (const connector of this.connectors) {
             try {
                 const events = await connector.poll();
+                this.recordSuccess(connector);
                 for (const e of events.filter((e) => e.priority === "urgent")) {
                     this.dispatch(e);
                 }
             } catch (err) {
+                this.recordError(connector, (err as Error).message);
                 console.error(`[Hub] ${connector.name} urgent poll error:`, (err as Error).message);
             }
         }
@@ -78,10 +118,21 @@ export class IngestionHub {
     private async pollConnector(connector: IConnector): Promise<void> {
         try {
             const events = await connector.poll();
+            this.recordSuccess(connector);
             for (const e of events) this.dispatch(e);
         } catch (err) {
+            this.recordError(connector, (err as Error).message);
             console.error(`[Hub] ${connector.name} poll error:`, (err as Error).message);
         }
+    }
+
+    private recordSuccess(connector: IConnector): void {
+        this.health.set(connector.slug, { lastSuccessAt: Date.now(), lastError: null });
+    }
+
+    private recordError(connector: IConnector, message: string): void {
+        const prior = this.health.get(connector.slug) ?? { lastSuccessAt: null, lastError: null };
+        this.health.set(connector.slug, { lastSuccessAt: prior.lastSuccessAt, lastError: message });
     }
 
     private dispatch(event: AcediaEvent): void {

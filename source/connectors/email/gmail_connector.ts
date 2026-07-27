@@ -1,4 +1,6 @@
 ﻿import type { IConnector } from "../connector_interface.js";
+import { CONNECTOR_REGISTRY } from "../connector_registry.js";
+import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getAccessToken, clearTokenCache } from "./gmail_auth.js";
@@ -30,7 +32,10 @@ interface GmailMessageMeta {
  * Rule: classification by senderPattern substring match only — never by LLM.
  */
 export class GmailConnector implements IConnector {
-    readonly name = "Gmail";
+    readonly slug: ConnectorSlug = "email";
+    get name(): string {
+        return CONNECTOR_REGISTRY[this.slug].label;
+    }
     readonly preferredPollIntervalMs: number;
 
     private readonly clientId: string;

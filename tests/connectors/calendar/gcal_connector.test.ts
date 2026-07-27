@@ -156,7 +156,8 @@ describe("GcalConnector", () => {
 
     it("should expose name and preferredPollIntervalMs", () => {
         const c = new GcalConnector();
-        expect(c.name).toBe("GCal");
+        expect(c.name).toBe("Calendar");
+        expect(c.slug).toBe("calendar");
         expect(c.preferredPollIntervalMs).toBeGreaterThan(0);
     });
 

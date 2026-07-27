@@ -1,4 +1,6 @@
 import type { IConnector } from "../connector_interface.js";
+import { CONNECTOR_REGISTRY } from "../connector_registry.js";
+import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
 import { parseFeed } from "./rss_parser.js";
 
@@ -30,7 +32,10 @@ function parseFeedConfigs(raw: string): FeedConfig[] {
  * Rule: classification by recency and feed config only — never by LLM.
  */
 export class RssConnector implements IConnector {
-    readonly name = "RSS";
+    readonly slug: ConnectorSlug = "rss";
+    get name(): string {
+        return CONNECTOR_REGISTRY[this.slug].label;
+    }
     readonly preferredPollIntervalMs: number;
 
     private readonly feeds: FeedConfig[];

@@ -35,7 +35,7 @@ const fcm = FcmSender.fromEnv();
 const ai = createAIProvider();
 const hub = new IngestionHub(connectors);
 const ws = new AcediaWsServer();
-const api = new AcediaApiServer(store, connectors, fcm, ai, process.env["ACEDIA_SECRET"]);
+const api = new AcediaApiServer(store, connectors, hub, fcm, ai, process.env["ACEDIA_SECRET"]);
 
 if (fcm) await fcm.load();
 

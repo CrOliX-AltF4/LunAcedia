@@ -263,6 +263,7 @@ describe("GitHubConnector", () => {
     it("should expose name and preferredPollIntervalMs", () => {
         const connector = new GitHubConnector();
         expect(connector.name).toBe("GitHub");
+        expect(connector.slug).toBe("github");
         expect(connector.preferredPollIntervalMs).toBeGreaterThanOrEqual(30_000);
     });
 });

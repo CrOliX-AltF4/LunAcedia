@@ -173,7 +173,8 @@ describe("HaConnector", () => {
 
     it("should expose name and preferredPollIntervalMs", () => {
         const connector = new HaConnector();
-        expect(connector.name).toBe("HomeAssistant");
+        expect(connector.name).toBe("Home Assistant");
+        expect(connector.slug).toBe("ha");
         expect(connector.preferredPollIntervalMs).toBeGreaterThan(0);
     });
 
