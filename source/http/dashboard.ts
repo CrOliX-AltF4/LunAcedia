@@ -93,6 +93,7 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 
 <script>
 const ICONS={github:'⎇',email:'✉',calendar:'📅',tasks:'✓',rss:'◉',ha:'⌂',system:'⚙'};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let tok=sessionStorage.getItem('at')||'';
 let events=[];
 let filter='all';
@@ -144,13 +145,13 @@ function render(){
   if(!shown.length){list.innerHTML='';empty.style.display='';return;}
   empty.style.display='none';
   list.innerHTML=shown.map(e=>\`
-<div class="card\${!e.read?' unread':''}" data-key="\${e.dedupeKey}" onclick="toggle(this,'\${e.dedupeKey.replace(/'/g,"\\\\'")}')">
+<div class="card\${!e.read?' unread':''}" data-key="\${esc(e.dedupeKey)}" onclick="toggle(this,'\${e.dedupeKey.replace(/'/g,"\\\\'")}')">
   <div class="card-top">
-    <span class="src">\${ICONS[e.source]||'●'} \${e.source}</span>
-    <span class="pri pri-\${e.priority}">\${e.priority}</span>
+    <span class="src">\${ICONS[e.source]||'●'} \${esc(e.source)}</span>
+    <span class="pri pri-\${esc(e.priority)}">\${esc(e.priority)}</span>
   </div>
-  <div class="card-title">\${e.title}</div>
-  \${e.body?'<div class="card-body">'+e.body+'</div>':''}
+  <div class="card-title">\${esc(e.title)}</div>
+  \${e.body?'<div class="card-body">'+esc(e.body)+'</div>':''}
   <div class="card-time">\${ago(e.ts)}</div>
 </div>\`).join('');
 }
