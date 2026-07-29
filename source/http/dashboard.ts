@@ -151,7 +151,7 @@ function render(){
   if(!shown.length){list.innerHTML='';empty.style.display='';return;}
   empty.style.display='none';
   list.innerHTML=shown.map(e=>\`
-<div class="card\${!e.read?' unread':''}" data-key="\${esc(e.dedupeKey)}" onclick="toggle(this,'\${e.dedupeKey.replace(/'/g,"\\\\'")}')">
+<div class="card\${!e.read?' unread':''}" data-key="\${esc(e.dedupeKey)}" onclick="toggle(this)">
   <div class="card-top">
     <span class="src">\${ICONS[e.source]||'●'} \${esc(e.source)}</span>
     <span class="pri pri-\${esc(e.priority)}">\${esc(e.priority)}</span>
@@ -162,7 +162,8 @@ function render(){
 </div>\`).join('');
 }
 
-async function toggle(el,key){
+async function toggle(el){
+  const key=el.dataset.key;
   el.classList.toggle('open');
   if(el.classList.contains('unread')){
     el.classList.remove('unread');

@@ -57,4 +57,29 @@ describe("DASHBOARD_HTML render() sink", () => {
         expect(cardBlock).toContain("esc(e.title)");
         expect(cardBlock).toContain("esc(e.body)");
     });
+
+    it("doesn't re-interpolate dedupeKey a second time into the onclick attribute", () => {
+        // Regression guard for the gap the audit found: dedupeKey used to be embedded a second
+        // time in onclick="toggle(this,'VALUE')" via a hand-rolled single-quote-only replace,
+        // which left the double-quoted attribute boundary (a bare ") unprotected. Fixed by
+        // reading the key from the already-escaped data-key attribute instead — toggle(this)
+        // takes no second copy of untrusted data at all, so there's nothing left to escape wrong.
+        const cardBlock = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("list.innerHTML=shown.map"),
+            DASHBOARD_HTML.indexOf("`).join('');") + 1,
+        );
+        expect(cardBlock).toContain('onclick="toggle(this)"');
+        expect(cardBlock).not.toMatch(/onclick="toggle\(this,/);
+    });
+});
+
+describe("dashboard toggle()", () => {
+    it("reads the key from the element's data-key attribute, not a function argument", () => {
+        const toggleBlock = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("async function toggle"),
+            DASHBOARD_HTML.indexOf("async function toggle") + 200,
+        );
+        expect(toggleBlock).toContain("async function toggle(el){");
+        expect(toggleBlock).toContain("el.dataset.key");
+    });
 });
