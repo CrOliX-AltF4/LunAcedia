@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "node:http";
 import { AcediaApiServer } from "../../source/http/api_server.js";
+import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { NullAIProvider } from "../../source/ai/null_provider.js";
 import type { IAIProvider } from "../../source/ai/ai_provider.js";
@@ -89,7 +90,7 @@ function makeConnector(
     name: string,
     executeAction?: (a: ConnectorAction) => Promise<void>,
 ): IConnector {
-    return { name, poll: async () => [], executeAction };
+    return { slug: "github", name, poll: async () => [], executeAction };
 }
 
 const nullAI = new NullAIProvider();
@@ -100,7 +101,7 @@ function makeServer(
     ai: IAIProvider = nullAI,
     secret: string | undefined = SECRET,
 ): AcediaApiServer {
-    return new AcediaApiServer(store, connectors, null, ai, secret);
+    return new AcediaApiServer(store, connectors, new IngestionHub(connectors), null, ai, secret);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -123,6 +124,26 @@ describe("AcediaApiServer — /api/health", () => {
         const res = await get(`http://localhost:${port}/api/health`);
         server.stop();
         expect((res.body as Record<string, unknown>)["ai"]).toBe("none");
+    });
+
+    it("should report a configured-but-never-polled connector as not connected, not just 'enabled'", async () => {
+        const port = nextPort();
+        const conn = makeConnector("Gmail");
+        const server = makeServer(new EventStore(), [conn]);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/health`);
+        server.stop();
+        expect(res.body).toMatchObject({
+            connectors: [
+                {
+                    slug: "github",
+                    name: "Gmail",
+                    connected: false,
+                    lastSuccessAt: null,
+                    lastError: null,
+                },
+            ],
+        });
     });
 });
 
@@ -147,7 +168,14 @@ describe("AcediaApiServer — auth", () => {
 
     it("should allow requests without auth when no secret is configured", async () => {
         const port = nextPort();
-        const server = new AcediaApiServer(new EventStore(), [], null, nullAI, undefined);
+        const server = new AcediaApiServer(
+            new EventStore(),
+            [],
+            new IngestionHub([]),
+            null,
+            nullAI,
+            undefined,
+        );
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events`);
         server.stop();

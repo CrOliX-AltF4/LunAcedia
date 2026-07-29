@@ -1,4 +1,6 @@
 ﻿import type { IConnector } from "../connector_interface.js";
+import { CONNECTOR_REGISTRY } from "../connector_registry.js";
+import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
@@ -30,7 +32,10 @@ interface TaskListResponse {
  * Rule: classification by due date only — never by LLM.
  */
 export class TasksConnector implements IConnector {
-    readonly name = "Tasks";
+    readonly slug: ConnectorSlug = "tasks";
+    get name(): string {
+        return CONNECTOR_REGISTRY[this.slug].label;
+    }
     readonly preferredPollIntervalMs: number;
 
     private readonly clientId: string;

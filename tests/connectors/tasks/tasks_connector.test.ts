@@ -166,6 +166,7 @@ describe("TasksConnector", () => {
     it("should expose name and preferredPollIntervalMs", () => {
         const c = new TasksConnector();
         expect(c.name).toBe("Tasks");
+        expect(c.slug).toBe("tasks");
         expect(c.preferredPollIntervalMs).toBeGreaterThan(0);
     });
 });

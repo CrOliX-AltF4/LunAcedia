@@ -1,4 +1,6 @@
 import type { IConnector } from "../connector_interface.js";
+import { CONNECTOR_REGISTRY } from "../connector_registry.js";
+import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
 
 interface HaStateResponse {
@@ -32,7 +34,10 @@ function parseEntities(raw: string): string[] {
  * Rule: state-change detection in the connector — never emits the same state twice in a row.
  */
 export class HaConnector implements IConnector {
-    readonly name = "HomeAssistant";
+    readonly slug: ConnectorSlug = "ha";
+    get name(): string {
+        return CONNECTOR_REGISTRY[this.slug].label;
+    }
     readonly preferredPollIntervalMs: number;
 
     private readonly baseUrl: string;

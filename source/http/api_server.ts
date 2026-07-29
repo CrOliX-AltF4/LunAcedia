@@ -1,5 +1,6 @@
 import http from "node:http";
 import type { IConnector } from "../connectors/connector_interface.js";
+import type { IngestionHub } from "../hub/ingestion_hub.js";
 import type { EventStore } from "../store/event_store.js";
 import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
@@ -56,6 +57,7 @@ export class AcediaApiServer {
     constructor(
         private readonly store: EventStore,
         private readonly connectors: IConnector[],
+        private readonly hub: IngestionHub,
         private readonly fcm: FcmSender | null,
         private readonly ai: IAIProvider,
         private readonly secret: string | undefined,
@@ -97,7 +99,7 @@ export class AcediaApiServer {
             return json(res, 200, {
                 status: "ok",
                 uptime: Math.floor((Date.now() - this.startedAt) / 1000),
-                connectors: this.connectors.map((c) => c.name),
+                connectors: this.hub.getConnectorHealth(),
                 events: this.store.size,
                 ai: this.ai.mode,
             });

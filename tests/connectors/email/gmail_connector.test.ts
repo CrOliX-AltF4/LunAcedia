@@ -192,6 +192,7 @@ describe("GmailConnector", () => {
     it("should expose name and preferredPollIntervalMs", () => {
         const connector = new GmailConnector();
         expect(connector.name).toBe("Gmail");
+        expect(connector.slug).toBe("email");
         expect(connector.preferredPollIntervalMs).toBeGreaterThan(0);
     });
 

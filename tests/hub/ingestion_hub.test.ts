@@ -14,6 +14,7 @@ const baseEvent: AcediaEvent = {
 
 function makeConnector(events: AcediaEvent[]): IConnector {
     return {
+        slug: "github",
         name: "MockConnector",
         poll: vi.fn().mockResolvedValue(events),
     };
@@ -80,6 +81,7 @@ describe("IngestionHub", () => {
 
     it("should not throw if a connector poll rejects", async () => {
         const connector: IConnector = {
+            slug: "github",
             name: "BrokenConnector",
             poll: vi.fn().mockRejectedValue(new Error("network error")),
         };
@@ -100,5 +102,77 @@ describe("IngestionHub", () => {
 
         await new Promise((r) => setTimeout(r, 50));
         expect(vi.mocked(connector.poll)).toHaveBeenCalledTimes(1);
+    });
+
+    describe("getConnectorHealth()", () => {
+        it("reports connected: false before any poll has run", () => {
+            const connector = makeConnector([]);
+            hub = new IngestionHub([connector]);
+
+            expect(hub.getConnectorHealth()).toEqual([
+                {
+                    slug: "github",
+                    name: "MockConnector",
+                    connected: false,
+                    lastSuccessAt: null,
+                    lastError: null,
+                },
+            ]);
+        });
+
+        it("reports connected: true after a poll succeeds — not just because the connector is enabled", async () => {
+            const connector = makeConnector([baseEvent]);
+            hub = new IngestionHub([connector]);
+            hub.start();
+
+            await new Promise((r) => setTimeout(r, 50));
+
+            const [health] = hub.getConnectorHealth();
+            expect(health).toMatchObject({ connected: true, lastError: null });
+            expect(health!.lastSuccessAt).not.toBeNull();
+        });
+
+        it("reports connected: false and surfaces lastError after a poll rejects", async () => {
+            const connector: IConnector = {
+                slug: "email",
+                name: "BrokenConnector",
+                poll: vi.fn().mockRejectedValue(new Error("invalid_grant")),
+            };
+            hub = new IngestionHub([connector]);
+            hub.start();
+
+            await new Promise((r) => setTimeout(r, 50));
+
+            expect(hub.getConnectorHealth()).toEqual([
+                {
+                    slug: "email",
+                    name: "BrokenConnector",
+                    connected: false,
+                    lastSuccessAt: null,
+                    lastError: "invalid_grant",
+                },
+            ]);
+        });
+
+        it("keeps the last known success time when a later poll fails", async () => {
+            const poll = vi
+                .fn()
+                .mockResolvedValueOnce([baseEvent])
+                .mockRejectedValueOnce(new Error("token expired"));
+            const connector: IConnector = { slug: "email", name: "Flaky", poll };
+            hub = new IngestionHub([connector]);
+            hub.start(); // initial sweep — succeeds
+
+            await new Promise((r) => setTimeout(r, 50));
+            const successAt = hub.getConnectorHealth()[0]!.lastSuccessAt;
+            expect(successAt).not.toBeNull();
+
+            await (hub as unknown as { pollAll(): Promise<void> }).pollAll(); // second poll — fails
+
+            const health = hub.getConnectorHealth()[0]!;
+            expect(health.connected).toBe(false);
+            expect(health.lastError).toBe("token expired");
+            expect(health.lastSuccessAt).toBe(successAt);
+        });
     });
 });

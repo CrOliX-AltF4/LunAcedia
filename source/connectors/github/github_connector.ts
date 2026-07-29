@@ -1,4 +1,6 @@
 import type { IConnector } from "../connector_interface.js";
+import { CONNECTOR_REGISTRY } from "../connector_registry.js";
+import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import { formatThread, formatFailedCheckRun } from "./github_formatter.js";
 
@@ -11,7 +13,10 @@ interface GitHubThread {
 }
 
 export class GitHubConnector implements IConnector {
-    readonly name = "GitHub";
+    readonly slug: ConnectorSlug = "github";
+    get name(): string {
+        return CONNECTOR_REGISTRY[this.slug].label;
+    }
 
     private readonly token: string;
     private readonly excludeRepos: Set<string>;
