@@ -8,7 +8,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LunAcedia</title>
 <style>
-:root{--bg:#0f0f11;--surface:#1a1a1d;--border:#2a2a2e;--text:#e8e8ec;--muted:#6b6b74;--urgent:#ff4455;--normal:#4488ff;--info:#7777aa;--accent:#c8a415}
+/* Palette pulled from the Lun ecosystem's shared identity sheet (LunAnima repo,
+   docs/lun-identity-tokens.md) — LunAcedia keeps its own variable names for its own
+   concepts (urgent/normal/info priority), but the hex values are the shared ones so
+   this dashboard and the Natsume panel read as one system. */
+:root{--bg:#0d0f14;--surface:#111827;--border:#1e2330;--text:#d1d5db;--muted:#9ca3af;--urgent:#f87171;--normal:#b9945a;--info:#9ca3af;--accent:#b9945a}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif;min-height:100vh}
 header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
@@ -27,8 +31,8 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 .card-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .src{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
 .pri{font-size:11px;padding:1px 6px;border-radius:4px;font-weight:600}
-.pri-urgent{background:#ff445522;color:var(--urgent)}
-.pri-normal{background:#4488ff22;color:var(--normal)}
+.pri-urgent{background:#f8717122;color:var(--urgent)}
+.pri-normal{background:#b9945a22;color:var(--normal)}
 .pri-info{color:var(--info)}
 .card-title{font-size:14px;font-weight:500}
 .card-body{font-size:13px;color:var(--muted);margin-top:6px;display:none;line-height:1.6}
