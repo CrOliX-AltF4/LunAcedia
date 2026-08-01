@@ -327,6 +327,63 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 });
 
+describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
+    it("should return 200 and ok:true when the poll succeeds", async () => {
+        const port = nextPort();
+        const conn: IConnector = { slug: "github", name: "GitHub", poll: async () => [] };
+        const hub = new IngestionHub([conn]);
+        const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/connectors/github/reconnect`,
+            {},
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ ok: true });
+    });
+
+    it("should return 502 and the connector's error when the poll fails", async () => {
+        const port = nextPort();
+        const conn: IConnector = {
+            slug: "email",
+            name: "Gmail",
+            poll: async () => {
+                throw new Error("invalid_grant");
+            },
+        };
+        const hub = new IngestionHub([conn]);
+        const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/connectors/email/reconnect`, {}, AUTH);
+        server.stop();
+        expect(res.status).toBe(502);
+        expect(res.body).toEqual({ ok: false, error: "invalid_grant" });
+    });
+
+    it("should return 404 for an unknown connector slug", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/connectors/nope/reconnect`, {}, AUTH);
+        server.stop();
+        expect(res.status).toBe(404);
+    });
+
+    it("should update getConnectorHealth() immediately, not wait for the next scheduled poll", async () => {
+        const port = nextPort();
+        const conn: IConnector = { slug: "rss", name: "RSS", poll: async () => [] };
+        const hub = new IngestionHub([conn]);
+        const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
+        server.start(port);
+        expect(hub.getConnectorHealth()[0]!.lastSuccessAt).toBeNull();
+        await post(`http://localhost:${port}/api/connectors/rss/reconnect`, {}, AUTH);
+        server.stop();
+        expect(hub.getConnectorHealth()[0]!.lastSuccessAt).not.toBeNull();
+    });
+});
+
 describe("AcediaApiServer — POST /api/chat", () => {
     it("should return 503 when AI provider is none", async () => {
         const port = nextPort();
