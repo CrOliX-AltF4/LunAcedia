@@ -154,6 +154,50 @@ describe("IngestionHub", () => {
             ]);
         });
 
+        describe("pollOne()", () => {
+            it("returns { ok: true } and records success without waiting for the scheduled interval", async () => {
+                const connector = makeConnector([baseEvent]);
+                hub = new IngestionHub([connector]);
+
+                const result = await hub.pollOne("github");
+
+                expect(result).toEqual({ ok: true });
+                expect(hub.getConnectorHealth()[0]!.lastSuccessAt).not.toBeNull();
+            });
+
+            it("returns { ok: false, error } when the connector's poll fails", async () => {
+                const connector: IConnector = {
+                    slug: "email",
+                    name: "Broken",
+                    poll: vi.fn().mockRejectedValue(new Error("invalid_grant")),
+                };
+                hub = new IngestionHub([connector]);
+
+                const result = await hub.pollOne("email");
+
+                expect(result).toEqual({ ok: false, error: "invalid_grant" });
+            });
+
+            it("returns { ok: false, error: 'Unknown connector' } for a slug not in the hub", async () => {
+                hub = new IngestionHub([makeConnector([])]);
+
+                const result = await hub.pollOne("nope");
+
+                expect(result).toEqual({ ok: false, error: "Unknown connector" });
+            });
+
+            it("dispatches events found during the forced poll like any other poll", async () => {
+                const connector = makeConnector([baseEvent]);
+                hub = new IngestionHub([connector]);
+                const received: AcediaEvent[] = [];
+                hub.onEvent((e) => received.push(e));
+
+                await hub.pollOne("github");
+
+                expect(received).toHaveLength(1);
+            });
+        });
+
         it("keeps the last known success time when a later poll fails", async () => {
             const poll = vi
                 .fn()

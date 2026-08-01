@@ -44,6 +44,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/events/read-all      → 204
  *   POST /api/events/:dedupeKey/read → 204
  *   GET  /api/stats
+ *   POST /api/connectors/:slug/reconnect  → { ok: boolean, error?: string }
  *   POST /api/actions              body: ConnectorAction & { connector: string }
  *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
@@ -161,6 +162,15 @@ export class AcediaApiServer {
                 total: this.store.size,
                 unread: this.store.unreadCount,
             });
+        }
+
+        // POST /api/connectors/:slug/reconnect
+        const reconnectMatch = path.match(/^\/api\/connectors\/([^/]+)\/reconnect$/);
+        if (method === "POST" && reconnectMatch) {
+            const slug = decodeURIComponent(reconnectMatch[1]!);
+            const result = await this.hub.pollOne(slug);
+            if (!result.ok && result.error === "Unknown connector") return json(res, 404, result);
+            return json(res, result.ok ? 200 : 502, result);
         }
 
         // POST /api/actions

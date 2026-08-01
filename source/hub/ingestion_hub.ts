@@ -64,6 +64,20 @@ export class IngestionHub {
         });
     }
 
+    /**
+     * Force an immediate poll of a single connector, outside its normal interval — the
+     * panel's "Reconnect" button. Health (lastSuccessAt/lastError) updates synchronously
+     * with the result, unlike a passive wait for the next scheduled pollAll()/pollUrgent()
+     * tick (up to `preferredPollIntervalMs`, several minutes for some connectors).
+     */
+    async pollOne(slug: string): Promise<{ ok: boolean; error?: string }> {
+        const connector = this.connectors.find((c) => c.slug === slug);
+        if (!connector) return { ok: false, error: "Unknown connector" };
+        await this.pollConnector(connector); // never throws — records success/error internally
+        const health = this.health.get(connector.slug);
+        return health?.lastError ? { ok: false, error: health.lastError } : { ok: true };
+    }
+
     start(): void {
         if (this.started) return;
         this.started = true;
