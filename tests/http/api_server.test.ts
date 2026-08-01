@@ -334,7 +334,11 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
         const hub = new IngestionHub([conn]);
         const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
         server.start(port);
-        const res = await post(`http://localhost:${port}/api/connectors/github/reconnect`, {}, AUTH);
+        const res = await post(
+            `http://localhost:${port}/api/connectors/github/reconnect`,
+            {},
+            AUTH,
+        );
         server.stop();
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ ok: true });
@@ -345,7 +349,9 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
         const conn: IConnector = {
             slug: "email",
             name: "Gmail",
-            poll: async () => { throw new Error("invalid_grant"); },
+            poll: async () => {
+                throw new Error("invalid_grant");
+            },
         };
         const hub = new IngestionHub([conn]);
         const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
