@@ -18,6 +18,9 @@ interface GmailMessageMeta {
     threadId: string;
     internalDate: string;
     payload: { headers: MessageHeader[] };
+    /** Short plain-text preview Gmail generates itself — present regardless of `format`,
+     *  since it isn't part of `payload` (unlike headers, which `format=metadata` limits). */
+    snippet?: string;
 }
 
 /**
@@ -126,7 +129,7 @@ export class GmailConnector implements IConnector {
                     ts,
                     source: "email",
                     title: subject,
-                    body: from,
+                    body: msg.snippet?.slice(0, 200).trim(),
                     priority,
                     dedupeKey: `email-${id}`,
                     meta: { from, messageId: id, threadId: msg.threadId },

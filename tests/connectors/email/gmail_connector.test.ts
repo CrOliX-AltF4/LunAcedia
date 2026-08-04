@@ -6,7 +6,7 @@ const NOW = Date.now();
 const FRESH_TS = String(NOW - 1_000);
 const OLD_TS = String(NOW - 30 * 3_600_000);
 
-type FakeMessage = { id: string; from: string; subject: string; ts: string };
+type FakeMessage = { id: string; from: string; subject: string; ts: string; snippet?: string };
 
 function makeFetch(messages: FakeMessage[]) {
     return vi.fn().mockImplementation((url: string) => {
@@ -31,6 +31,7 @@ function makeFetch(messages: FakeMessage[]) {
                     Promise.resolve({
                         id: msg.id,
                         internalDate: msg.ts,
+                        snippet: msg.snippet,
                         payload: {
                             headers: [
                                 { name: "From", value: msg.from },
@@ -143,13 +144,64 @@ describe("GmailConnector", () => {
         expect(events[0]!.dedupeKey).toBe("email-abc123");
     });
 
-    it("should use From header as body", async () => {
+    it("should use Gmail's snippet as body, not the sender", async () => {
         vi.stubGlobal(
             "fetch",
-            makeFetch([{ id: "msg1", from: "alice@example.com", subject: "Hi", ts: FRESH_TS }]),
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "alice@example.com",
+                    subject: "Hi",
+                    ts: FRESH_TS,
+                    snippet: "Hey, are we still on for tomorrow?",
+                },
+            ]),
         );
         const events = await new GmailConnector().poll();
-        expect(events[0]!.body).toBe("alice@example.com");
+        expect(events[0]!.body).toBe("Hey, are we still on for tomorrow?");
+    });
+
+    it("should truncate a long snippet to 200 chars", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "a@a.com",
+                    subject: "Hi",
+                    ts: FRESH_TS,
+                    snippet: "x".repeat(300),
+                },
+            ]),
+        );
+        const events = await new GmailConnector().poll();
+        expect(events[0]!.body).toHaveLength(200);
+    });
+
+    it("should leave body undefined when Gmail returns no snippet", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "msg1", from: "a@a.com", subject: "Hi", ts: FRESH_TS }]),
+        );
+        const events = await new GmailConnector().poll();
+        expect(events[0]!.body).toBeUndefined();
+    });
+
+    it("still carries the sender in meta.from even though it's no longer the body", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "alice@example.com",
+                    subject: "Hi",
+                    ts: FRESH_TS,
+                    snippet: "hey",
+                },
+            ]),
+        );
+        const events = await new GmailConnector().poll();
+        expect(events[0]!.meta?.["from"]).toBe("alice@example.com");
     });
 
     it("should return empty array when token refresh fails", async () => {

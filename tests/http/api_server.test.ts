@@ -117,6 +117,17 @@ describe("AcediaApiServer — /api/health", () => {
         expect((res.body as Record<string, unknown>)["status"]).toBe("ok");
     });
 
+    it("should include the package.json version in health response", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/health`);
+        server.stop();
+        expect((res.body as Record<string, unknown>)["version"]).toBe(
+            (await import("../../package.json", { with: { type: "json" } })).default.version,
+        );
+    });
+
     it("should include ai mode in health response", async () => {
         const port = nextPort();
         const server = makeServer(new EventStore());

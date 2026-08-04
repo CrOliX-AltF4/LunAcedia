@@ -1,4 +1,7 @@
 import http from "node:http";
+import * as fs from "node:fs";
+// Aliased — this file already uses `path` as a local variable name for the request URL's pathname.
+import * as nodePath from "node:path";
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { IngestionHub } from "../hub/ingestion_hub.js";
 import type { EventStore } from "../store/event_store.js";
@@ -10,6 +13,19 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
+
+// Read once at module load — package.json doesn't change at runtime. Lets Natsume's panel
+// show which LunAcedia version it's actually talking to, instead of no version at all
+// (the gap that let a shipped feature go out with a stale package.json — see PR history).
+function readPackageVersion(): string {
+    try {
+        const raw = fs.readFileSync(nodePath.join(process.cwd(), "package.json"), "utf-8");
+        return (JSON.parse(raw) as { version?: string }).version ?? "unknown";
+    } catch {
+        return "unknown";
+    }
+}
+const PACKAGE_VERSION = readPackageVersion();
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
     const payload = JSON.stringify(body);
@@ -99,6 +115,7 @@ export class AcediaApiServer {
         if (method === "GET" && path === "/api/health") {
             return json(res, 200, {
                 status: "ok",
+                version: PACKAGE_VERSION,
                 uptime: Math.floor((Date.now() - this.startedAt) / 1000),
                 connectors: this.hub.getConnectorHealth(),
                 events: this.store.size,
