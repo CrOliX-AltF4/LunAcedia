@@ -147,10 +147,15 @@ describe("GmailConnector", () => {
     it("should use Gmail's snippet as body, not the sender", async () => {
         vi.stubGlobal(
             "fetch",
-            makeFetch([{
-                id: "msg1", from: "alice@example.com", subject: "Hi", ts: FRESH_TS,
-                snippet: "Hey, are we still on for tomorrow?",
-            }]),
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "alice@example.com",
+                    subject: "Hi",
+                    ts: FRESH_TS,
+                    snippet: "Hey, are we still on for tomorrow?",
+                },
+            ]),
         );
         const events = await new GmailConnector().poll();
         expect(events[0]!.body).toBe("Hey, are we still on for tomorrow?");
@@ -159,7 +164,15 @@ describe("GmailConnector", () => {
     it("should truncate a long snippet to 200 chars", async () => {
         vi.stubGlobal(
             "fetch",
-            makeFetch([{ id: "msg1", from: "a@a.com", subject: "Hi", ts: FRESH_TS, snippet: "x".repeat(300) }]),
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "a@a.com",
+                    subject: "Hi",
+                    ts: FRESH_TS,
+                    snippet: "x".repeat(300),
+                },
+            ]),
         );
         const events = await new GmailConnector().poll();
         expect(events[0]!.body).toHaveLength(200);
@@ -177,7 +190,15 @@ describe("GmailConnector", () => {
     it("still carries the sender in meta.from even though it's no longer the body", async () => {
         vi.stubGlobal(
             "fetch",
-            makeFetch([{ id: "msg1", from: "alice@example.com", subject: "Hi", ts: FRESH_TS, snippet: "hey" }]),
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "alice@example.com",
+                    subject: "Hi",
+                    ts: FRESH_TS,
+                    snippet: "hey",
+                },
+            ]),
         );
         const events = await new GmailConnector().poll();
         expect(events[0]!.meta?.["from"]).toBe("alice@example.com");
