@@ -4,6 +4,7 @@ import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
+import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 
 const GCAL_API = "https://www.googleapis.com/calendar/v3";
 
@@ -58,16 +59,18 @@ export class GcalConnector implements IConnector {
 
     private readonly clientId: string;
     private readonly clientSecret: string;
-    private readonly refreshToken: string;
+    private readonly staticRefreshToken: string;
     private readonly calendars: string[];
     private readonly lookaheadMs: number;
     private readonly defaultPriority: AcediaEventPriority;
     private readonly urgentWithinMs: number;
+    private readonly tokenStore?: GoogleTokenStore;
 
-    constructor() {
+    constructor(tokenStore?: GoogleTokenStore) {
+        this.tokenStore = tokenStore;
         this.clientId = process.env["GCAL_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GCAL_CLIENT_SECRET"] ?? "";
-        this.refreshToken = process.env["GCAL_REFRESH_TOKEN"] ?? "";
+        this.staticRefreshToken = process.env["GCAL_REFRESH_TOKEN"] ?? "";
 
         const intervalMin = parseInt(process.env["GCAL_POLL_INTERVAL_MIN"] ?? "15", 10);
         this.preferredPollIntervalMs = Math.max(5, intervalMin) * 60_000;
@@ -85,25 +88,31 @@ export class GcalConnector implements IConnector {
         const urgentWithinMin = parseInt(process.env["GCAL_URGENT_WITHIN_MIN"] ?? "15", 10);
         this.urgentWithinMs = Math.max(0, isNaN(urgentWithinMin) ? 15 : urgentWithinMin) * 60_000;
 
-        // GCAL_ENABLED=true gates whether this connector is even constructed — if we're
-        // here without credentials, that's a real misconfiguration, not an intentional
-        // disable. poll() silently returning [] every cycle gave no visibility into this.
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) {
+        // GCAL_ENABLED=true gates whether this connector is even constructed — if we're here
+        // without credentials AND no stored token, that's a real misconfiguration, not an
+        // intentional disable. poll() silently returning [] every cycle gave no visibility.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken()) {
             console.warn(
-                "[GCal] GCAL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed.",
+                "[GCal] GCAL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed (or connect via the dashboard).",
             );
         }
     }
 
+    /** Read fresh, not cached — see GmailConnector.refreshToken() for why. */
+    private refreshToken(): string {
+        return this.tokenStore?.get("gcal") ?? this.staticRefreshToken;
+    }
+
     async poll(): Promise<AcediaEvent[]> {
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) return [];
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return [];
 
         let token: string;
         try {
             token = await getGoogleToken(
                 this.clientId,
                 this.clientSecret,
-                this.refreshToken,
+                refreshToken,
                 "gcal",
             );
         } catch (e) {
@@ -169,7 +178,8 @@ export class GcalConnector implements IConnector {
 
     async executeAction(action: ConnectorAction): Promise<void> {
         if (action.kind !== "update") return;
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) return;
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
         // sourceId = "{calendarId}/{eventId}"
         const slash = action.sourceId.indexOf("/");
@@ -185,7 +195,7 @@ export class GcalConnector implements IConnector {
             token = await getGoogleToken(
                 this.clientId,
                 this.clientSecret,
-                this.refreshToken,
+                refreshToken,
                 "gcal",
             );
         } catch (e) {

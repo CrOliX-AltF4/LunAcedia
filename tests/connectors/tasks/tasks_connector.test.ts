@@ -1,6 +1,7 @@
 ﻿import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TasksConnector } from "../../../source/connectors/tasks/tasks_connector.js";
 import { clearGoogleTokenCache } from "../../../source/auth/google_oauth.js";
+import { GoogleTokenStore } from "../../../source/auth/google_token_store.js";
 
 const NOW = Date.now();
 const DUE_TODAY = new Date(NOW + 2 * 3_600_000).toISOString(); // 2h from now
@@ -168,6 +169,24 @@ describe("TasksConnector", () => {
         expect(c.name).toBe("Tasks");
         expect(c.slug).toBe("tasks");
         expect(c.preferredPollIntervalMs).toBeGreaterThan(0);
+    });
+});
+
+describe("TasksConnector — GoogleTokenStore", () => {
+    it("prefers a stored refresh token over GTASKS_REFRESH_TOKEN once one exists", async () => {
+        delete process.env["GTASKS_REFRESH_TOKEN"];
+        const tokenStore = new GoogleTokenStore("/tmp/does-not-matter.json");
+        await tokenStore.set("gtasks", "rt-from-oauth-flow");
+        vi.stubGlobal("fetch", makeFetch([task("t1", "Buy milk", DUE_TODAY)]));
+        const events = await new TasksConnector(tokenStore).poll();
+        expect(events).toHaveLength(1);
+    });
+
+    it("still returns nothing when neither the store nor GTASKS_REFRESH_TOKEN has a token", async () => {
+        delete process.env["GTASKS_REFRESH_TOKEN"];
+        const tokenStore = new GoogleTokenStore("/tmp/does-not-matter.json");
+        const events = await new TasksConnector(tokenStore).poll();
+        expect(events).toHaveLength(0);
     });
 });
 

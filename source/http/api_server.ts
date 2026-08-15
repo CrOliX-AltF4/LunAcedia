@@ -10,6 +10,8 @@ import type { ActionTierStore } from "../actions/action_tier_store.js";
 import type { PendingActionStore } from "../actions/pending_action_store.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
+import type { GoogleTokenStore } from "../auth/google_token_store.js";
+import { findGoogleOAuthConnector, buildGoogleAuthUrl, exchangeGoogleCode } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
@@ -59,6 +61,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
+ *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
+ *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
+ *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
  *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
@@ -78,6 +83,7 @@ export class AcediaApiServer {
         private readonly tierStore: ActionTierStore,
         private readonly pendingStore: PendingActionStore,
         private readonly emailClassificationStore?: EmailClassificationStore,
+        private readonly googleTokenStore?: GoogleTokenStore,
     ) {}
 
     start(port: number): void {
@@ -104,6 +110,75 @@ export class AcediaApiServer {
         } catch (e) {
             console.error("[API] action error:", (e as Error).message);
             return json(res, 500, { error: "Action failed" });
+        }
+    }
+
+    /** Reachable only by the user's own browser, so we build it from whatever host they used
+     *  to reach the dashboard — matches the redirect Google will send them back to, as long as
+     *  that exact host is registered as an authorized redirect URI in Google Cloud Console.
+     *  OAUTH_REDIRECT_BASE_URL overrides this (reverse proxy / non-default port setups). */
+    private resolveOAuthRedirectUri(req: http.IncomingMessage): string {
+        const override = process.env["OAUTH_REDIRECT_BASE_URL"];
+        if (override) return `${override.replace(/\/$/, "")}/api/oauth/google/callback`;
+        const host = req.headers["host"] ?? "localhost";
+        return `http://${host}/api/oauth/google/callback`;
+    }
+
+    private handleGoogleOAuthStart(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        url: URL,
+    ): void {
+        const key = url.searchParams.get("connector") ?? "";
+        const meta = findGoogleOAuthConnector(key);
+        const clientId = process.env["GOOGLE_CLIENT_ID"];
+        if (!meta) { json(res, 400, { error: "Unknown or missing connector" }); return; }
+        if (!clientId) { json(res, 503, { error: "GOOGLE_CLIENT_ID not configured" }); return; }
+
+        const redirectUri = this.resolveOAuthRedirectUri(req);
+        const authUrl = buildGoogleAuthUrl(clientId, redirectUri, meta.scopes, meta.key);
+        res.writeHead(302, { Location: authUrl });
+        res.end();
+    }
+
+    private async handleGoogleOAuthCallback(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        url: URL,
+    ): Promise<void> {
+        const html = (title: string, body: string): void => {
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<html><body><h2>${title}</h2><p>${body}</p></body></html>`);
+        };
+
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state") ?? "";
+        const oauthError = url.searchParams.get("error");
+        const meta = findGoogleOAuthConnector(state);
+
+        if (oauthError) { html("❌ Connexion refusée", oauthError); return; }
+        if (!code || !meta) { html("❌ Requête invalide", "Code ou connecteur manquant."); return; }
+
+        const clientId = process.env["GOOGLE_CLIENT_ID"] ?? "";
+        const clientSecret = process.env["GOOGLE_CLIENT_SECRET"] ?? "";
+        try {
+            const { refreshToken } = await exchangeGoogleCode(
+                clientId,
+                clientSecret,
+                code,
+                this.resolveOAuthRedirectUri(req),
+            );
+            if (!refreshToken) {
+                html(
+                    "⚠️ Aucun refresh token reçu",
+                    "Révoque l'accès dans myaccount.google.com/permissions puis réessaie — Google n'en renvoie qu'au premier consentement.",
+                );
+                return;
+            }
+            if (this.googleTokenStore) await this.googleTokenStore.set(meta.key, refreshToken);
+            html(`✅ ${meta.label} connecté`, "Tu peux fermer cet onglet.");
+        } catch (e) {
+            html("❌ Erreur", (e as Error).message);
         }
     }
 
@@ -134,6 +209,20 @@ export class AcediaApiServer {
                 events: this.store.size,
                 ai: this.ai.mode,
             });
+        }
+
+        // GET /api/oauth/google/start — no auth required (a plain browser redirect can't
+        // carry an Authorization header; anyone reaching it without an account still needs
+        // to complete Google's own consent screen as the real account owner to get anywhere).
+        if (method === "GET" && path === "/api/oauth/google/start") {
+            return this.handleGoogleOAuthStart(req, res, url);
+        }
+
+        // GET /api/oauth/google/callback — same reasoning, and Google's own `code` param is
+        // single-use/short-lived, which is what actually secures this endpoint, not a Bearer
+        // header a browser redirect can never send.
+        if (method === "GET" && path === "/api/oauth/google/callback") {
+            return this.handleGoogleOAuthCallback(req, res, url);
         }
 
         if (!this.authenticate(req)) {
@@ -304,6 +393,15 @@ export class AcediaApiServer {
             }
             await this.emailClassificationStore.patch(body as Partial<EmailClassificationConfig>);
             return json(res, 200, this.emailClassificationStore.getAll());
+        }
+
+        // GET /api/oauth/google/status
+        if (method === "GET" && path === "/api/oauth/google/status") {
+            return json(
+                res,
+                200,
+                this.googleTokenStore?.status() ?? { gmail: false, gcal: false, gtasks: false },
+            );
         }
 
         // POST /api/chat

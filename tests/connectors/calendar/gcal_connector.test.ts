@@ -1,6 +1,7 @@
 ﻿import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GcalConnector } from "../../../source/connectors/calendar/gcal_connector.js";
 import { clearGoogleTokenCache } from "../../../source/auth/google_oauth.js";
+import { GoogleTokenStore } from "../../../source/auth/google_token_store.js";
 
 const START = new Date(Date.now() + 60 * 60 * 1_000).toISOString();
 const END = new Date(Date.now() + 90 * 60 * 1_000).toISOString();
@@ -202,6 +203,24 @@ describe("GcalConnector", () => {
         expect(upcoming.map((e) => e.title).sort()).toEqual(["Personal", "Work Meeting"]);
         const conflict = events.find((e) => e.type === "calendar.conflict");
         expect(conflict?.priority).toBe("urgent");
+    });
+});
+
+describe("GcalConnector — GoogleTokenStore", () => {
+    it("prefers a stored refresh token over GCAL_REFRESH_TOKEN once one exists", async () => {
+        delete process.env["GCAL_REFRESH_TOKEN"]; // no static fallback — proves the store alone is enough
+        const tokenStore = new GoogleTokenStore("/tmp/does-not-matter.json");
+        await tokenStore.set("gcal", "rt-from-oauth-flow");
+        vi.stubGlobal("fetch", makeFetch([calEvent("ev1", "Meeting")]));
+        const events = await new GcalConnector(tokenStore).poll();
+        expect(events.length).toBeGreaterThan(0);
+    });
+
+    it("still returns nothing when neither the store nor GCAL_REFRESH_TOKEN has a token", async () => {
+        delete process.env["GCAL_REFRESH_TOKEN"];
+        const tokenStore = new GoogleTokenStore("/tmp/does-not-matter.json");
+        const events = await new GcalConnector(tokenStore).poll();
+        expect(events).toHaveLength(0);
     });
 });
 

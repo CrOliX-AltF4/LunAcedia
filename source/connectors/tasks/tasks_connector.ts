@@ -4,6 +4,7 @@ import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
+import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 
 const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
 
@@ -40,37 +41,45 @@ export class TasksConnector implements IConnector {
 
     private readonly clientId: string;
     private readonly clientSecret: string;
-    private readonly refreshToken: string;
+    private readonly staticRefreshToken: string;
     private readonly listId: string;
+    private readonly tokenStore?: GoogleTokenStore;
 
-    constructor() {
+    constructor(tokenStore?: GoogleTokenStore) {
+        this.tokenStore = tokenStore;
         this.clientId = process.env["GTASKS_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GTASKS_CLIENT_SECRET"] ?? "";
-        this.refreshToken = process.env["GTASKS_REFRESH_TOKEN"] ?? "";
+        this.staticRefreshToken = process.env["GTASKS_REFRESH_TOKEN"] ?? "";
         this.listId = process.env["GTASKS_LIST_ID"] ?? "@default";
 
         const intervalMin = parseInt(process.env["GTASKS_POLL_INTERVAL_MIN"] ?? "15", 10);
         this.preferredPollIntervalMs = Math.max(5, intervalMin) * 60_000;
 
-        // GTASKS_ENABLED=true gates whether this connector is even constructed — if we're
-        // here without credentials, that's a real misconfiguration, not an intentional
-        // disable. poll() silently returning [] every cycle gave no visibility into this.
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) {
+        // GTASKS_ENABLED=true gates whether this connector is even constructed — if we're here
+        // without credentials AND no stored token, that's a real misconfiguration, not an
+        // intentional disable. poll() silently returning [] every cycle gave no visibility.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken()) {
             console.warn(
-                "[Tasks] GTASKS_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed.",
+                "[Tasks] GTASKS_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed (or connect via the dashboard).",
             );
         }
     }
 
+    /** Read fresh, not cached — see GmailConnector.refreshToken() for why. */
+    private refreshToken(): string {
+        return this.tokenStore?.get("gtasks") ?? this.staticRefreshToken;
+    }
+
     async poll(): Promise<AcediaEvent[]> {
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) return [];
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return [];
 
         let token: string;
         try {
             token = await getGoogleToken(
                 this.clientId,
                 this.clientSecret,
-                this.refreshToken,
+                refreshToken,
                 "gtasks",
             );
         } catch (e) {
@@ -129,14 +138,15 @@ export class TasksConnector implements IConnector {
 
     async executeAction(action: ConnectorAction): Promise<void> {
         if (action.kind !== "complete") return;
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) return;
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
         let token: string;
         try {
             token = await getGoogleToken(
                 this.clientId,
                 this.clientSecret,
-                this.refreshToken,
+                refreshToken,
                 "gtasks",
             );
         } catch (e) {

@@ -9,6 +9,7 @@ import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
 import { EmailClassificationStore } from "../../source/connectors/email/email_classification_store.js";
+import { GoogleTokenStore } from "../../source/auth/google_token_store.js";
 import type { IAIProvider } from "../../source/ai/ai_provider.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
@@ -81,6 +82,29 @@ function post(
     });
 }
 
+function getNoRedirect(
+    url: string,
+    headers: Record<string, string> = {},
+): Promise<{ status: number; location: string | undefined; body: string }> {
+    return new Promise((resolve, reject) => {
+        http
+            .get(url, { headers }, (res) => {
+                let data = "";
+                res.on("data", (c: Buffer) => {
+                    data += c.toString();
+                });
+                res.on("end", () =>
+                    resolve({
+                        status: res.statusCode ?? 0,
+                        location: res.headers.location,
+                        body: data,
+                    }),
+                );
+            })
+            .on("error", reject);
+    });
+}
+
 function patch(
     url: string,
     body: unknown,
@@ -143,6 +167,7 @@ function makeServer(
     secret: string | undefined = SECRET,
     tierStore: ActionTierStore = new ActionTierStore(),
     emailClassificationStore?: EmailClassificationStore,
+    googleTokenStore?: GoogleTokenStore,
 ): AcediaApiServer {
     return new AcediaApiServer(
         store,
@@ -154,6 +179,7 @@ function makeServer(
         tierStore,
         new PendingActionStore(),
         emailClassificationStore,
+        googleTokenStore,
     );
 }
 
@@ -590,6 +616,96 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
         expect(patchRes.status).toBe(200);
         expect((patchRes.body as { vipSenders: string[] }).vipSenders).toEqual(["boss@corp.com"]);
         expect((getRes.body as { vipSenders: string[] }).vipSenders).toEqual(["boss@corp.com"]);
+    });
+});
+
+describe("AcediaApiServer — GET /api/oauth/google/*", () => {
+    beforeEach(() => {
+        process.env["GOOGLE_CLIENT_ID"] = "test-client-id";
+        process.env["GOOGLE_CLIENT_SECRET"] = "test-client-secret";
+    });
+    afterEach(() => {
+        delete process.env["GOOGLE_CLIENT_ID"];
+        delete process.env["GOOGLE_CLIENT_SECRET"];
+        vi.unstubAllGlobals();
+    });
+
+    function tmpTokenStore(): GoogleTokenStore {
+        return new GoogleTokenStore(
+            path.join(os.tmpdir(), `lunacedia-test-tokens-${Date.now()}-${Math.random().toString(36).slice(2)}.json`),
+        );
+    }
+
+    it("start: redirects to Google's consent screen without requiring auth", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore(), [], nullAI, undefined);
+        server.start(port);
+        const res = await getNoRedirect(`http://localhost:${port}/api/oauth/google/start?connector=gmail`);
+        server.stop();
+        expect(res.status).toBe(302);
+        expect(res.location).toContain("https://accounts.google.com/o/oauth2/v2/auth");
+        expect(res.location).toContain("state=gmail");
+    });
+
+    it("start: returns 400 for an unknown connector", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(`http://localhost:${port}/api/oauth/google/start?connector=dropbox`);
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("start: returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
+        delete process.env["GOOGLE_CLIENT_ID"];
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(`http://localhost:${port}/api/oauth/google/start?connector=gmail`);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("callback: exchanges the code, persists the token, and does not require auth", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ refresh_token: "rt-abc" }),
+            }),
+        );
+        const port = nextPort();
+        const tokenStore = tmpTokenStore();
+        const server = makeServer(new EventStore(), [], nullAI, SECRET, new ActionTierStore(), undefined, tokenStore);
+        server.start(port);
+        const res = await getNoRedirect(`http://localhost:${port}/api/oauth/google/callback?code=abc&state=gmail`);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("Gmail connecté");
+        expect(tokenStore.get("gmail")).toBe("rt-abc");
+    });
+
+    it("callback: shows an error page and does not throw when Google reports an error", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/callback?error=access_denied&state=gmail`,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("refusée");
+    });
+
+    it("status: reports which connectors have a stored token", async () => {
+        const port = nextPort();
+        const tokenStore = tmpTokenStore();
+        await tokenStore.set("gcal", "rt-xyz");
+        const server = makeServer(new EventStore(), [], nullAI, SECRET, new ActionTierStore(), undefined, tokenStore);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/oauth/google/status`, AUTH);
+        server.stop();
+        expect(res.body).toEqual({ gmail: false, gcal: true, gtasks: false });
     });
 });
 
