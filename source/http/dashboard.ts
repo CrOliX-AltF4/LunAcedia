@@ -52,6 +52,11 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 #digest-box h3{color:var(--accent);margin-bottom:12px}
 #digest-text{font-size:14px;line-height:1.7;white-space:pre-wrap}
 #digest-close{margin-top:14px}
+/* command bar */
+#cmdbar{padding:10px 20px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)}
+#cmd-input{flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:6px;font-size:13px;font-family:inherit}
+#cmd-input:focus{outline:none;border-color:var(--accent)}
+#cmd-status{font-size:12px;color:var(--muted);white-space:nowrap}
 /* pending actions */
 #pending{padding:0 20px;max-width:900px}
 #pending.empty{display:none}
@@ -133,6 +138,12 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="markAll()">Mark all read</button>
 </header>
+
+<div id="cmdbar">
+  <input id="cmd-input" type="text" placeholder="Dis-moi ce qu'il faut faire… (ex. crée une tâche pour rappeler le rendez-vous)" onkeydown="if(event.key==='Enter')sendCommand()" />
+  <button onclick="sendCommand()">Envoyer</button>
+  <span id="cmd-status"></span>
+</div>
 
 <div id="filters">
   <span class="chip active" data-f="all">All</span>
@@ -247,6 +258,24 @@ async function openDigestLike(path,title){
     t.textContent=data.response||data.proposals||data.error||'No response';
   }catch(e){t.textContent='Error: '+e.message;}
 }
+async function sendCommand(){
+  const input=document.getElementById('cmd-input');
+  const status=document.getElementById('cmd-status');
+  const text=input.value.trim();
+  if(!text)return;
+  status.textContent='…';
+  try{
+    const r=await req('/api/intent',{method:'POST',body:JSON.stringify({text})});
+    if(r.status===503){status.textContent="IA non configurée.";return;}
+    const data=await r.json();
+    if(!data.matched){status.textContent="Je n'ai pas compris de commande.";return;}
+    if(data.status==='executed'){status.textContent='✓ Fait.';input.value='';}
+    else if(data.status==='pending'){status.textContent='En attente de confirmation.';input.value='';loadPending();}
+    else if(data.status==='refused'){status.textContent='Refusé — action manuelle uniquement.';}
+    else{status.textContent='Erreur.';}
+  }catch(e){status.textContent='Erreur.';}
+}
+
 function openDigest(){openDigestLike('/api/digest','Digest');}
 function openProposals(){openDigestLike('/api/proposals','Propositions');}
 function closeDigest(){document.getElementById('digest').classList.remove('open');}

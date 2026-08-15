@@ -824,6 +824,119 @@ describe("AcediaApiServer — POST /api/chat", () => {
     });
 });
 
+describe("AcediaApiServer — POST /api/intent", () => {
+    it("should return 503 when AI provider is none", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "mark it read" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("should return 400 when text is missing", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn(), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, {}, AUTH);
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("returns { matched: false } when the AI reply doesn't parse into a known action", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn().mockResolvedValue('{"matched": false}'), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "what's the weather" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ matched: false });
+    });
+
+    it("dispatches a matched intent through the same tier as POST /api/actions — confirm queues it", async () => {
+        const port = nextPort();
+        const conn = makeConnector("Tasks", async () => {});
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue('{"matched":true,"connector":"Tasks","action":{"kind":"create_task","fields":{"title":"Buy milk"}}}'),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [conn], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "reminds me to buy milk" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const body = res.body as { matched: boolean; status: string; id: string };
+        expect(body.matched).toBe(true);
+        expect(body.status).toBe("pending");
+        expect(body.id).toBeTruthy();
+    });
+
+    it("dispatches through the auto tier when configured, executing immediately", async () => {
+        const port = nextPort();
+        let called = false;
+        const conn = makeConnector("Gmail", async () => {
+            called = true;
+        });
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ mark_email_read: "auto" });
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue('{"matched":true,"connector":"Gmail","action":{"kind":"mark_email_read","sourceId":"msg1"}}'),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [conn], mockAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "mark that email as read" }, AUTH);
+        server.stop();
+        const body = res.body as { status: string };
+        expect(body.status).toBe("executed");
+        expect(called).toBe(true);
+    });
+
+    it("never executes merge_pr, even if the AI hallucinates one", async () => {
+        const port = nextPort();
+        let called = false;
+        const conn = makeConnector("GitHub", async () => {
+            called = true;
+        });
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue('{"matched":true,"connector":"GitHub","action":{"kind":"merge_pr","sourceId":"o/r#1"}}'),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [conn], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "merge my PR please" }, AUTH);
+        server.stop();
+        expect(res.body).toEqual({ matched: false });
+        expect(called).toBe(false);
+    });
+
+    it("returns matched:false, not a 502, when the AI reply is malformed JSON", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn().mockResolvedValue("not json"), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "do something" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ matched: false });
+    });
+
+    it("should return 502 when the AI provider itself throws", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn().mockRejectedValue(new Error("timeout")), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, { text: "do something" }, AUTH);
+        server.stop();
+        expect(res.status).toBe(502);
+    });
+});
+
 describe("AcediaApiServer — GET /api/digest", () => {
     it("should return 503 when AI provider is none", async () => {
         const port = nextPort();

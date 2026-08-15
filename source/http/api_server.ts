@@ -5,6 +5,7 @@ import type { EventStore } from "../store/event_store.js";
 import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import { formatProposalsPrompt } from "../ai/ai_provider.js";
+import { formatIntentPrompt, parseIntentResponse } from "../ai/intent_parser.js";
 import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
 import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
@@ -69,6 +70,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
  *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
+ *   POST /api/intent               body: { text: string }  → parses free text into a
+ *                                  structured action and dispatches it via the same tier
+ *                                  gate as POST /api/actions (requires AI_PROVIDER != none)
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
  *   GET  /api/proposals            suggest next actions for unread urgent/conflict items (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
@@ -134,6 +138,43 @@ export class AcediaApiServer {
         } catch (e) {
             console.error("[API] action error:", (e as Error).message);
             return json(res, 500, { error: "Action failed" });
+        }
+    }
+
+    /**
+     * Connector lookup + tier check, shared by POST /api/actions and POST /api/intent — the
+     * one place that decides auto/pending/refused, so an intent-parsed action is gated by
+     * exactly the same rule a directly-submitted one is, not a parallel copy of it.
+     */
+    private async dispatchAction(
+        connectorName: string,
+        action: ConnectorAction,
+    ): Promise<
+        | { status: "not_found" }
+        | { status: "unsupported" }
+        | { status: "refused"; reason: string }
+        | { status: "pending"; id: string }
+        | { status: "executed" }
+        | { status: "error" }
+    > {
+        const connector = this.connectors.find((c) => c.name === connectorName);
+        if (!connector) return { status: "not_found" };
+        if (!connector.executeAction) return { status: "unsupported" };
+
+        const tier = this.tierStore.getTier(action.kind);
+        if (tier === "manual") {
+            return { status: "refused", reason: `'${action.kind}' is set to manual — not executable via this endpoint` };
+        }
+        if (tier === "confirm") {
+            const pending = this.pendingStore.create(connectorName, action);
+            return { status: "pending", id: pending.id };
+        }
+        try {
+            await connector.executeAction(action);
+            return { status: "executed" };
+        } catch (e) {
+            console.error("[API] action error:", (e as Error).message);
+            return { status: "error" };
         }
     }
 
@@ -335,27 +376,13 @@ export class AcediaApiServer {
                 });
             }
 
-            const connector = this.connectors.find((c) => c.name === connectorName);
-            if (!connector) {
-                return json(res, 404, { error: `Connector '${connectorName}' not found` });
-            }
-            if (!connector.executeAction) {
-                return json(res, 400, {
-                    error: `Connector '${connectorName}' does not support actions`,
-                });
-            }
-
-            const tier = this.tierStore.getTier(action.kind);
-            if (tier === "manual") {
-                return json(res, 403, {
-                    error: `'${action.kind}' is set to manual — not executable via this endpoint`,
-                });
-            }
-            if (tier === "confirm") {
-                const pending = this.pendingStore.create(connectorName, action);
-                return json(res, 202, { status: "pending", id: pending.id });
-            }
-            return this.executeConnectorAction(res, connector, action);
+            const result = await this.dispatchAction(connectorName, action);
+            if (result.status === "not_found") return json(res, 404, { error: `Connector '${connectorName}' not found` });
+            if (result.status === "unsupported") return json(res, 400, { error: `Connector '${connectorName}' does not support actions` });
+            if (result.status === "refused") return json(res, 403, { error: result.reason });
+            if (result.status === "pending") return json(res, 202, { status: "pending", id: result.id });
+            if (result.status === "error") return json(res, 500, { error: "Action failed" });
+            return json(res, 204, null);
         }
 
         // POST /api/actions/:id/confirm
@@ -465,6 +492,45 @@ export class AcediaApiServer {
                 console.error("[API] chat error:", (e as Error).message);
                 return json(res, 502, { error: "AI provider error" });
             }
+        }
+
+        // POST /api/intent — translates free text (a voice command relayed as text, "crée
+        // une tâche pour rappeler le rendez-vous") into a structured action and dispatches it
+        // through the exact same tier gate as POST /api/actions. Never trusts the AI's JSON
+        // directly — parseIntentResponse() re-validates every field before dispatchAction()
+        // ever sees it, and merge_pr is refused unconditionally regardless of what the model
+        // outputs (see intent_parser.ts).
+        if (method === "POST" && path === "/api/intent") {
+            if (this.ai.mode === "none") {
+                return json(res, 503, { error: "AI_PROVIDER not configured" });
+            }
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const text = (body as Record<string, unknown>)["text"];
+            if (typeof text !== "string" || text.trim().length === 0) {
+                return json(res, 400, { error: "Body must be { text: string }" });
+            }
+            let raw: string;
+            try {
+                raw = await this.ai.chat(formatIntentPrompt(text.trim()));
+            } catch (e) {
+                console.error("[API] intent error:", (e as Error).message);
+                return json(res, 502, { error: "AI provider error" });
+            }
+            const intent = parseIntentResponse(raw);
+            if (!intent) return json(res, 200, { matched: false });
+
+            const result = await this.dispatchAction(intent.connector, intent.action);
+            if (result.status === "not_found") return json(res, 200, { matched: false });
+            if (result.status === "unsupported") return json(res, 200, { matched: false });
+            if (result.status === "refused") return json(res, 200, { matched: true, ...intent, status: "refused", reason: result.reason });
+            if (result.status === "pending") return json(res, 200, { matched: true, ...intent, status: "pending", id: result.id });
+            if (result.status === "error") return json(res, 200, { matched: true, ...intent, status: "error" });
+            return json(res, 200, { matched: true, ...intent, status: "executed" });
         }
 
         // GET /api/digest
