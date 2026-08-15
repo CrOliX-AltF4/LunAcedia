@@ -4,6 +4,7 @@ import type { IngestionHub } from "../hub/ingestion_hub.js";
 import type { EventStore } from "../store/event_store.js";
 import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
+import { formatProposalsPrompt } from "../ai/ai_provider.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
@@ -66,6 +67,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
  *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
+ *   GET  /api/proposals            suggest next actions for unread urgent/conflict items (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
  */
@@ -441,6 +443,26 @@ export class AcediaApiServer {
                 return json(res, 200, { response, count: events.length });
             } catch (e) {
                 console.error("[API] digest error:", (e as Error).message);
+                return json(res, 502, { error: "AI provider error" });
+            }
+        }
+
+        // GET /api/proposals — butler-layer suggestions for current urgent/conflict items.
+        // Read-only: proposes in plain text, never executes — acting on a proposal still
+        // goes through POST /api/actions and its autonomy tiers like any other action.
+        if (method === "GET" && path === "/api/proposals") {
+            if (this.ai.mode === "none") {
+                return json(res, 503, { error: "AI_PROVIDER not configured" });
+            }
+            const { events } = this.store.query({ unread: true, limit: 100 });
+            const relevant = (events as AcediaEvent[]).filter(
+                (e) => e.priority === "urgent" || e.type === "calendar.conflict",
+            );
+            try {
+                const proposals = await this.ai.chat(formatProposalsPrompt(relevant));
+                return json(res, 200, { proposals, count: relevant.length });
+            } catch (e) {
+                console.error("[API] proposals error:", (e as Error).message);
                 return json(res, 502, { error: "AI provider error" });
             }
         }

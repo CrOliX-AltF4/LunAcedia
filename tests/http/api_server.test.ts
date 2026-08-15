@@ -860,6 +860,63 @@ describe("AcediaApiServer — GET /api/digest", () => {
     });
 });
 
+describe("AcediaApiServer — GET /api/proposals", () => {
+    it("should return 503 when AI provider is none", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("only sends urgent/conflict unread events to the AI, not routine ones", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "info", title: "Newsletter" }));
+        store.push(makeEvent({ dedupeKey: "e2", priority: "urgent", title: "Server down" }));
+        store.push(makeEvent({ dedupeKey: "e3", type: "calendar.conflict", title: "Overlap", priority: "urgent" }));
+        const chatSpy = vi.fn().mockResolvedValue("1. Restart the server. 2. Decline one meeting.");
+        const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const body = res.body as { proposals: string; count: number };
+        expect(body.count).toBe(2);
+        expect(body.proposals).toContain("Restart the server");
+        const promptSent = chatSpy.mock.calls[0]![0] as string;
+        expect(promptSent).toContain("Server down");
+        expect(promptSent).toContain("Overlap");
+        expect(promptSent).not.toContain("Newsletter");
+    });
+
+    it("does not mark events as read — proposals are read-only", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "urgent", title: "Urgent thing" }));
+        const mockAI: IAIProvider = { mode: "natsume", chat: vi.fn().mockResolvedValue("Do it."), digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(store.unreadCount).toBe(1);
+    });
+
+    it("should return 502 when AI provider throws", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "urgent" }));
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn().mockRejectedValue(new Error("Timeout")), digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(res.status).toBe(502);
+    });
+});
+
 describe("AcediaApiServer — /api/devices/push-token", () => {
     it("should return 503 when FCM is not configured", async () => {
         const port = nextPort();
