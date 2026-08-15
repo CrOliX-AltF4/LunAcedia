@@ -52,6 +52,32 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 #digest-box h3{color:var(--accent);margin-bottom:12px}
 #digest-text{font-size:14px;line-height:1.7;white-space:pre-wrap}
 #digest-close{margin-top:14px}
+/* pending actions */
+#pending{padding:0 20px;max-width:900px}
+#pending.empty{display:none}
+.pending-row{background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.pending-row span{flex:1;font-size:13px}
+.pending-row button{padding:4px 12px;font-size:12px}
+.pending-row .confirm{border-color:var(--accent);color:var(--accent)}
+.pending-row .cancel{color:var(--urgent)}
+/* settings modal */
+#settings{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:100}
+#settings.open{display:flex}
+#settings-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:560px;width:90%;max-height:85vh;overflow-y:auto}
+#settings-box h3{color:var(--accent);margin-bottom:14px}
+#settings-box h4{font-size:13px;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+#settings-box h4:first-of-type{margin-top:0}
+.src-row{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px}
+.src-row .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.src-row .dot.on{background:#4ade80}
+.src-row span{flex:1}
+.tier-row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px}
+.tier-row span{flex:1}
+select,textarea{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:inherit}
+textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
+.field-hint{font-size:11px;color:var(--muted);margin:-6px 0 8px}
+#settings-save{margin-top:14px}
+#settings-status{font-size:12px;color:var(--accent);margin-left:10px}
 </style>
 </head>
 <body>
@@ -67,9 +93,34 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 
 <div id="digest">
   <div id="digest-box">
-    <h3>Digest</h3>
+    <h3 id="digest-title">Digest</h3>
     <div id="digest-text">Loading…</div>
     <button id="digest-close" onclick="closeDigest()">Close</button>
+  </div>
+</div>
+
+<div id="settings">
+  <div id="settings-box">
+    <h3>⚙ Réglages</h3>
+
+    <h4>Sources</h4>
+    <div id="src-list"></div>
+
+    <h4>Paliers d'autonomie</h4>
+    <div class="tier-row"><span>Répondre à un email</span><select data-tier="reply"><option value="auto">Auto</option><option value="confirm">Confirmation</option><option value="manual">Manuel</option></select></div>
+    <div class="tier-row"><span>Compléter une tâche</span><select data-tier="complete"><option value="auto">Auto</option><option value="confirm">Confirmation</option><option value="manual">Manuel</option></select></div>
+    <div class="tier-row"><span>Modifier un événement</span><select data-tier="update"><option value="auto">Auto</option><option value="confirm">Confirmation</option><option value="manual">Manuel</option></select></div>
+
+    <h4>Classification email</h4>
+    <div class="field-hint">Un par ligne. Expéditeurs/mots-clés VIP et urgents passent en priorité urgente, mots-clés normaux en priorité normale.</div>
+    <textarea id="vip-senders" placeholder="boss@corp.com"></textarea>
+    <textarea id="urgent-keywords" placeholder="urgent&#10;deadline"></textarea>
+    <textarea id="normal-keywords" placeholder="newsletter"></textarea>
+
+    <button id="settings-save" onclick="saveSettings()">Enregistrer</button>
+    <span id="settings-status"></span>
+    <br><br>
+    <button onclick="closeSettings()">Fermer</button>
   </div>
 </div>
 
@@ -77,7 +128,9 @@ button:hover{border-color:var(--accent);color:var(--accent)}
   <h1>◆ LunAcedia</h1>
   <span id="badge">0</span>
   <div class="spacer"></div>
+  <button onclick="openProposals()">Propositions</button>
   <button onclick="openDigest()">Digest</button>
+  <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="markAll()">Mark all read</button>
 </header>
 
@@ -94,6 +147,7 @@ button:hover{border-color:var(--accent);color:var(--accent)}
   <span class="chip" data-f="ha">${CONNECTOR_REGISTRY.ha.label}</span>
 </div>
 
+<div id="pending" class="empty"></div>
 <div id="list"></div>
 <div id="empty">No events yet.</div>
 
@@ -180,18 +234,127 @@ async function markAll(){
   await req('/api/events/read-all',{method:'POST'}).catch(()=>{});
 }
 
-async function openDigest(){
+async function openDigestLike(path,title){
   const d=document.getElementById('digest');
+  const h=document.getElementById('digest-title');
   const t=document.getElementById('digest-text');
+  h.textContent=title;
   d.classList.add('open');
   t.textContent='Loading…';
   try{
-    const r=await req('/api/digest');
+    const r=await req(path);
     const data=await r.json();
-    t.textContent=data.response||data.error||'No response';
+    t.textContent=data.response||data.proposals||data.error||'No response';
   }catch(e){t.textContent='Error: '+e.message;}
 }
+function openDigest(){openDigestLike('/api/digest','Digest');}
+function openProposals(){openDigestLike('/api/proposals','Propositions');}
 function closeDigest(){document.getElementById('digest').classList.remove('open');}
+
+// ── Pending actions ──────────────────────────────────────────────────────────
+async function loadPending(){
+  try{
+    const r=await req('/api/actions/pending');
+    if(!r.ok)return;
+    const pending=await r.json();
+    renderPending(pending);
+  }catch(e){if(e.message!=='401')console.error(e);}
+}
+
+function describeAction(a){
+  if(a.action.kind==='reply')return 'Répondre : '+esc(a.action.body||'').slice(0,60);
+  if(a.action.kind==='complete')return 'Compléter la tâche '+esc(a.action.sourceId);
+  if(a.action.kind==='update')return 'Modifier l\\'événement '+esc(a.action.sourceId);
+  return 'Action '+esc(a.action.kind);
+}
+
+function renderPending(pending){
+  const el=document.getElementById('pending');
+  if(!pending.length){el.className='empty';el.innerHTML='';return;}
+  el.className='';
+  // id passed via data-id + this, never interpolated straight into onclick as a JS string
+  // argument — see dashboard.test.ts's toggle()/dedupeKey regression guard for why.
+  el.innerHTML=pending.map(p=>\`
+<div class="pending-row" data-id="\${esc(p.id)}">
+  <span>\${describeAction(p)}</span>
+  <button class="confirm" onclick="confirmPending(this)">Confirmer</button>
+  <button class="cancel" onclick="cancelPending(this)">Annuler</button>
+</div>\`).join('');
+}
+
+async function confirmPending(btn){
+  const id=btn.closest('.pending-row').dataset.id;
+  await req('/api/actions/'+encodeURIComponent(id)+'/confirm',{method:'POST'}).catch(()=>{});
+  loadPending();
+}
+async function cancelPending(btn){
+  const id=btn.closest('.pending-row').dataset.id;
+  await req('/api/actions/'+encodeURIComponent(id)+'/cancel',{method:'POST'}).catch(()=>{});
+  loadPending();
+}
+
+// ── Settings (sources / tiers / email rules) ─────────────────────────────────
+const GOOGLE_SOURCES=[{key:'gmail',label:'Gmail'},{key:'gcal',label:'Google Calendar'},{key:'gtasks',label:'Google Tasks'}];
+
+async function openSettings(){
+  document.getElementById('settings').classList.add('open');
+  try{
+    const [statusRes,tiersRes,rulesRes]=await Promise.all([
+      req('/api/oauth/google/status'),
+      req('/api/config/tiers'),
+      req('/api/config/email-rules').catch(()=>null),
+    ]);
+    const status=await statusRes.json();
+    renderSources(status);
+    const tiers=await tiersRes.json();
+    for(const k in tiers){
+      const sel=document.querySelector('select[data-tier="'+k+'"]');
+      if(sel)sel.value=tiers[k];
+    }
+    if(rulesRes&&rulesRes.ok){
+      const rules=await rulesRes.json();
+      document.getElementById('vip-senders').value=(rules.vipSenders||[]).join('\\n');
+      document.getElementById('urgent-keywords').value=(rules.urgentKeywords||[]).join('\\n');
+      document.getElementById('normal-keywords').value=(rules.normalKeywords||[]).join('\\n');
+    }
+  }catch(e){console.error(e);}
+}
+function closeSettings(){document.getElementById('settings').classList.remove('open');}
+
+function renderSources(status){
+  const el=document.getElementById('src-list');
+  el.innerHTML=GOOGLE_SOURCES.map(s=>\`
+<div class="src-row">
+  <span class="dot\${status[s.key]?' on':''}"></span>
+  <span>\${esc(s.label)} — \${status[s.key]?'connecté':'non connecté'}</span>
+  <button onclick="connectSource('\${s.key}')">\${status[s.key]?'Reconnecter':'Connecter'}</button>
+</div>\`).join('');
+}
+
+function connectSource(key){
+  const url='/api/oauth/google/start?connector='+encodeURIComponent(key);
+  window.open(url,'_blank','width=520,height=680');
+}
+
+async function saveSettings(){
+  const statusEl=document.getElementById('settings-status');
+  statusEl.textContent='Enregistrement…';
+  const tiers={};
+  document.querySelectorAll('select[data-tier]').forEach(sel=>{tiers[sel.dataset.tier]=sel.value;});
+  const rules={
+    vipSenders:document.getElementById('vip-senders').value.split('\\n').map(s=>s.trim()).filter(Boolean),
+    urgentKeywords:document.getElementById('urgent-keywords').value.split('\\n').map(s=>s.trim()).filter(Boolean),
+    normalKeywords:document.getElementById('normal-keywords').value.split('\\n').map(s=>s.trim()).filter(Boolean),
+  };
+  try{
+    await Promise.all([
+      req('/api/config/tiers',{method:'PATCH',body:JSON.stringify(tiers)}),
+      req('/api/config/email-rules',{method:'PATCH',body:JSON.stringify(rules)}),
+    ]);
+    statusEl.textContent='Enregistré ✓';
+    setTimeout(()=>{statusEl.textContent='';},2000);
+  }catch(e){statusEl.textContent='Erreur';}
+}
 
 document.querySelectorAll('.chip').forEach(c=>{
   c.addEventListener('click',()=>{
@@ -207,11 +370,12 @@ document.querySelectorAll('.chip').forEach(c=>{
   try{
     const r=await fetch('/api/events?limit=100');
     if(r.status===401){showAuth();return;}
-    if(r.ok){hideAuth();events=(await r.json()).events||[];render();}
+    if(r.ok){hideAuth();events=(await r.json()).events||[];render();loadPending();}
   }catch(e){console.error(e);}
 })();
 
 setInterval(load,15000);
+setInterval(loadPending,15000);
 </script>
 </body>
 </html>`;

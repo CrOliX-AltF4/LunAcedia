@@ -160,6 +160,13 @@ function makeConnector(
 
 const nullAI = new NullAIProvider();
 
+// Isolated tmp file per call — writing tiers must never touch the real ~/.lunacedia.
+function tmpTierStore(): ActionTierStore {
+    return new ActionTierStore(
+        path.join(os.tmpdir(), `lunacedia-test-tiers-${Date.now()}-${Math.random().toString(36).slice(2)}.json`),
+    );
+}
+
 function makeServer(
     store: EventStore,
     connectors: IConnector[] = [],
@@ -379,7 +386,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         const conn = makeConnector("Gmail", async () => {
             called = true;
         });
-        const tierStore = new ActionTierStore();
+        const tierStore = tmpTierStore();
         await tierStore.patch({ reply: "auto" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
         server.start(port);
@@ -400,7 +407,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         const conn = makeConnector("Gmail", async () => {
             called = true;
         });
-        const tierStore = new ActionTierStore();
+        const tierStore = tmpTierStore();
         await tierStore.patch({ reply: "manual" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
         server.start(port);
