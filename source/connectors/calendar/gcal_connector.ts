@@ -41,7 +41,13 @@ function parseCalendars(raw: string): string[] {
  *   GCAL_CALENDARS='["primary","work@group.calendar.google.com"]' (default: ["primary"])
  *   GCAL_LOOKAHEAD_HOURS=24    — how far ahead to fetch (default 24)
  *   GCAL_POLL_INTERVAL_MIN=15
- *   GCAL_PRIORITY=normal       — priority applied to all events (urgent|normal|info)
+ *   GCAL_PRIORITY=normal       — floor priority applied to every event (urgent|normal|info)
+ *   GCAL_URGENT_WITHIN_MIN=15  — an event starting within this many minutes always escalates
+ *                                to urgent, regardless of GCAL_PRIORITY (0 disables escalation)
+ *
+ * Also emits synthetic "calendar.conflict" events when two timed events (across any polled
+ * calendar) overlap — all-day events are excluded, they're context, not a real time
+ * commitment that can conflict. Deterministic, no LLM (design rule — see README).
  */
 export class GcalConnector implements IConnector {
     readonly slug: ConnectorSlug = "calendar";
@@ -56,6 +62,7 @@ export class GcalConnector implements IConnector {
     private readonly calendars: string[];
     private readonly lookaheadMs: number;
     private readonly defaultPriority: AcediaEventPriority;
+    private readonly urgentWithinMs: number;
 
     constructor() {
         this.clientId = process.env["GCAL_CLIENT_ID"] ?? "";
@@ -74,6 +81,9 @@ export class GcalConnector implements IConnector {
         this.defaultPriority = (
             ["urgent", "normal", "info"].includes(raw) ? raw : "normal"
         ) as AcediaEventPriority;
+
+        const urgentWithinMin = parseInt(process.env["GCAL_URGENT_WITHIN_MIN"] ?? "15", 10);
+        this.urgentWithinMs = Math.max(0, isNaN(urgentWithinMin) ? 15 : urgentWithinMin) * 60_000;
 
         // GCAL_ENABLED=true gates whether this connector is even constructed — if we're
         // here without credentials, that's a real misconfiguration, not an intentional
@@ -109,7 +119,52 @@ export class GcalConnector implements IConnector {
             this.calendars.map((calId) => this.pollCalendar(calId, timeMin, timeMax, headers)),
         );
 
-        return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+        const events = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+        return [...events, ...this.detectConflicts(events)];
+    }
+
+    /**
+     * Pairwise overlap check across every timed (non-all-day) event in this poll batch,
+     * cross-calendar included. Strict overlap only — back-to-back events that just touch
+     * (A ends exactly when B starts) are not a conflict.
+     */
+    private detectConflicts(events: AcediaEvent[]): AcediaEvent[] {
+        const timed = events
+            .map((e) => {
+                const start = e.meta?.["start"];
+                const end = e.meta?.["end"];
+                if (typeof start !== "string" || typeof end !== "string") return null;
+                if (!start.includes("T") || !end.includes("T")) return null; // all-day — excluded
+                const startMs = new Date(start).getTime();
+                const endMs = new Date(end).getTime();
+                if (isNaN(startMs) || isNaN(endMs)) return null;
+                return { event: e, startMs, endMs };
+            })
+            .filter((x): x is { event: AcediaEvent; startMs: number; endMs: number } => x !== null);
+
+        const conflicts: AcediaEvent[] = [];
+        for (let i = 0; i < timed.length; i++) {
+            for (let j = i + 1; j < timed.length; j++) {
+                const a = timed[i]!;
+                const b = timed[j]!;
+                const overlaps = a.startMs < b.endMs && b.startMs < a.endMs;
+                if (!overlaps) continue;
+
+                const idA = String(a.event.meta?.["eventId"] ?? a.event.dedupeKey);
+                const idB = String(b.event.meta?.["eventId"] ?? b.event.dedupeKey);
+                const [firstId, secondId] = [idA, idB].sort();
+                conflicts.push({
+                    type: "calendar.conflict",
+                    ts: Math.min(a.startMs, b.startMs),
+                    source: "calendar",
+                    title: `Conflit : "${a.event.title}" chevauche "${b.event.title}"`,
+                    priority: "urgent",
+                    dedupeKey: `cal-conflict-${firstId}-${secondId}`,
+                    meta: { eventAId: idA, eventBId: idB },
+                });
+            }
+        }
+        return conflicts;
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
@@ -164,6 +219,14 @@ export class GcalConnector implements IConnector {
         }
     }
 
+    /** GCAL_PRIORITY is a floor — an event starting within GCAL_URGENT_WITHIN_MIN always escalates to urgent. */
+    private computePriority(startTs: number): AcediaEventPriority {
+        if (this.urgentWithinMs <= 0) return this.defaultPriority;
+        const msUntil = startTs - Date.now();
+        if (msUntil >= 0 && msUntil <= this.urgentWithinMs) return "urgent";
+        return this.defaultPriority;
+    }
+
     private async pollCalendar(
         calId: string,
         timeMin: string,
@@ -205,7 +268,7 @@ export class GcalConnector implements IConnector {
                 title: ev.summary ?? "(no title)",
                 body: ev.description?.slice(0, 200).trim(),
                 url: ev.htmlLink,
-                priority: this.defaultPriority,
+                priority: this.computePriority(ts),
                 dedupeKey: `cal-${ev.id}`,
                 meta: {
                     calendarId: calId,

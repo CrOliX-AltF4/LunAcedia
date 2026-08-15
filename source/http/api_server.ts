@@ -6,6 +6,10 @@ import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
+import type { ActionTierStore } from "../actions/action_tier_store.js";
+import type { PendingActionStore } from "../actions/pending_action_store.js";
+import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
+import type { EmailClassificationConfig } from "../types/email_classification.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
@@ -46,6 +50,15 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/stats
  *   POST /api/connectors/:slug/reconnect  → { ok: boolean, error?: string }
  *   POST /api/actions              body: ConnectorAction & { connector: string }
+ *                                  → 204 (auto tier, executed) | 202 { id } (confirm tier, pending)
+ *                                  | 403 (manual tier — not executable via this endpoint)
+ *   POST /api/actions/:id/confirm  → 204, executes a pending action
+ *   POST /api/actions/:id/cancel   → 204, discards a pending action
+ *   GET  /api/actions/pending      → PendingAction[]
+ *   GET  /api/config/tiers         → ActionTierConfig
+ *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
+ *   GET  /api/config/email-rules   → EmailClassificationConfig
+ *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
  *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
@@ -62,6 +75,9 @@ export class AcediaApiServer {
         private readonly fcm: FcmSender | null,
         private readonly ai: IAIProvider,
         private readonly secret: string | undefined,
+        private readonly tierStore: ActionTierStore,
+        private readonly pendingStore: PendingActionStore,
+        private readonly emailClassificationStore?: EmailClassificationStore,
     ) {}
 
     start(port: number): void {
@@ -75,6 +91,20 @@ export class AcediaApiServer {
 
     stop(): void {
         this.server?.close();
+    }
+
+    private async executeConnectorAction(
+        res: http.ServerResponse,
+        connector: IConnector,
+        action: ConnectorAction,
+    ): Promise<void> {
+        try {
+            await connector.executeAction!(action);
+            return json(res, 204, null);
+        } catch (e) {
+            console.error("[API] action error:", (e as Error).message);
+            return json(res, 500, { error: "Action failed" });
+        }
     }
 
     private authenticate(req: http.IncomingMessage): boolean {
@@ -202,13 +232,78 @@ export class AcediaApiServer {
                 });
             }
 
-            try {
-                await connector.executeAction(action);
-                return json(res, 204, null);
-            } catch (e) {
-                console.error("[API] action error:", (e as Error).message);
-                return json(res, 500, { error: "Action failed" });
+            const tier = this.tierStore.getTier(action.kind);
+            if (tier === "manual") {
+                return json(res, 403, {
+                    error: `'${action.kind}' is set to manual — not executable via this endpoint`,
+                });
             }
+            if (tier === "confirm") {
+                const pending = this.pendingStore.create(connectorName, action);
+                return json(res, 202, { status: "pending", id: pending.id });
+            }
+            return this.executeConnectorAction(res, connector, action);
+        }
+
+        // POST /api/actions/:id/confirm
+        const confirmMatch = path.match(/^\/api\/actions\/([^/]+)\/confirm$/);
+        if (method === "POST" && confirmMatch) {
+            const id = decodeURIComponent(confirmMatch[1]!);
+            const pending = this.pendingStore.consume(id);
+            if (!pending) return json(res, 404, { error: "No such pending action (expired or already resolved)" });
+            const connector = this.connectors.find((c) => c.name === pending.connector);
+            if (!connector?.executeAction) return json(res, 404, { error: "Connector no longer available" });
+            return this.executeConnectorAction(res, connector, pending.action);
+        }
+
+        // POST /api/actions/:id/cancel
+        const cancelMatch = path.match(/^\/api\/actions\/([^/]+)\/cancel$/);
+        if (method === "POST" && cancelMatch) {
+            const id = decodeURIComponent(cancelMatch[1]!);
+            const pending = this.pendingStore.consume(id);
+            if (!pending) return json(res, 404, { error: "No such pending action (expired or already resolved)" });
+            return json(res, 204, null);
+        }
+
+        // GET /api/actions/pending
+        if (method === "GET" && path === "/api/actions/pending") {
+            return json(res, 200, this.pendingStore.list());
+        }
+
+        // GET /api/config/tiers
+        if (method === "GET" && path === "/api/config/tiers") {
+            return json(res, 200, this.tierStore.getAll());
+        }
+
+        // PATCH /api/config/tiers
+        if (method === "PATCH" && path === "/api/config/tiers") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const changed = await this.tierStore.patch(body as Record<string, string>);
+            return json(res, 200, { changed, tiers: this.tierStore.getAll() });
+        }
+
+        // GET /api/config/email-rules
+        if (method === "GET" && path === "/api/config/email-rules") {
+            if (!this.emailClassificationStore) return json(res, 503, { error: "Not configured" });
+            return json(res, 200, this.emailClassificationStore.getAll());
+        }
+
+        // PATCH /api/config/email-rules
+        if (method === "PATCH" && path === "/api/config/email-rules") {
+            if (!this.emailClassificationStore) return json(res, 503, { error: "Not configured" });
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            await this.emailClassificationStore.patch(body as Partial<EmailClassificationConfig>);
+            return json(res, 200, this.emailClassificationStore.getAll());
         }
 
         // POST /api/chat

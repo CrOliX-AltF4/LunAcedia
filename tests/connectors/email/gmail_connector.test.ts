@@ -1,6 +1,7 @@
 ﻿import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GmailConnector } from "../../../source/connectors/email/gmail_connector.js";
 import { clearTokenCache } from "../../../source/connectors/email/gmail_auth.js";
+import { EmailClassificationStore } from "../../../source/connectors/email/email_classification_store.js";
 
 const NOW = Date.now();
 const FRESH_TS = String(NOW - 1_000);
@@ -132,6 +133,36 @@ describe("GmailConnector", () => {
         );
         const events = await new GmailConnector().poll();
         expect(events[0]!.priority).toBe("info");
+    });
+
+    it("prefers EmailClassificationStore over GMAIL_RULES once the store has anything configured", async () => {
+        // GMAIL_RULES would classify this sender as "info" (no match) — the structured store
+        // says "urgent" for the same sender. If the result is "urgent", the store won, proving
+        // precedence rather than coincidence.
+        process.env["GMAIL_RULES"] = JSON.stringify([
+            { senderPattern: "someone-else@company.com", priority: "urgent" },
+        ]);
+        const classificationStore = new EmailClassificationStore("/tmp/does-not-matter.json");
+        await classificationStore.patch({ vipSenders: ["boss@company.com"] });
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "msg1", from: "boss@company.com", subject: "Hi", ts: FRESH_TS }]),
+        );
+        const events = await new GmailConnector(classificationStore).poll();
+        expect(events[0]!.priority).toBe("urgent");
+    });
+
+    it("falls back to GMAIL_RULES when the classification store exists but is empty", async () => {
+        process.env["GMAIL_RULES"] = JSON.stringify([
+            { senderPattern: "boss@company.com", priority: "urgent" },
+        ]);
+        const classificationStore = new EmailClassificationStore("/tmp/does-not-matter.json");
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "msg1", from: "boss@company.com", subject: "Hi", ts: FRESH_TS }]),
+        );
+        const events = await new GmailConnector(classificationStore).poll();
+        expect(events[0]!.priority).toBe("urgent");
     });
 
     it("should set dedupeKey with email- prefix", async () => {

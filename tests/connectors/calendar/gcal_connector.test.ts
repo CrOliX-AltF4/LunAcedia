@@ -50,6 +50,7 @@ afterEach(() => {
         "GCAL_CALENDARS",
         "GCAL_LOOKAHEAD_HOURS",
         "GCAL_PRIORITY",
+        "GCAL_URGENT_WITHIN_MIN",
     ].forEach((k) => delete process.env[k]);
 });
 
@@ -193,8 +194,129 @@ describe("GcalConnector", () => {
             }),
         );
         const events = await new GcalConnector().poll();
-        expect(events).toHaveLength(2);
-        expect(events.map((e) => e.title).sort()).toEqual(["Personal", "Work Meeting"]);
+        // "Personal" (primary) and "Work Meeting" (work calendar) share the same fixture
+        // START/END, so — correctly — a 3rd synthetic conflict event is now emitted too
+        // (cross-calendar overlap detection, see gcal_connector.ts's detectConflicts()).
+        expect(events).toHaveLength(3);
+        const upcoming = events.filter((e) => e.type === "calendar.upcoming");
+        expect(upcoming.map((e) => e.title).sort()).toEqual(["Personal", "Work Meeting"]);
+        const conflict = events.find((e) => e.type === "calendar.conflict");
+        expect(conflict?.priority).toBe("urgent");
+    });
+});
+
+describe("GcalConnector — time-proximity urgent escalation", () => {
+    it("escalates to urgent when the event starts within GCAL_URGENT_WITHIN_MIN", async () => {
+        process.env["GCAL_PRIORITY"] = "info";
+        process.env["GCAL_URGENT_WITHIN_MIN"] = "10";
+        const soonStart = new Date(Date.now() + 5 * 60_000).toISOString();
+        const soonEnd = new Date(Date.now() + 35 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "ev1", summary: "Standup", start: { dateTime: soonStart }, end: { dateTime: soonEnd } }]),
+        );
+        const events = await new GcalConnector().poll();
+        expect(events[0]!.priority).toBe("urgent");
+    });
+
+    it("keeps GCAL_PRIORITY as the floor when the event is further out than the escalation window", async () => {
+        process.env["GCAL_PRIORITY"] = "info";
+        process.env["GCAL_URGENT_WITHIN_MIN"] = "10";
+        vi.stubGlobal("fetch", makeFetch([calEvent("ev1", "Later")])); // default fixture starts in 60 min
+        const events = await new GcalConnector().poll();
+        expect(events[0]!.priority).toBe("info");
+    });
+
+    it("does not escalate a past-start event that is still open (msUntil negative)", async () => {
+        process.env["GCAL_PRIORITY"] = "normal";
+        process.env["GCAL_URGENT_WITHIN_MIN"] = "10";
+        const pastStart = new Date(Date.now() - 5 * 60_000).toISOString();
+        const futureEnd = new Date(Date.now() + 25 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "ev1", summary: "In progress", start: { dateTime: pastStart }, end: { dateTime: futureEnd } }]),
+        );
+        const events = await new GcalConnector().poll();
+        expect(events[0]!.priority).toBe("normal");
+    });
+
+    it("GCAL_URGENT_WITHIN_MIN=0 disables escalation entirely", async () => {
+        process.env["GCAL_PRIORITY"] = "info";
+        process.env["GCAL_URGENT_WITHIN_MIN"] = "0";
+        const soonStart = new Date(Date.now() + 1 * 60_000).toISOString();
+        const soonEnd = new Date(Date.now() + 30 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "ev1", summary: "ASAP", start: { dateTime: soonStart }, end: { dateTime: soonEnd } }]),
+        );
+        const events = await new GcalConnector().poll();
+        expect(events[0]!.priority).toBe("info");
+    });
+});
+
+describe("GcalConnector — conflict detection", () => {
+    it("emits a calendar.conflict event when two timed events on the same calendar overlap", async () => {
+        const s1 = new Date(Date.now() + 60 * 60_000).toISOString();
+        const e1 = new Date(Date.now() + 120 * 60_000).toISOString();
+        const s2 = new Date(Date.now() + 90 * 60_000).toISOString(); // starts before e1 — overlaps
+        const e2 = new Date(Date.now() + 150 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                { id: "ev1", summary: "A", start: { dateTime: s1 }, end: { dateTime: e1 } },
+                { id: "ev2", summary: "B", start: { dateTime: s2 }, end: { dateTime: e2 } },
+            ]),
+        );
+        const events = await new GcalConnector().poll();
+        const conflicts = events.filter((e) => e.type === "calendar.conflict");
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0]!.title).toContain("A");
+        expect(conflicts[0]!.title).toContain("B");
+        expect(conflicts[0]!.meta).toEqual({ eventAId: "ev1", eventBId: "ev2" });
+    });
+
+    it("does not flag back-to-back events that only touch (A ends exactly when B starts)", async () => {
+        const s1 = new Date(Date.now() + 60 * 60_000).toISOString();
+        const e1 = new Date(Date.now() + 120 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                { id: "ev1", summary: "A", start: { dateTime: s1 }, end: { dateTime: e1 } },
+                { id: "ev2", summary: "B", start: { dateTime: e1 }, end: { dateTime: new Date(Date.now() + 150 * 60_000).toISOString() } },
+            ]),
+        );
+        const events = await new GcalConnector().poll();
+        expect(events.filter((e) => e.type === "calendar.conflict")).toHaveLength(0);
+    });
+
+    it("excludes all-day events from conflict detection", async () => {
+        const s1 = new Date(Date.now() + 60 * 60_000).toISOString();
+        const e1 = new Date(Date.now() + 120 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                { id: "ev1", summary: "Timed meeting", start: { dateTime: s1 }, end: { dateTime: e1 } },
+                { id: "ev2", summary: "Vacation", start: { date: "2026-08-20" }, end: { date: "2026-08-25" } },
+            ]),
+        );
+        const events = await new GcalConnector().poll();
+        expect(events.filter((e) => e.type === "calendar.conflict")).toHaveLength(0);
+    });
+
+    it("does not flag two non-overlapping events", async () => {
+        const s1 = new Date(Date.now() + 60 * 60_000).toISOString();
+        const e1 = new Date(Date.now() + 90 * 60_000).toISOString();
+        const s2 = new Date(Date.now() + 180 * 60_000).toISOString();
+        const e2 = new Date(Date.now() + 210 * 60_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                { id: "ev1", summary: "A", start: { dateTime: s1 }, end: { dateTime: e1 } },
+                { id: "ev2", summary: "B", start: { dateTime: s2 }, end: { dateTime: e2 } },
+            ]),
+        );
+        const events = await new GcalConnector().poll();
+        expect(events.filter((e) => e.type === "calendar.conflict")).toHaveLength(0);
     });
 });
 

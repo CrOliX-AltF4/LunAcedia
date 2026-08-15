@@ -6,6 +6,7 @@ import type { ConnectorAction } from "../../types/connector_action.js";
 import { getAccessToken, clearTokenCache } from "./gmail_auth.js";
 import { parseRules, classifyEmail } from "./email_rules.js";
 import type { EmailRule } from "./email_rules.js";
+import type { EmailClassificationStore } from "./email_classification_store.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -28,6 +29,7 @@ interface GmailMessageMeta {
  *   GMAIL_MAX_AGE_HOURS=24            — ignore messages older than N hours
  *   GMAIL_POLL_INTERVAL_MIN=5         — poll frequency
  *   GMAIL_RULES='[{"senderPattern":"boss@corp.com","priority":"urgent"}]'
+ *                — fallback only; ignored once EmailClassificationStore has anything configured
  *
  * Rule: classification by senderPattern substring match only — never by LLM.
  */
@@ -42,9 +44,12 @@ export class GmailConnector implements IConnector {
     private readonly clientSecret: string;
     private readonly refreshToken: string;
     private readonly maxAgeMs: number;
-    private readonly rules: EmailRule[];
+    /** Legacy fallback, parsed once from GMAIL_RULES at construction. */
+    private readonly staticRules: EmailRule[];
+    private readonly classificationStore?: EmailClassificationStore;
 
-    constructor() {
+    constructor(classificationStore?: EmailClassificationStore) {
+        this.classificationStore = classificationStore;
         this.clientId = process.env["GMAIL_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GMAIL_CLIENT_SECRET"] ?? "";
         this.refreshToken = process.env["GMAIL_REFRESH_TOKEN"] ?? "";
@@ -55,7 +60,7 @@ export class GmailConnector implements IConnector {
         const maxAgeHours = parseInt(process.env["GMAIL_MAX_AGE_HOURS"] ?? "24", 10);
         this.maxAgeMs = Math.max(1, maxAgeHours) * 3_600_000;
 
-        this.rules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
+        this.staticRules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
 
         // GMAIL_ENABLED=true gates whether this connector is even constructed — if we're
         // here without credentials, that's a real misconfiguration, not an intentional
@@ -119,7 +124,10 @@ export class GmailConnector implements IConnector {
 
                 const from = header("From");
                 const subject = header("Subject") || "(no subject)";
-                const priority = classifyEmail(from, subject, this.rules);
+                const rules = this.classificationStore?.isConfigured()
+                    ? this.classificationStore.compileRules()
+                    : this.staticRules;
+                const priority = classifyEmail(from, subject, rules);
 
                 events.push({
                     type: "email.received",
