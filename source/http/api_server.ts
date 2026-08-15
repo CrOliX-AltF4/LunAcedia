@@ -5,6 +5,8 @@ import type { EventStore } from "../store/event_store.js";
 import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import { formatProposalsPrompt } from "../ai/ai_provider.js";
+import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
+import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
@@ -62,6 +64,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
+ *   GET  /api/calendar/free-slots?hours=24&minGapMin=30  → TimeSlot[] (deterministic, no LLM)
  *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
@@ -99,6 +102,25 @@ export class AcediaApiServer {
 
     stop(): void {
         this.server?.close();
+    }
+
+    /** Busy intervals from every currently-known timed calendar.upcoming event — all-day
+     *  events excluded, same reasoning as GcalConnector's conflict detection. */
+    private calendarBusyIntervals(): TimeSlot[] {
+        const { events } = this.store.query({ source: "calendar", limit: 200 });
+        return (events as AcediaEvent[])
+            .filter((e) => e.type === "calendar.upcoming")
+            .map((e) => {
+                const start = e.meta?.["start"];
+                const end = e.meta?.["end"];
+                if (typeof start !== "string" || typeof end !== "string") return null;
+                if (!start.includes("T") || !end.includes("T")) return null;
+                const s = new Date(start).getTime();
+                const en = new Date(end).getTime();
+                if (isNaN(s) || isNaN(en)) return null;
+                return { start: s, end: en };
+            })
+            .filter((x): x is TimeSlot => x !== null);
     }
 
     private async executeConnectorAction(
@@ -397,6 +419,21 @@ export class AcediaApiServer {
             return json(res, 200, this.emailClassificationStore.getAll());
         }
 
+        // GET /api/calendar/free-slots?hours=24&minGapMin=30
+        if (method === "GET" && path === "/api/calendar/free-slots") {
+            const hoursAhead = parseInt(url.searchParams.get("hours") ?? "24", 10);
+            const minGapMin = parseInt(url.searchParams.get("minGapMin") ?? "30", 10);
+            const now = Date.now();
+            const windowEnd = now + Math.max(1, isNaN(hoursAhead) ? 24 : hoursAhead) * 3_600_000;
+            const minGapMs = Math.max(1, isNaN(minGapMin) ? 30 : minGapMin) * 60_000;
+            const slots = computeFreeSlots(this.calendarBusyIntervals(), now, windowEnd, minGapMs);
+            return json(
+                res,
+                200,
+                slots.map((s) => ({ start: new Date(s.start).toISOString(), end: new Date(s.end).toISOString() })),
+            );
+        }
+
         // GET /api/oauth/google/status
         if (method === "GET" && path === "/api/oauth/google/status") {
             return json(
@@ -458,8 +495,12 @@ export class AcediaApiServer {
             const relevant = (events as AcediaEvent[]).filter(
                 (e) => e.priority === "urgent" || e.type === "calendar.conflict",
             );
+            const hasConflict = relevant.some((e) => e.type === "calendar.conflict");
+            const freeSlots = hasConflict
+                ? computeFreeSlots(this.calendarBusyIntervals(), Date.now(), Date.now() + 7 * 86_400_000, 30 * 60_000)
+                : [];
             try {
-                const proposals = await this.ai.chat(formatProposalsPrompt(relevant));
+                const proposals = await this.ai.chat(formatProposalsPrompt(relevant, freeSlots));
                 return json(res, 200, { proposals, count: relevant.length });
             } catch (e) {
                 console.error("[API] proposals error:", (e as Error).message);

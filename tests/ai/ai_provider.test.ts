@@ -75,4 +75,25 @@ describe("formatProposalsPrompt", () => {
         expect(result.toLowerCase()).toContain("propose");
         expect(result.toLowerCase()).toContain("action");
     });
+
+    it("includes free slots in the prompt when a conflict is present", () => {
+        const result = formatProposalsPrompt(
+            [makeEvent({ type: "calendar.conflict", title: "Overlap" })],
+            [{ start: 1_700_000_000_000, end: 1_700_001_800_000 }],
+        );
+        expect(result).toContain("Open calendar slots");
+    });
+
+    it("omits the free-slots block when there is no conflict, even if slots are passed", () => {
+        const result = formatProposalsPrompt(
+            [makeEvent({ priority: "urgent" })],
+            [{ start: 1_700_000_000_000, end: 1_700_001_800_000 }],
+        );
+        expect(result).not.toContain("Open calendar slots");
+    });
+
+    it("omits the free-slots block when there is a conflict but no slots were found", () => {
+        const result = formatProposalsPrompt([makeEvent({ type: "calendar.conflict" })], []);
+        expect(result).not.toContain("Open calendar slots");
+    });
 });

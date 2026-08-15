@@ -129,6 +129,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <span id="badge">0</span>
   <div class="spacer"></div>
   <button onclick="openProposals()">Propositions</button>
+  <button onclick="openFreeSlots()">Créneaux libres</button>
   <button onclick="openDigest()">Digest</button>
   <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="markAll()">Mark all read</button>
@@ -250,6 +251,27 @@ async function openDigestLike(path,title){
 function openDigest(){openDigestLike('/api/digest','Digest');}
 function openProposals(){openDigestLike('/api/proposals','Propositions');}
 function closeDigest(){document.getElementById('digest').classList.remove('open');}
+
+function fmtSlot(s){
+  const opts={weekday:'short',hour:'2-digit',minute:'2-digit'};
+  return new Date(s.start).toLocaleString(undefined,opts)+' → '+new Date(s.end).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+
+async function openFreeSlots(){
+  const d=document.getElementById('digest');
+  const h=document.getElementById('digest-title');
+  const t=document.getElementById('digest-text');
+  h.textContent='Créneaux libres (24h, ≥30min)';
+  d.classList.add('open');
+  t.textContent='Loading…';
+  try{
+    const r=await req('/api/calendar/free-slots');
+    const slots=await r.json();
+    t.textContent=Array.isArray(slots)&&slots.length
+      ? slots.map(fmtSlot).join('\\n')
+      : 'Aucun créneau libre trouvé.';
+  }catch(e){t.textContent='Error: '+e.message;}
+}
 
 // ── Pending actions ──────────────────────────────────────────────────────────
 async function loadPending(){

@@ -867,6 +867,60 @@ describe("AcediaApiServer — GET /api/digest", () => {
     });
 });
 
+describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
+    it("returns the whole default window as free when there are no calendar events", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/calendar/free-slots`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const slots = res.body as { start: string; end: string }[];
+        expect(slots).toHaveLength(1);
+    });
+
+    it("excludes busy timed calendar events from the free slots", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        const start = new Date(Date.now() + 2 * 3_600_000).toISOString();
+        const end = new Date(Date.now() + 3 * 3_600_000).toISOString();
+        store.push(
+            makeEvent({
+                dedupeKey: "cal-1",
+                source: "calendar",
+                type: "calendar.upcoming",
+                meta: { start, end },
+            }),
+        );
+        const server = makeServer(store);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/calendar/free-slots?minGapMin=5`, AUTH);
+        server.stop();
+        const slots = res.body as { start: string; end: string }[];
+        // Busy 2h-3h from now splits the 24h window into a before-gap and an after-gap.
+        expect(slots.length).toBe(2);
+    });
+
+    it("ignores all-day events (date-only, no time component)", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "cal-1",
+                source: "calendar",
+                type: "calendar.upcoming",
+                meta: { start: "2026-08-20", end: "2026-08-21" },
+            }),
+        );
+        const server = makeServer(store);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/calendar/free-slots`, AUTH);
+        server.stop();
+        const slots = res.body as { start: string; end: string }[];
+        expect(slots).toHaveLength(1);
+    });
+});
+
 describe("AcediaApiServer — GET /api/proposals", () => {
     it("should return 503 when AI provider is none", async () => {
         const port = nextPort();
@@ -897,6 +951,34 @@ describe("AcediaApiServer — GET /api/proposals", () => {
         expect(promptSent).toContain("Server down");
         expect(promptSent).toContain("Overlap");
         expect(promptSent).not.toContain("Newsletter");
+    });
+
+    it("passes open calendar slots to the AI when a conflict is present", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", type: "calendar.conflict", title: "Overlap", priority: "urgent" }));
+        const chatSpy = vi.fn().mockResolvedValue("Move the second meeting to the open slot.");
+        const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        const promptSent = chatSpy.mock.calls[0]![0] as string;
+        expect(promptSent).toContain("Open calendar slots");
+    });
+
+    it("does not include a slots block when there is no conflict, even with free calendar time", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "urgent", title: "Server down" }));
+        const chatSpy = vi.fn().mockResolvedValue("Restart it.");
+        const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        const promptSent = chatSpy.mock.calls[0]![0] as string;
+        expect(promptSent).not.toContain("Open calendar slots");
     });
 
     it("does not mark events as read — proposals are read-only", async () => {
