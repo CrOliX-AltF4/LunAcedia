@@ -339,7 +339,7 @@ describe("GcalConnector — conflict detection", () => {
     });
 });
 
-describe("GcalConnector.executeAction — update", () => {
+describe("GcalConnector.executeAction — update_event / create_event / delete_event", () => {
     beforeEach(() => {
         clearGoogleTokenCache();
         process.env["GCAL_CLIENT_ID"] = "cid";
@@ -348,7 +348,7 @@ describe("GcalConnector.executeAction — update", () => {
     });
     afterEach(() => vi.unstubAllGlobals());
 
-    it("should PATCH the event with mapped fields", async () => {
+    it("update_event: should PATCH the event with mapped fields", async () => {
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             const u = String(url);
             if (u.includes("oauth2"))
@@ -362,7 +362,7 @@ describe("GcalConnector.executeAction — update", () => {
         });
         vi.stubGlobal("fetch", mockFetch);
         await new GcalConnector().executeAction({
-            kind: "update",
+            kind: "update_event",
             sourceId: "primary/event-123",
             fields: { title: "New Title", description: "New desc" },
         });
@@ -377,17 +377,86 @@ describe("GcalConnector.executeAction — update", () => {
         expect(body["description"]).toBe("New desc");
     });
 
-    it("should warn and return when sourceId has no slash", async () => {
+    it("update_event: should warn and return when sourceId has no slash", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GcalConnector().executeAction({ kind: "update", sourceId: "bad-id", fields: {} });
+        await new GcalConnector().executeAction({ kind: "update_event", sourceId: "bad-id", fields: {} });
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("should ignore non-update actions", async () => {
+    it("should ignore action kinds it doesn't own", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GcalConnector().executeAction({ kind: "complete", sourceId: "primary/ev1" });
+        await new GcalConnector().executeAction({ kind: "complete_task", sourceId: "primary/ev1" });
         expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("create_event: POSTs a new event with the given fields to the target calendar", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "POST")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GcalConnector().executeAction({
+            kind: "create_event",
+            fields: { summary: "New meeting", start: "2026-09-01T10:00:00Z", end: "2026-09-01T10:30:00Z" },
+        });
+        const postCall = mockFetch.mock.calls.find(([u, o]: [string, RequestInit]) => o?.method === "POST" && !String(u).includes("oauth2"));
+        expect(postCall).toBeDefined();
+        expect(String(postCall![0]!)).toContain("primary");
+        const body = JSON.parse(postCall![1]!.body as string) as { summary: string; start: { dateTime: string } };
+        expect(body.summary).toBe("New meeting");
+        expect(body.start.dateTime).toBe("2026-09-01T10:00:00Z");
+    });
+
+    it("create_event: uses fields.calendarId when given instead of primary", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
+            if (opts?.method === "POST") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GcalConnector().executeAction({
+            kind: "create_event",
+            fields: { summary: "Team sync", start: "2026-09-01T10:00:00Z", end: "2026-09-01T10:30:00Z", calendarId: "work@group.calendar.google.com" },
+        });
+        const postCall = mockFetch.mock.calls.find(([u, o]: [string, RequestInit]) => o?.method === "POST" && !String(u).includes("oauth2"));
+        expect(String(postCall![0]!)).toContain(encodeURIComponent("work@group.calendar.google.com"));
+    });
+
+    it("delete_event: DELETEs the event at {calendarId}/{eventId}", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
+            if (opts?.method === "DELETE") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GcalConnector().executeAction({ kind: "delete_event", sourceId: "primary/event-999" });
+        const delCall = mockFetch.mock.calls.find(([, o]: [string, RequestInit]) => o?.method === "DELETE");
+        expect(delCall).toBeDefined();
+        expect(String(delCall![0]!)).toContain("event-999");
+    });
+
+    it("delete_event: treats 410 (already deleted) as success, not a warning", async () => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
+            if (opts?.method === "DELETE") return Promise.resolve({ ok: false, status: 410, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GcalConnector().executeAction({ kind: "delete_event", sourceId: "primary/event-999" });
+        expect(warnSpy).not.toHaveBeenCalled();
+        warnSpy.mockRestore();
     });
 });

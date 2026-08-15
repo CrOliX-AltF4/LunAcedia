@@ -107,9 +107,8 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
     <div id="src-list"></div>
 
     <h4>Paliers d'autonomie</h4>
-    <div class="tier-row"><span>Répondre à un email</span><select data-tier="reply"><option value="auto">Auto</option><option value="confirm">Confirmation</option><option value="manual">Manuel</option></select></div>
-    <div class="tier-row"><span>Compléter une tâche</span><select data-tier="complete"><option value="auto">Auto</option><option value="confirm">Confirmation</option><option value="manual">Manuel</option></select></div>
-    <div class="tier-row"><span>Modifier un événement</span><select data-tier="update"><option value="auto">Auto</option><option value="confirm">Confirmation</option><option value="manual">Manuel</option></select></div>
+    <div class="field-hint">Auto = l'IA agit seule. Confirmation = sur demande explicite ou après proposition. Manuel = jamais l'IA, quoi qu'il arrive.</div>
+    <div id="tier-list"></div>
 
     <h4>Classification email</h4>
     <div class="field-hint">Un par ligne. Expéditeurs/mots-clés VIP et urgents passent en priorité urgente, mots-clés normaux en priorité normale.</div>
@@ -284,10 +283,9 @@ async function loadPending(){
 }
 
 function describeAction(a){
-  if(a.action.kind==='reply')return 'Répondre : '+esc(a.action.body||'').slice(0,60);
-  if(a.action.kind==='complete')return 'Compléter la tâche '+esc(a.action.sourceId);
-  if(a.action.kind==='update')return 'Modifier l\\'événement '+esc(a.action.sourceId);
-  return 'Action '+esc(a.action.kind);
+  const label=(typeof ACTION_KIND_LABELS!=='undefined'&&ACTION_KIND_LABELS[a.action.kind])||a.action.kind;
+  const detail=a.action.body||a.action.label||(a.action.fields&&(a.action.fields.title||a.action.fields.summary))||a.action.sourceId||'';
+  return esc(label)+(detail?' — '+esc(String(detail)).slice(0,60):'');
 }
 
 function renderPending(pending){
@@ -318,6 +316,38 @@ async function cancelPending(btn){
 // ── Settings (sources / tiers / email rules) ─────────────────────────────────
 const GOOGLE_SOURCES=[{key:'gmail',label:'Gmail'},{key:'gcal',label:'Google Calendar'},{key:'gtasks',label:'Google Tasks'}];
 
+const ACTION_KIND_LABELS={
+  reply:'Répondre à un email',
+  archive_email:'Archiver un email',
+  delete_email:'Supprimer un email',
+  mark_email_read:'Marquer un email lu',
+  mark_email_unread:'Marquer un email non lu',
+  create_event:'Créer un événement calendrier',
+  update_event:'Modifier un événement',
+  delete_event:'Supprimer un événement',
+  create_task:'Créer une tâche',
+  complete_task:'Compléter une tâche',
+  delete_task:'Supprimer une tâche',
+  comment_issue:'Commenter une issue/PR GitHub',
+  add_label:'Ajouter un label GitHub',
+  create_issue:'Créer une issue GitHub',
+  close_issue:'Fermer une issue GitHub',
+  open_pr:'Ouvrir une PR GitHub',
+  merge_pr:'Merger une PR GitHub',
+};
+
+function renderTiers(tiers){
+  const el=document.getElementById('tier-list');
+  el.innerHTML=Object.keys(ACTION_KIND_LABELS).map(kind=>{
+    const label=esc(ACTION_KIND_LABELS[kind]);
+    if(kind==='merge_pr'){
+      return \`<div class="tier-row"><span>\${label}</span><span style="color:var(--urgent);font-size:12px">Manuel — toujours humain</span></div>\`;
+    }
+    const value=esc(tiers[kind]||'confirm');
+    return \`<div class="tier-row"><span>\${label}</span><select data-tier="\${esc(kind)}"><option value="auto"\${value==='auto'?' selected':''}>Auto</option><option value="confirm"\${value==='confirm'?' selected':''}>Confirmation</option><option value="manual"\${value==='manual'?' selected':''}>Manuel</option></select></div>\`;
+  }).join('');
+}
+
 async function openSettings(){
   document.getElementById('settings').classList.add('open');
   try{
@@ -329,10 +359,7 @@ async function openSettings(){
     const status=await statusRes.json();
     renderSources(status);
     const tiers=await tiersRes.json();
-    for(const k in tiers){
-      const sel=document.querySelector('select[data-tier="'+k+'"]');
-      if(sel)sel.value=tiers[k];
-    }
+    renderTiers(tiers);
     if(rulesRes&&rulesRes.ok){
       const rules=await rulesRes.json();
       document.getElementById('vip-senders').value=(rules.vipSenders||[]).join('\\n');

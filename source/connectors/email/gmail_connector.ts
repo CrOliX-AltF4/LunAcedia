@@ -160,7 +160,15 @@ export class GmailConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "reply") return;
+        if (
+            action.kind !== "reply" &&
+            action.kind !== "archive_email" &&
+            action.kind !== "delete_email" &&
+            action.kind !== "mark_email_read" &&
+            action.kind !== "mark_email_unread"
+        ) {
+            return;
+        }
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
@@ -169,6 +177,11 @@ export class GmailConnector implements IConnector {
             token = await getAccessToken(this.clientId, this.clientSecret, refreshToken);
         } catch (e) {
             console.error("[Gmail] action token error:", (e as Error).message);
+            return;
+        }
+
+        if (action.kind === "archive_email" || action.kind === "delete_email" || action.kind === "mark_email_read" || action.kind === "mark_email_unread") {
+            await this.modifyMessage(token, action.kind, action.sourceId);
             return;
         }
 
@@ -232,6 +245,36 @@ export class GmailConnector implements IConnector {
             }
         } catch (e) {
             console.error("[Gmail] reply send error:", (e as Error).message);
+        }
+    }
+
+    /** archive/delete/mark-read/mark-unread all reduce to a Gmail label mutation.
+     *  delete_email moves to Trash (recoverable, not a permanent delete) — matches what
+     *  "delete" means in a normal Gmail client. */
+    private async modifyMessage(
+        token: string,
+        kind: "archive_email" | "delete_email" | "mark_email_read" | "mark_email_unread",
+        messageId: string,
+    ): Promise<void> {
+        const endpoint = kind === "delete_email" ? "trash" : "modify";
+        const body: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined =
+            kind === "archive_email"
+                ? { removeLabelIds: ["INBOX"] }
+                : kind === "mark_email_read"
+                  ? { removeLabelIds: ["UNREAD"] }
+                  : kind === "mark_email_unread"
+                    ? { addLabelIds: ["UNREAD"] }
+                    : undefined;
+
+        try {
+            const resp = await fetch(`${GMAIL_API}/messages/${encodeURIComponent(messageId)}/${endpoint}`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            if (!resp.ok) console.warn(`[Gmail] ${kind} returned ${resp.status}`);
+        } catch (e) {
+            console.error(`[Gmail] ${kind} error:`, (e as Error).message);
         }
     }
 }

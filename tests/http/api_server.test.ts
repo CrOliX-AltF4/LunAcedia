@@ -10,6 +10,7 @@ import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
 import { EmailClassificationStore } from "../../source/connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "../../source/auth/google_token_store.js";
+import { DEFAULT_ACTION_TIERS } from "../../source/types/action_tier.js";
 import type { IAIProvider } from "../../source/ai/ai_provider.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
@@ -480,7 +481,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
-            { connector: "NoSuchConnector", action: { kind: "complete", sourceId: "x" } },
+            { connector: "NoSuchConnector", action: { kind: "complete_task", sourceId: "x" } },
             AUTH,
         );
         server.stop();
@@ -494,7 +495,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
-            { connector: "ReadOnly", action: { kind: "complete", sourceId: "x" } },
+            { connector: "ReadOnly", action: { kind: "complete_task", sourceId: "x" } },
             AUTH,
         );
         server.stop();
@@ -537,14 +538,14 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
         );
     }
 
-    it("GET returns the default tiers (all 'confirm') when nothing was ever patched", async () => {
+    it("GET returns the default tiers when nothing was ever patched", async () => {
         const port = nextPort();
         const server = makeServer(new EventStore(), [], nullAI, SECRET, tmpTierStore());
         server.start(port);
         const res = await get(`http://localhost:${port}/api/config/tiers`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ reply: "confirm", complete: "confirm", update: "confirm" });
+        expect(res.body).toEqual(DEFAULT_ACTION_TIERS);
     });
 
     it("PATCH updates a tier and it takes effect on the very next POST /api/actions", async () => {
@@ -555,15 +556,15 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
         });
         const server = makeServer(new EventStore(), [conn], nullAI, SECRET, tmpTierStore());
         server.start(port);
-        const patchRes = await patch(`http://localhost:${port}/api/config/tiers`, { complete: "auto" }, AUTH);
+        const patchRes = await patch(`http://localhost:${port}/api/config/tiers`, { complete_task: "auto" }, AUTH);
         const actionRes = await post(
             `http://localhost:${port}/api/actions`,
-            { connector: "Tasks", action: { kind: "complete", sourceId: "t1" } },
+            { connector: "Tasks", action: { kind: "complete_task", sourceId: "t1" } },
             AUTH,
         );
         server.stop();
         expect(patchRes.status).toBe(200);
-        expect((patchRes.body as { changed: string[] }).changed).toEqual(["complete"]);
+        expect((patchRes.body as { changed: string[] }).changed).toEqual(["complete_task"]);
         expect(actionRes.status).toBe(204);
         expect(called).toBe(true);
     });

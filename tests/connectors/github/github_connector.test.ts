@@ -267,3 +267,109 @@ describe("GitHubConnector", () => {
         expect(connector.preferredPollIntervalMs).toBeGreaterThanOrEqual(30_000);
     });
 });
+
+describe("GitHubConnector.executeAction", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("does nothing when GITHUB_TOKEN is missing", async () => {
+        delete process.env["GITHUB_TOKEN"];
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo#1" });
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("ignores action kinds it doesn't own", async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({ kind: "complete_task", sourceId: "x" });
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("comment_issue: POSTs the body to /issues/:number/comments", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({
+            kind: "comment_issue",
+            sourceId: "CrOliX-AltF4/LunAnima#42",
+            body: "Looking into it.",
+        });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect(String(url)).toBe("https://api.github.com/repos/CrOliX-AltF4/LunAnima/issues/42/comments");
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({ body: "Looking into it." });
+    });
+
+    it("add_label: POSTs the label array to /issues/:number/labels", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({
+            kind: "add_label",
+            sourceId: "owner/repo#7",
+            label: "needs-triage",
+        });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect(String(url)).toBe("https://api.github.com/repos/owner/repo/issues/7/labels");
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({ labels: ["needs-triage"] });
+    });
+
+    it("close_issue: PATCHes state to closed", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo#3" });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect((opts as RequestInit).method).toBe("PATCH");
+        expect(String(url)).toBe("https://api.github.com/repos/owner/repo/issues/3");
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({ state: "closed" });
+    });
+
+    it("create_issue: POSTs title/body to /repos/:repo/issues", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({
+            kind: "create_issue",
+            fields: { repo: "owner/repo", title: "Bug found", body: "Steps to repro..." },
+        });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect(String(url)).toBe("https://api.github.com/repos/owner/repo/issues");
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({
+            title: "Bug found",
+            body: "Steps to repro...",
+        });
+    });
+
+    it("open_pr: POSTs title/head/base/body to /repos/:repo/pulls", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({
+            kind: "open_pr",
+            fields: { repo: "owner/repo", title: "Fix typo", head: "fix/typo", base: "main", body: "" },
+        });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect(String(url)).toBe("https://api.github.com/repos/owner/repo/pulls");
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({
+            title: "Fix typo",
+            head: "fix/typo",
+            base: "main",
+            body: "",
+        });
+    });
+
+    it("merge_pr: PUTs to /repos/:repo/pulls/:number/merge", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({ kind: "merge_pr", sourceId: "owner/repo#9" });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect((opts as RequestInit).method).toBe("PUT");
+        expect(String(url)).toBe("https://api.github.com/repos/owner/repo/pulls/9/merge");
+    });
+
+    it("warns and does nothing for a malformed sourceId (no '#')", async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo-no-hash" });
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
+    });
+});

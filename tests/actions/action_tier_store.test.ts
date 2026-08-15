@@ -18,6 +18,7 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
+import { DEFAULT_ACTION_TIERS } from "../../source/types/action_tier.js";
 
 describe("ActionTierStore", () => {
     beforeEach(() => {
@@ -27,9 +28,10 @@ describe("ActionTierStore", () => {
         h.mockMkdir.mockResolvedValue(undefined);
     });
 
-    it("defaults every action kind to 'confirm' — fail-safe, never 'auto' out of the box", () => {
+    it("defaults every action kind to DEFAULT_ACTION_TIERS — fail-safe, never 'auto' out of the box", () => {
         const store = new ActionTierStore("/tmp/does-not-matter.json");
-        expect(store.getAll()).toEqual({ reply: "confirm", complete: "confirm", update: "confirm" });
+        expect(store.getAll()).toEqual(DEFAULT_ACTION_TIERS);
+        expect(Object.values(store.getAll())).not.toContain("auto");
     });
 
     it("load() applies a persisted valid tier over the default", async () => {
@@ -37,7 +39,7 @@ describe("ActionTierStore", () => {
         const store = new ActionTierStore("/tmp/tiers.json");
         await store.load();
         expect(store.getTier("reply")).toBe("auto");
-        expect(store.getTier("complete")).toBe("confirm");
+        expect(store.getTier("complete_task")).toBe("confirm");
     });
 
     it("load() ignores an invalid persisted tier value and keeps the default", async () => {
@@ -50,16 +52,39 @@ describe("ActionTierStore", () => {
     it("load() keeps defaults when the file does not exist", async () => {
         const store = new ActionTierStore("/tmp/tiers.json");
         await store.load();
-        expect(store.getAll()).toEqual({ reply: "confirm", complete: "confirm", update: "confirm" });
+        expect(store.getAll()).toEqual(DEFAULT_ACTION_TIERS);
+    });
+
+    it("load() ignores a persisted attempt to relax merge_pr", async () => {
+        h.mockReadFile.mockResolvedValue(JSON.stringify({ merge_pr: "auto" }));
+        const store = new ActionTierStore("/tmp/tiers.json");
+        await store.load();
+        expect(store.getTier("merge_pr")).toBe("manual");
     });
 
     it("patch() applies valid (kind, tier) pairs and persists them", async () => {
         const store = new ActionTierStore("/tmp/tiers.json");
-        const changed = await store.patch({ reply: "auto", complete: "manual" });
-        expect(changed.sort()).toEqual(["complete", "reply"]);
+        const changed = await store.patch({ reply: "auto", complete_task: "manual" });
+        expect(changed.sort()).toEqual(["complete_task", "reply"]);
         expect(store.getTier("reply")).toBe("auto");
-        expect(store.getTier("complete")).toBe("manual");
+        expect(store.getTier("complete_task")).toBe("manual");
         expect(h.mockWriteFile).toHaveBeenCalledOnce();
+    });
+
+    it("patch() silently drops an attempt to change merge_pr — 'merger reste toujours humain'", async () => {
+        const store = new ActionTierStore("/tmp/tiers.json");
+        const changed = await store.patch({ merge_pr: "auto" });
+        expect(changed).toEqual([]);
+        expect(store.getTier("merge_pr")).toBe("manual");
+        expect(h.mockWriteFile).not.toHaveBeenCalled();
+    });
+
+    it("patch() ignoring merge_pr does not block other valid pairs in the same call", async () => {
+        const store = new ActionTierStore("/tmp/tiers.json");
+        const changed = await store.patch({ merge_pr: "auto", reply: "auto" });
+        expect(changed).toEqual(["reply"]);
+        expect(store.getTier("merge_pr")).toBe("manual");
+        expect(store.getTier("reply")).toBe("auto");
     });
 
     it("patch() rejects an unknown action kind without touching disk", async () => {

@@ -137,45 +137,66 @@ export class TasksConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "complete") return;
+        if (action.kind !== "complete_task" && action.kind !== "create_task" && action.kind !== "delete_task") return;
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
         let token: string;
         try {
-            token = await getGoogleToken(
-                this.clientId,
-                this.clientSecret,
-                refreshToken,
-                "gtasks",
-            );
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gtasks");
         } catch (e) {
             console.error("[Tasks] action token error:", (e as Error).message);
             return;
         }
+        const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
+        if (action.kind === "create_task") {
+            const listId = action.fields.listId || this.listId;
+            const listPath = listId.startsWith("@") ? listId : encodeURIComponent(listId);
+            const body: Record<string, unknown> = { title: action.fields.title };
+            if (action.fields.due) body["due"] = action.fields.due;
+            if (action.fields.notes) body["notes"] = action.fields.notes;
+            try {
+                const resp = await fetch(`${TASKS_API}/lists/${listPath}/tasks`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) console.warn(`[Tasks] create_task returned ${resp.status}`);
+            } catch (e) {
+                console.error("[Tasks] create_task error:", (e as Error).message);
+            }
+            return;
+        }
+
+        // complete_task / delete_task both address an existing task
         // sourceId = "{listId}/{taskId}" or just "{taskId}" (falls back to configured listId)
         const [first, second] = action.sourceId.split("/");
         const [listId, taskId] = second ? [first!, second] : [this.listId, first!];
+        const listPath = listId.startsWith("@") ? listId : encodeURIComponent(listId);
+        const taskUrl = `${TASKS_API}/lists/${listPath}/tasks/${encodeURIComponent(taskId)}`;
+
+        if (action.kind === "delete_task") {
+            try {
+                const resp = await fetch(taskUrl, { method: "DELETE", headers });
+                if (!resp.ok && resp.status !== 404) console.warn(`[Tasks] delete_task returned ${resp.status}`);
+            } catch (e) {
+                console.error("[Tasks] delete_task error:", (e as Error).message);
+            }
+            return;
+        }
 
         try {
-            const listPath2 = listId.startsWith("@") ? listId : encodeURIComponent(listId);
-            const resp = await fetch(
-                `${TASKS_API}/lists/${listPath2}/tasks/${encodeURIComponent(taskId)}`,
-                {
-                    method: "PATCH",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ status: "completed" }),
-                },
-            );
+            const resp = await fetch(taskUrl, {
+                method: "PATCH",
+                headers,
+                body: JSON.stringify({ status: "completed" }),
+            });
             if (!resp.ok) {
-                console.warn(`[Tasks] complete returned ${resp.status}`);
+                console.warn(`[Tasks] complete_task returned ${resp.status}`);
             }
         } catch (e) {
-            console.error("[Tasks] complete error:", (e as Error).message);
+            console.error("[Tasks] complete_task error:", (e as Error).message);
         }
     }
 }

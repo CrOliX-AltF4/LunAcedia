@@ -92,14 +92,19 @@ describe("DASHBOARD_HTML renderPending() sink", () => {
         expect(block).not.toMatch(/onclick="cancelPending\('/);
     });
 
-    it("wraps every interpolated pending-action field in esc(...)", () => {
+    it("wraps every interpolated pending-action field in esc(...) — label and detail alike", () => {
+        // describeAction() covers 17 action kinds generically (label lookup + a single
+        // "detail" field pulled from whichever of body/label/fields.title/sourceId the kind
+        // actually has) rather than one branch per kind — both the label and the extracted
+        // detail must still go through esc() before landing in the pending-row's innerHTML.
         const block = DASHBOARD_HTML.slice(
             DASHBOARD_HTML.indexOf("function describeAction"),
             DASHBOARD_HTML.indexOf("function renderPending"),
         );
-        expect(block).toContain("esc(a.action.body");
-        expect(block).toContain("esc(a.action.sourceId)");
-        expect(block).toContain("esc(a.action.kind)");
+        expect(block).toContain("esc(label)");
+        expect(block).toContain("esc(String(detail))");
+        // The raw fields feeding `detail` must never be interpolated a second time unescaped.
+        expect(block).not.toMatch(/\$\{a\.action\.(body|sourceId|label)\}/);
     });
 
     it("confirmPending/cancelPending read the id from the clicked element's closest row", () => {

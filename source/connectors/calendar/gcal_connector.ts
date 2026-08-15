@@ -177,55 +177,78 @@ export class GcalConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "update") return;
+        if (action.kind !== "update_event" && action.kind !== "create_event" && action.kind !== "delete_event") return;
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
-        // sourceId = "{calendarId}/{eventId}"
-        const slash = action.sourceId.indexOf("/");
-        if (slash === -1) {
-            console.warn("[GCal] update: sourceId must be '{calendarId}/{eventId}'");
-            return;
+        // Validate sourceId shape before spending a token fetch on a request that can't
+        // proceed anyway — update_event/delete_event both address "{calendarId}/{eventId}".
+        let calId = "";
+        let eventId = "";
+        if (action.kind !== "create_event") {
+            const slash = action.sourceId.indexOf("/");
+            if (slash === -1) {
+                console.warn(`[GCal] ${action.kind}: sourceId must be '{calendarId}/{eventId}'`);
+                return;
+            }
+            calId = action.sourceId.slice(0, slash);
+            eventId = action.sourceId.slice(slash + 1);
         }
-        const calId = action.sourceId.slice(0, slash);
-        const eventId = action.sourceId.slice(slash + 1);
 
         let token: string;
         try {
-            token = await getGoogleToken(
-                this.clientId,
-                this.clientSecret,
-                refreshToken,
-                "gcal",
-            );
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gcal");
         } catch (e) {
             console.error("[GCal] action token error:", (e as Error).message);
             return;
         }
+        const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
-        // Map generic `fields` to GCal event patch body (summary = title, description = body)
+        if (action.kind === "create_event") {
+            const calId = action.fields.calendarId || "primary";
+            const body: Record<string, unknown> = {
+                summary: action.fields.summary,
+                start: { dateTime: action.fields.start },
+                end: { dateTime: action.fields.end },
+            };
+            if (action.fields.description) body["description"] = action.fields.description;
+            if (action.fields.location) body["location"] = action.fields.location;
+            try {
+                const resp = await fetch(`${GCAL_API}/calendars/${encodeURIComponent(calId)}/events`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) console.warn(`[GCal] create_event returned ${resp.status}`);
+            } catch (e) {
+                console.error("[GCal] create_event error:", (e as Error).message);
+            }
+            return;
+        }
+
+        // update_event / delete_event — calId/eventId already parsed from sourceId above
+        const eventUrl = `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`;
+
+        if (action.kind === "delete_event") {
+            try {
+                const resp = await fetch(eventUrl, { method: "DELETE", headers });
+                if (!resp.ok && resp.status !== 410) console.warn(`[GCal] delete_event returned ${resp.status}`);
+            } catch (e) {
+                console.error("[GCal] delete_event error:", (e as Error).message);
+            }
+            return;
+        }
+
+        // update_event — map generic `fields` to GCal event patch body
         const patch: Record<string, string> = {};
         if (action.fields["title"]) patch["summary"] = action.fields["title"];
         if (action.fields["description"]) patch["description"] = action.fields["description"];
         if (action.fields["location"]) patch["location"] = action.fields["location"];
-
         try {
-            const resp = await fetch(
-                `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
-                {
-                    method: "PATCH",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(patch),
-                },
-            );
-            if (!resp.ok) {
-                console.warn(`[GCal] update returned ${resp.status}`);
-            }
+            const resp = await fetch(eventUrl, { method: "PATCH", headers, body: JSON.stringify(patch) });
+            if (!resp.ok) console.warn(`[GCal] update_event returned ${resp.status}`);
         } catch (e) {
-            console.error("[GCal] update error:", (e as Error).message);
+            console.error("[GCal] update_event error:", (e as Error).message);
         }
     }
 

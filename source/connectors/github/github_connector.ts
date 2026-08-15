@@ -2,7 +2,20 @@ import type { IConnector } from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
+import type { ConnectorAction } from "../../types/connector_action.js";
 import { formatThread, formatFailedCheckRun } from "./github_formatter.js";
+
+const GITHUB_API = "https://api.github.com";
+
+/** "{owner}/{repo}#{number}" → { repo: "owner/repo", number: 123 }, or null if malformed. */
+function parseIssueRef(sourceId: string): { repo: string; number: number } | null {
+    const hash = sourceId.lastIndexOf("#");
+    if (hash === -1) return null;
+    const repo = sourceId.slice(0, hash);
+    const number = parseInt(sourceId.slice(hash + 1), 10);
+    if (!repo || isNaN(number)) return null;
+    return { repo, number };
+}
 
 interface GitHubThread {
     id: string;
@@ -145,6 +158,107 @@ export class GitHubConnector implements IConnector {
                 .map((r) => formatFailedCheckRun(r, repo));
         } catch {
             return [];
+        }
+    }
+
+    /**
+     * Reuses GITHUB_TOKEN (the same token that reads notifications) — a fine-grained PAT with
+     * both notifications:read and issues/pull-requests:write covers everything here; no
+     * separate write-scoped token to configure. merge_pr's tier is hardcoded to "manual" in
+     * ActionTierStore regardless of what reaches this method — this connector doesn't
+     * re-enforce that (single source of truth is the tier store, checked before dispatch).
+     */
+    async executeAction(action: ConnectorAction): Promise<void> {
+        if (
+            action.kind !== "comment_issue" &&
+            action.kind !== "add_label" &&
+            action.kind !== "create_issue" &&
+            action.kind !== "close_issue" &&
+            action.kind !== "open_pr" &&
+            action.kind !== "merge_pr"
+        ) {
+            return;
+        }
+        if (!this.token) return;
+
+        const headers = {
+            Authorization: `Bearer ${this.token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        };
+
+        if (action.kind === "create_issue") {
+            try {
+                const resp = await fetch(`${GITHUB_API}/repos/${action.fields.repo}/issues`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ title: action.fields.title, body: action.fields.body }),
+                });
+                if (!resp.ok) console.warn(`[GitHub] create_issue returned ${resp.status}`);
+            } catch (e) {
+                console.error("[GitHub] create_issue error:", (e as Error).message);
+            }
+            return;
+        }
+
+        if (action.kind === "open_pr") {
+            try {
+                const resp = await fetch(`${GITHUB_API}/repos/${action.fields.repo}/pulls`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({
+                        title: action.fields.title,
+                        head: action.fields.head,
+                        base: action.fields.base,
+                        body: action.fields.body,
+                    }),
+                });
+                if (!resp.ok) console.warn(`[GitHub] open_pr returned ${resp.status}`);
+            } catch (e) {
+                console.error("[GitHub] open_pr error:", (e as Error).message);
+            }
+            return;
+        }
+
+        // comment_issue / add_label / close_issue / merge_pr all address an existing
+        // issue or PR via sourceId = "{owner}/{repo}#{number}"
+        const ref = parseIssueRef(action.sourceId);
+        if (!ref) {
+            console.warn(`[GitHub] ${action.kind}: sourceId must be '{owner}/{repo}#{number}'`);
+            return;
+        }
+
+        try {
+            let resp: Response;
+            if (action.kind === "comment_issue") {
+                resp = await fetch(`${GITHUB_API}/repos/${ref.repo}/issues/${ref.number}/comments`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ body: action.body }),
+                });
+            } else if (action.kind === "add_label") {
+                resp = await fetch(`${GITHUB_API}/repos/${ref.repo}/issues/${ref.number}/labels`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ labels: [action.label] }),
+                });
+            } else if (action.kind === "close_issue") {
+                resp = await fetch(`${GITHUB_API}/repos/${ref.repo}/issues/${ref.number}`, {
+                    method: "PATCH",
+                    headers,
+                    body: JSON.stringify({ state: "closed" }),
+                });
+            } else {
+                // merge_pr
+                resp = await fetch(`${GITHUB_API}/repos/${ref.repo}/pulls/${ref.number}/merge`, {
+                    method: "PUT",
+                    headers,
+                });
+            }
+            if (!resp.ok) console.warn(`[GitHub] ${action.kind} returned ${resp.status}`);
+        } catch (e) {
+            console.error(`[GitHub] ${action.kind} error:`, (e as Error).message);
         }
     }
 }
