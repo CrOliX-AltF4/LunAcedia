@@ -15,7 +15,11 @@ import type { PendingActionStore } from "../actions/pending_action_store.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
 import type { GoogleTokenStore } from "../auth/google_token_store.js";
-import { findGoogleOAuthConnector, buildGoogleAuthUrl, exchangeGoogleCode } from "../auth/google_oauth_flow.js";
+import {
+    findGoogleOAuthConnector,
+    buildGoogleAuthUrl,
+    exchangeGoogleCode,
+} from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
@@ -163,7 +167,10 @@ export class AcediaApiServer {
 
         const tier = this.tierStore.getTier(action.kind);
         if (tier === "manual") {
-            return { status: "refused", reason: `'${action.kind}' is set to manual — not executable via this endpoint` };
+            return {
+                status: "refused",
+                reason: `'${action.kind}' is set to manual — not executable via this endpoint`,
+            };
         }
         if (tier === "confirm") {
             const pending = this.pendingStore.create(connectorName, action);
@@ -197,8 +204,14 @@ export class AcediaApiServer {
         const key = url.searchParams.get("connector") ?? "";
         const meta = findGoogleOAuthConnector(key);
         const clientId = process.env["GOOGLE_CLIENT_ID"];
-        if (!meta) { json(res, 400, { error: "Unknown or missing connector" }); return; }
-        if (!clientId) { json(res, 503, { error: "GOOGLE_CLIENT_ID not configured" }); return; }
+        if (!meta) {
+            json(res, 400, { error: "Unknown or missing connector" });
+            return;
+        }
+        if (!clientId) {
+            json(res, 503, { error: "GOOGLE_CLIENT_ID not configured" });
+            return;
+        }
 
         const redirectUri = this.resolveOAuthRedirectUri(req);
         const authUrl = buildGoogleAuthUrl(clientId, redirectUri, meta.scopes, meta.key);
@@ -221,8 +234,14 @@ export class AcediaApiServer {
         const oauthError = url.searchParams.get("error");
         const meta = findGoogleOAuthConnector(state);
 
-        if (oauthError) { html("❌ Connexion refusée", oauthError); return; }
-        if (!code || !meta) { html("❌ Requête invalide", "Code ou connecteur manquant."); return; }
+        if (oauthError) {
+            html("❌ Connexion refusée", oauthError);
+            return;
+        }
+        if (!code || !meta) {
+            html("❌ Requête invalide", "Code ou connecteur manquant.");
+            return;
+        }
 
         const clientId = process.env["GOOGLE_CLIENT_ID"] ?? "";
         const clientSecret = process.env["GOOGLE_CLIENT_SECRET"] ?? "";
@@ -377,10 +396,15 @@ export class AcediaApiServer {
             }
 
             const result = await this.dispatchAction(connectorName, action);
-            if (result.status === "not_found") return json(res, 404, { error: `Connector '${connectorName}' not found` });
-            if (result.status === "unsupported") return json(res, 400, { error: `Connector '${connectorName}' does not support actions` });
+            if (result.status === "not_found")
+                return json(res, 404, { error: `Connector '${connectorName}' not found` });
+            if (result.status === "unsupported")
+                return json(res, 400, {
+                    error: `Connector '${connectorName}' does not support actions`,
+                });
             if (result.status === "refused") return json(res, 403, { error: result.reason });
-            if (result.status === "pending") return json(res, 202, { status: "pending", id: result.id });
+            if (result.status === "pending")
+                return json(res, 202, { status: "pending", id: result.id });
             if (result.status === "error") return json(res, 500, { error: "Action failed" });
             return json(res, 204, null);
         }
@@ -390,9 +414,13 @@ export class AcediaApiServer {
         if (method === "POST" && confirmMatch) {
             const id = decodeURIComponent(confirmMatch[1]!);
             const pending = this.pendingStore.consume(id);
-            if (!pending) return json(res, 404, { error: "No such pending action (expired or already resolved)" });
+            if (!pending)
+                return json(res, 404, {
+                    error: "No such pending action (expired or already resolved)",
+                });
             const connector = this.connectors.find((c) => c.name === pending.connector);
-            if (!connector?.executeAction) return json(res, 404, { error: "Connector no longer available" });
+            if (!connector?.executeAction)
+                return json(res, 404, { error: "Connector no longer available" });
             return this.executeConnectorAction(res, connector, pending.action);
         }
 
@@ -401,7 +429,10 @@ export class AcediaApiServer {
         if (method === "POST" && cancelMatch) {
             const id = decodeURIComponent(cancelMatch[1]!);
             const pending = this.pendingStore.consume(id);
-            if (!pending) return json(res, 404, { error: "No such pending action (expired or already resolved)" });
+            if (!pending)
+                return json(res, 404, {
+                    error: "No such pending action (expired or already resolved)",
+                });
             return json(res, 204, null);
         }
 
@@ -457,7 +488,10 @@ export class AcediaApiServer {
             return json(
                 res,
                 200,
-                slots.map((s) => ({ start: new Date(s.start).toISOString(), end: new Date(s.end).toISOString() })),
+                slots.map((s) => ({
+                    start: new Date(s.start).toISOString(),
+                    end: new Date(s.end).toISOString(),
+                })),
             );
         }
 
@@ -527,9 +561,22 @@ export class AcediaApiServer {
             const result = await this.dispatchAction(intent.connector, intent.action);
             if (result.status === "not_found") return json(res, 200, { matched: false });
             if (result.status === "unsupported") return json(res, 200, { matched: false });
-            if (result.status === "refused") return json(res, 200, { matched: true, ...intent, status: "refused", reason: result.reason });
-            if (result.status === "pending") return json(res, 200, { matched: true, ...intent, status: "pending", id: result.id });
-            if (result.status === "error") return json(res, 200, { matched: true, ...intent, status: "error" });
+            if (result.status === "refused")
+                return json(res, 200, {
+                    matched: true,
+                    ...intent,
+                    status: "refused",
+                    reason: result.reason,
+                });
+            if (result.status === "pending")
+                return json(res, 200, {
+                    matched: true,
+                    ...intent,
+                    status: "pending",
+                    id: result.id,
+                });
+            if (result.status === "error")
+                return json(res, 200, { matched: true, ...intent, status: "error" });
             return json(res, 200, { matched: true, ...intent, status: "executed" });
         }
 
@@ -563,7 +610,12 @@ export class AcediaApiServer {
             );
             const hasConflict = relevant.some((e) => e.type === "calendar.conflict");
             const freeSlots = hasConflict
-                ? computeFreeSlots(this.calendarBusyIntervals(), Date.now(), Date.now() + 7 * 86_400_000, 30 * 60_000)
+                ? computeFreeSlots(
+                      this.calendarBusyIntervals(),
+                      Date.now(),
+                      Date.now() + 7 * 86_400_000,
+                      30 * 60_000,
+                  )
                 : [];
             try {
                 const proposals = await this.ai.chat(formatProposalsPrompt(relevant, freeSlots));

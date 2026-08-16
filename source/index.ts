@@ -29,7 +29,8 @@ await googleTokenStore.load();
 const connectors: IConnector[] = [];
 if (process.env["GITHUB_ENABLED"] === "true") connectors.push(new GitHubConnector());
 if (process.env["RSS_ENABLED"] === "true") connectors.push(new RssConnector());
-if (process.env["GMAIL_ENABLED"] === "true") connectors.push(new GmailConnector(emailClassificationStore, googleTokenStore));
+if (process.env["GMAIL_ENABLED"] === "true")
+    connectors.push(new GmailConnector(emailClassificationStore, googleTokenStore));
 if (process.env["GCAL_ENABLED"] === "true") connectors.push(new GcalConnector(googleTokenStore));
 if (process.env["GTASKS_ENABLED"] === "true") connectors.push(new TasksConnector(googleTokenStore));
 if (process.env["HA_ENABLED"] === "true") connectors.push(new HaConnector());

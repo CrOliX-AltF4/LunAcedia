@@ -44,14 +44,17 @@ export function formatProposalsPrompt(
             ? "\n\nOpen calendar slots available for rescheduling (use these exact times, do not invent others):\n" +
               freeSlots
                   .slice(0, 5)
-                  .map((s) => `- ${new Date(s.start).toLocaleString()} → ${new Date(s.end).toLocaleString()}`)
+                  .map(
+                      (s) =>
+                          `- ${new Date(s.start).toLocaleString()} → ${new Date(s.end).toLocaleString()}`,
+                  )
                   .join("\n")
             : "";
 
     return (
         "For each item below, propose one concrete next action in a single short imperative " +
-        "sentence (e.g. \"Decline the client call\", \"Reply confirming attendance\", \"No " +
-        "action needed\"). Prioritize CONFLICT and URGENT items. For a CONFLICT item, if an " +
+        'sentence (e.g. "Decline the client call", "Reply confirming attendance", "No ' +
+        'action needed"). Prioritize CONFLICT and URGENT items. For a CONFLICT item, if an ' +
         "open slot is listed below, name it explicitly as the reschedule target. Do not " +
         "invent facts not present below.\n\n" +
         lines.join("\n") +

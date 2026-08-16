@@ -60,11 +60,12 @@ HA     ──┘
 **Events** — Structured `AcediaEvent` objects: type, source, priority, dedupeKey, body — 7-day dedup TTL
 
 **Actions** — 17 kinds via `POST /api/actions`: Gmail (reply, archive, delete, mark read/unread), Calendar (create/update/delete event), Tasks (create/complete/delete), GitHub (comment, label, create/close issue, open PR, merge PR). Each kind has an autonomy tier, `GET/PATCH /api/config/tiers`:
-  - **auto** — the butler acts with no human signal at all
-  - **confirm** — needs a human signal first, either an explicit request or a proposal it made and is waiting on a "yes" (`POST /api/actions` queues it, `POST /api/actions/:id/confirm` executes it)
-  - **manual** — never executable through the API no matter how explicitly it's requested (the butler may only suggest it as text)
 
-  `merge_pr` is hardcoded to `manual` and cannot be relaxed — merging is always a human action.
+- **auto** — the butler acts with no human signal at all
+- **confirm** — needs a human signal first, either an explicit request or a proposal it made and is waiting on a "yes" (`POST /api/actions` queues it, `POST /api/actions/:id/confirm` executes it)
+- **manual** — never executable through the API no matter how explicitly it's requested (the butler may only suggest it as text)
+
+`merge_pr` is hardcoded to `manual` and cannot be relaxed — merging is always a human action.
 
 **Voice/chat commands** — `POST /api/intent` turns free text ("crée-moi une tâche pour rappeler le rendez-vous") into a structured action and dispatches it through the same tier gate as `POST /api/actions`. Requires `AI_PROVIDER != none`; the model's JSON reply is re-validated field by field before anything executes.
 
@@ -137,12 +138,12 @@ In **APIs & Services → Library**, enable:
 
 **3a. Connect in-app (recommended)** — one click per connector from the dashboard, no manual token copying:
 
-- Add `http://<your-host>:<HTTP_PORT>/api/oauth/google/callback` as an authorized redirect URI on the OAuth client (e.g. `http://localhost:4001/api/oauth/google/callback`) — this is a *different* redirect URI from the OAuth Playground one in 3b, register both if you might use either method
+- Add `http://<your-host>:<HTTP_PORT>/api/oauth/google/callback` as an authorized redirect URI on the OAuth client (e.g. `http://localhost:4001/api/oauth/google/callback`) — this is a _different_ redirect URI from the OAuth Playground one in 3b, register both if you might use either method
 - Fill in `.env`:
-  ```bash
-  GOOGLE_CLIENT_ID=...
-  GOOGLE_CLIENT_SECRET=...
-  ```
+    ```bash
+    GOOGLE_CLIENT_ID=...
+    GOOGLE_CLIENT_SECRET=...
+    ```
 - Start LunAcedia, open the dashboard → **⚙ Réglages** → click **Connecter** next to Gmail / Google Calendar / Google Tasks — each opens Google's consent screen and stores the refresh token automatically (`GoogleTokenStore`, no restart needed, `GET /api/oauth/google/status` reports connection state)
 - `GMAIL_ENABLED` / `GCAL_ENABLED` / `GTASKS_ENABLED` still need to be `true` at process start for the connector to exist at all — this flow fixes "enabled but missing/expired token", not "never enabled"
 
@@ -158,19 +159,19 @@ In **APIs & Services → Library**, enable:
 - **Authorize APIs** → sign in → accept (you will see "This app isn't verified" — click **Continue**, you are a test user)
 - **Step 2 → Exchange authorization code for tokens** → copy the `refresh_token`
 - Fill in `.env` — the same Client ID, Client Secret, and refresh token work for all three Google connectors:
-  ```bash
-  GMAIL_CLIENT_ID=...
-  GMAIL_CLIENT_SECRET=...
-  GMAIL_REFRESH_TOKEN=<token from OAuth Playground>
+    ```bash
+    GMAIL_CLIENT_ID=...
+    GMAIL_CLIENT_SECRET=...
+    GMAIL_REFRESH_TOKEN=<token from OAuth Playground>
 
-  GCAL_CLIENT_ID=...        # same values
-  GCAL_CLIENT_SECRET=...
-  GCAL_REFRESH_TOKEN=<same token>
+    GCAL_CLIENT_ID=...        # same values
+    GCAL_CLIENT_SECRET=...
+    GCAL_REFRESH_TOKEN=<same token>
 
-  GTASKS_CLIENT_ID=...
-  GTASKS_CLIENT_SECRET=...
-  GTASKS_REFRESH_TOKEN=<same token>
-  ```
+    GTASKS_CLIENT_ID=...
+    GTASKS_CLIENT_SECRET=...
+    GTASKS_REFRESH_TOKEN=<same token>
+    ```
 
 ---
 

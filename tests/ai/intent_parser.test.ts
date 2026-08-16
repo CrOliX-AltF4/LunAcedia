@@ -32,22 +32,26 @@ describe("parseIntentResponse", () => {
     });
 
     it("returns null for an unknown connector", () => {
-        const raw = '{"matched":true,"connector":"Dropbox","action":{"kind":"reply","sourceId":"1","body":"hi"}}';
+        const raw =
+            '{"matched":true,"connector":"Dropbox","action":{"kind":"reply","sourceId":"1","body":"hi"}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
     it("returns null for merge_pr regardless of shape validity", () => {
-        const raw = '{"matched":true,"connector":"GitHub","action":{"kind":"merge_pr","sourceId":"owner/repo#1"}}';
+        const raw =
+            '{"matched":true,"connector":"GitHub","action":{"kind":"merge_pr","sourceId":"owner/repo#1"}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
     it("returns null for an unrecognized kind", () => {
-        const raw = '{"matched":true,"connector":"Gmail","action":{"kind":"delete_forever","sourceId":"1"}}';
+        const raw =
+            '{"matched":true,"connector":"Gmail","action":{"kind":"delete_forever","sourceId":"1"}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
     it("parses a valid simple-sourceId action (mark_email_read)", () => {
-        const raw = '{"matched":true,"connector":"Gmail","action":{"kind":"mark_email_read","sourceId":"msg1"}}';
+        const raw =
+            '{"matched":true,"connector":"Gmail","action":{"kind":"mark_email_read","sourceId":"msg1"}}';
         expect(parseIntentResponse(raw)).toEqual({
             connector: "Gmail",
             action: { kind: "mark_email_read", sourceId: "msg1" },
@@ -55,12 +59,14 @@ describe("parseIntentResponse", () => {
     });
 
     it("rejects a simple-sourceId action with an empty sourceId", () => {
-        const raw = '{"matched":true,"connector":"Gmail","action":{"kind":"mark_email_read","sourceId":""}}';
+        const raw =
+            '{"matched":true,"connector":"Gmail","action":{"kind":"mark_email_read","sourceId":""}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
     it("parses a valid reply action", () => {
-        const raw = '{"matched":true,"connector":"Gmail","action":{"kind":"reply","sourceId":"msg1","body":"On it."}}';
+        const raw =
+            '{"matched":true,"connector":"Gmail","action":{"kind":"reply","sourceId":"msg1","body":"On it."}}';
         expect(parseIntentResponse(raw)).toEqual({
             connector: "Gmail",
             action: { kind: "reply", sourceId: "msg1", body: "On it." },
@@ -68,7 +74,8 @@ describe("parseIntentResponse", () => {
     });
 
     it("parses a valid add_label action", () => {
-        const raw = '{"matched":true,"connector":"GitHub","action":{"kind":"add_label","sourceId":"o/r#1","label":"bug"}}';
+        const raw =
+            '{"matched":true,"connector":"GitHub","action":{"kind":"add_label","sourceId":"o/r#1","label":"bug"}}';
         expect(parseIntentResponse(raw)).toEqual({
             connector: "GitHub",
             action: { kind: "add_label", sourceId: "o/r#1", label: "bug" },
@@ -76,7 +83,8 @@ describe("parseIntentResponse", () => {
     });
 
     it("rejects add_label without a label", () => {
-        const raw = '{"matched":true,"connector":"GitHub","action":{"kind":"add_label","sourceId":"o/r#1"}}';
+        const raw =
+            '{"matched":true,"connector":"GitHub","action":{"kind":"add_label","sourceId":"o/r#1"}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
@@ -87,18 +95,25 @@ describe("parseIntentResponse", () => {
             connector: "Calendar",
             action: {
                 kind: "create_event",
-                fields: { summary: "Sync", start: "2026-09-01T10:00:00Z", end: "2026-09-01T10:30:00Z", location: "Room A" },
+                fields: {
+                    summary: "Sync",
+                    start: "2026-09-01T10:00:00Z",
+                    end: "2026-09-01T10:30:00Z",
+                    location: "Room A",
+                },
             },
         });
     });
 
     it("rejects create_event missing a required field (end)", () => {
-        const raw = '{"matched":true,"connector":"Calendar","action":{"kind":"create_event","fields":{"summary":"Sync","start":"2026-09-01T10:00:00Z"}}}';
+        const raw =
+            '{"matched":true,"connector":"Calendar","action":{"kind":"create_event","fields":{"summary":"Sync","start":"2026-09-01T10:00:00Z"}}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
     it("parses a valid create_task action", () => {
-        const raw = '{"matched":true,"connector":"Tasks","action":{"kind":"create_task","fields":{"title":"Buy milk","due":"2026-09-01"}}}';
+        const raw =
+            '{"matched":true,"connector":"Tasks","action":{"kind":"create_task","fields":{"title":"Buy milk","due":"2026-09-01"}}}';
         expect(parseIntentResponse(raw)).toEqual({
             connector: "Tasks",
             action: { kind: "create_task", fields: { title: "Buy milk", due: "2026-09-01" } },
@@ -106,12 +121,14 @@ describe("parseIntentResponse", () => {
     });
 
     it("rejects create_task without a title", () => {
-        const raw = '{"matched":true,"connector":"Tasks","action":{"kind":"create_task","fields":{"due":"2026-09-01"}}}';
+        const raw =
+            '{"matched":true,"connector":"Tasks","action":{"kind":"create_task","fields":{"due":"2026-09-01"}}}';
         expect(parseIntentResponse(raw)).toBeNull();
     });
 
     it("parses a valid create_issue action", () => {
-        const raw = '{"matched":true,"connector":"GitHub","action":{"kind":"create_issue","fields":{"repo":"o/r","title":"Bug"}}}';
+        const raw =
+            '{"matched":true,"connector":"GitHub","action":{"kind":"create_issue","fields":{"repo":"o/r","title":"Bug"}}}';
         expect(parseIntentResponse(raw)).toEqual({
             connector: "GitHub",
             action: { kind: "create_issue", fields: { repo: "o/r", title: "Bug" } },
@@ -119,17 +136,23 @@ describe("parseIntentResponse", () => {
     });
 
     it("parses a valid open_pr action, rejects one missing head/base", () => {
-        const ok = '{"matched":true,"connector":"GitHub","action":{"kind":"open_pr","fields":{"repo":"o/r","title":"Fix","head":"fix","base":"main"}}}';
+        const ok =
+            '{"matched":true,"connector":"GitHub","action":{"kind":"open_pr","fields":{"repo":"o/r","title":"Fix","head":"fix","base":"main"}}}';
         expect(parseIntentResponse(ok)).toEqual({
             connector: "GitHub",
-            action: { kind: "open_pr", fields: { repo: "o/r", title: "Fix", head: "fix", base: "main" } },
+            action: {
+                kind: "open_pr",
+                fields: { repo: "o/r", title: "Fix", head: "fix", base: "main" },
+            },
         });
-        const missing = '{"matched":true,"connector":"GitHub","action":{"kind":"open_pr","fields":{"repo":"o/r","title":"Fix"}}}';
+        const missing =
+            '{"matched":true,"connector":"GitHub","action":{"kind":"open_pr","fields":{"repo":"o/r","title":"Fix"}}}';
         expect(parseIntentResponse(missing)).toBeNull();
     });
 
     it("parses a valid update_event action", () => {
-        const raw = '{"matched":true,"connector":"Calendar","action":{"kind":"update_event","sourceId":"primary/ev1","fields":{"title":"New"}}}';
+        const raw =
+            '{"matched":true,"connector":"Calendar","action":{"kind":"update_event","sourceId":"primary/ev1","fields":{"title":"New"}}}';
         expect(parseIntentResponse(raw)).toEqual({
             connector: "Calendar",
             action: { kind: "update_event", sourceId: "primary/ev1", fields: { title: "New" } },

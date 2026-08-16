@@ -65,7 +65,9 @@ describe("formatProposalsPrompt", () => {
     });
 
     it("includes the event title and body", () => {
-        const result = formatProposalsPrompt([makeEvent({ title: "Server down", body: "prod outage" })]);
+        const result = formatProposalsPrompt([
+            makeEvent({ title: "Server down", body: "prod outage" }),
+        ]);
         expect(result).toContain("Server down");
         expect(result).toContain("prod outage");
     });

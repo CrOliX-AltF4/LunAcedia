@@ -232,11 +232,14 @@ export class GitHubConnector implements IConnector {
         try {
             let resp: Response;
             if (action.kind === "comment_issue") {
-                resp = await fetch(`${GITHUB_API}/repos/${ref.repo}/issues/${ref.number}/comments`, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify({ body: action.body }),
-                });
+                resp = await fetch(
+                    `${GITHUB_API}/repos/${ref.repo}/issues/${ref.number}/comments`,
+                    {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify({ body: action.body }),
+                    },
+                );
             } else if (action.kind === "add_label") {
                 resp = await fetch(`${GITHUB_API}/repos/${ref.repo}/issues/${ref.number}/labels`, {
                     method: "POST",

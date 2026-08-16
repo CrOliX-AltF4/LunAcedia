@@ -180,7 +180,12 @@ export class GmailConnector implements IConnector {
             return;
         }
 
-        if (action.kind === "archive_email" || action.kind === "delete_email" || action.kind === "mark_email_read" || action.kind === "mark_email_unread") {
+        if (
+            action.kind === "archive_email" ||
+            action.kind === "delete_email" ||
+            action.kind === "mark_email_read" ||
+            action.kind === "mark_email_unread"
+        ) {
             await this.modifyMessage(token, action.kind, action.sourceId);
             return;
         }
@@ -267,11 +272,17 @@ export class GmailConnector implements IConnector {
                     : undefined;
 
         try {
-            const resp = await fetch(`${GMAIL_API}/messages/${encodeURIComponent(messageId)}/${endpoint}`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                ...(body ? { body: JSON.stringify(body) } : {}),
-            });
+            const resp = await fetch(
+                `${GMAIL_API}/messages/${encodeURIComponent(messageId)}/${endpoint}`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    ...(body ? { body: JSON.stringify(body) } : {}),
+                },
+            );
             if (!resp.ok) console.warn(`[Gmail] ${kind} returned ${resp.status}`);
         } catch (e) {
             console.error(`[Gmail] ${kind} error:`, (e as Error).message);

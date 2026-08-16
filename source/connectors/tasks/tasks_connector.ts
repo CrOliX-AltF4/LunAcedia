@@ -76,12 +76,7 @@ export class TasksConnector implements IConnector {
 
         let token: string;
         try {
-            token = await getGoogleToken(
-                this.clientId,
-                this.clientSecret,
-                refreshToken,
-                "gtasks",
-            );
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gtasks");
         } catch (e) {
             console.error("[Tasks] token refresh error:", (e as Error).message);
             return [];
@@ -137,7 +132,12 @@ export class TasksConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "complete_task" && action.kind !== "create_task" && action.kind !== "delete_task") return;
+        if (
+            action.kind !== "complete_task" &&
+            action.kind !== "create_task" &&
+            action.kind !== "delete_task"
+        )
+            return;
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
@@ -179,7 +179,8 @@ export class TasksConnector implements IConnector {
         if (action.kind === "delete_task") {
             try {
                 const resp = await fetch(taskUrl, { method: "DELETE", headers });
-                if (!resp.ok && resp.status !== 404) console.warn(`[Tasks] delete_task returned ${resp.status}`);
+                if (!resp.ok && resp.status !== 404)
+                    console.warn(`[Tasks] delete_task returned ${resp.status}`);
             } catch (e) {
                 console.error("[Tasks] delete_task error:", (e as Error).message);
             }

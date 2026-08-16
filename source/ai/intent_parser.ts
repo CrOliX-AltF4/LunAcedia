@@ -78,7 +78,10 @@ export function parseIntentResponse(raw: string): ParsedIntent | null {
     let parsed: unknown;
     try {
         // Strip markdown code fences if the model added them despite instructions.
-        const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+        const cleaned = raw
+            .trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/```\s*$/i, "");
         parsed = JSON.parse(cleaned);
     } catch {
         return null;
@@ -103,22 +106,46 @@ export function parseIntentResponse(raw: string): ParsedIntent | null {
 
     if (kind === "reply" || kind === "comment_issue") {
         if (!isNonEmptyString(a["sourceId"]) || !isString(a["body"])) return null;
-        return { connector, action: { kind, sourceId: a["sourceId"], body: a["body"] } as ConnectorAction };
+        return {
+            connector,
+            action: { kind, sourceId: a["sourceId"], body: a["body"] } as ConnectorAction,
+        };
     }
 
     if (kind === "add_label") {
         if (!isNonEmptyString(a["sourceId"]) || !isNonEmptyString(a["label"])) return null;
-        return { connector, action: { kind: "add_label", sourceId: a["sourceId"], label: a["label"] } };
+        return {
+            connector,
+            action: { kind: "add_label", sourceId: a["sourceId"], label: a["label"] },
+        };
     }
 
     if (kind === "update_event") {
-        if (!isNonEmptyString(a["sourceId"]) || typeof a["fields"] !== "object" || a["fields"] === null) return null;
-        return { connector, action: { kind: "update_event", sourceId: a["sourceId"], fields: a["fields"] as Record<string, string> } };
+        if (
+            !isNonEmptyString(a["sourceId"]) ||
+            typeof a["fields"] !== "object" ||
+            a["fields"] === null
+        )
+            return null;
+        return {
+            connector,
+            action: {
+                kind: "update_event",
+                sourceId: a["sourceId"],
+                fields: a["fields"] as Record<string, string>,
+            },
+        };
     }
 
     if (kind === "create_event") {
         const f = a["fields"] as Record<string, unknown> | undefined;
-        if (!f || !isNonEmptyString(f["summary"]) || !isNonEmptyString(f["start"]) || !isNonEmptyString(f["end"])) return null;
+        if (
+            !f ||
+            !isNonEmptyString(f["summary"]) ||
+            !isNonEmptyString(f["start"]) ||
+            !isNonEmptyString(f["end"])
+        )
+            return null;
         return {
             connector,
             action: {
@@ -157,18 +184,38 @@ export function parseIntentResponse(raw: string): ParsedIntent | null {
         if (!f || !isNonEmptyString(f["repo"]) || !isNonEmptyString(f["title"])) return null;
         return {
             connector,
-            action: { kind: "create_issue", fields: { repo: f["repo"], title: f["title"], ...(isString(f["body"]) ? { body: f["body"] } : {}) } },
+            action: {
+                kind: "create_issue",
+                fields: {
+                    repo: f["repo"],
+                    title: f["title"],
+                    ...(isString(f["body"]) ? { body: f["body"] } : {}),
+                },
+            },
         };
     }
 
     if (kind === "open_pr") {
         const f = a["fields"] as Record<string, unknown> | undefined;
-        if (!f || !isNonEmptyString(f["repo"]) || !isNonEmptyString(f["title"]) || !isNonEmptyString(f["head"]) || !isNonEmptyString(f["base"])) return null;
+        if (
+            !f ||
+            !isNonEmptyString(f["repo"]) ||
+            !isNonEmptyString(f["title"]) ||
+            !isNonEmptyString(f["head"]) ||
+            !isNonEmptyString(f["base"])
+        )
+            return null;
         return {
             connector,
             action: {
                 kind: "open_pr",
-                fields: { repo: f["repo"], title: f["title"], head: f["head"], base: f["base"], ...(isString(f["body"]) ? { body: f["body"] } : {}) },
+                fields: {
+                    repo: f["repo"],
+                    title: f["title"],
+                    head: f["head"],
+                    base: f["base"],
+                    ...(isString(f["body"]) ? { body: f["body"] } : {}),
+                },
             },
         };
     }

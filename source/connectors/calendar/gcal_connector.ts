@@ -109,12 +109,7 @@ export class GcalConnector implements IConnector {
 
         let token: string;
         try {
-            token = await getGoogleToken(
-                this.clientId,
-                this.clientSecret,
-                refreshToken,
-                "gcal",
-            );
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gcal");
         } catch (e) {
             console.error("[GCal] token refresh error:", (e as Error).message);
             return [];
@@ -177,7 +172,12 @@ export class GcalConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "update_event" && action.kind !== "create_event" && action.kind !== "delete_event") return;
+        if (
+            action.kind !== "update_event" &&
+            action.kind !== "create_event" &&
+            action.kind !== "delete_event"
+        )
+            return;
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
@@ -214,11 +214,14 @@ export class GcalConnector implements IConnector {
             if (action.fields.description) body["description"] = action.fields.description;
             if (action.fields.location) body["location"] = action.fields.location;
             try {
-                const resp = await fetch(`${GCAL_API}/calendars/${encodeURIComponent(calId)}/events`, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(body),
-                });
+                const resp = await fetch(
+                    `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events`,
+                    {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify(body),
+                    },
+                );
                 if (!resp.ok) console.warn(`[GCal] create_event returned ${resp.status}`);
             } catch (e) {
                 console.error("[GCal] create_event error:", (e as Error).message);
@@ -232,7 +235,8 @@ export class GcalConnector implements IConnector {
         if (action.kind === "delete_event") {
             try {
                 const resp = await fetch(eventUrl, { method: "DELETE", headers });
-                if (!resp.ok && resp.status !== 410) console.warn(`[GCal] delete_event returned ${resp.status}`);
+                if (!resp.ok && resp.status !== 410)
+                    console.warn(`[GCal] delete_event returned ${resp.status}`);
             } catch (e) {
                 console.error("[GCal] delete_event error:", (e as Error).message);
             }
@@ -245,7 +249,11 @@ export class GcalConnector implements IConnector {
         if (action.fields["description"]) patch["description"] = action.fields["description"];
         if (action.fields["location"]) patch["location"] = action.fields["location"];
         try {
-            const resp = await fetch(eventUrl, { method: "PATCH", headers, body: JSON.stringify(patch) });
+            const resp = await fetch(eventUrl, {
+                method: "PATCH",
+                headers,
+                body: JSON.stringify(patch),
+            });
             if (!resp.ok) console.warn(`[GCal] update_event returned ${resp.status}`);
         } catch (e) {
             console.error("[GCal] update_event error:", (e as Error).message);

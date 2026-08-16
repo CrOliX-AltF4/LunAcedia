@@ -32,7 +32,10 @@ describe("PendingActionStore", () => {
         const store = new PendingActionStore();
         const a = store.create("Gmail", { kind: "reply", sourceId: "m1", body: "hi" });
         const b = store.create("Tasks", { kind: "complete", sourceId: "t1" });
-        const ids = store.list().map((e) => e.id).sort();
+        const ids = store
+            .list()
+            .map((e) => e.id)
+            .sort();
         expect(ids).toEqual([a.id, b.id].sort());
     });
 

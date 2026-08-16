@@ -233,7 +233,10 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
             return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "complete_task", sourceId: "mylist/task-xyz" });
+        await new TasksConnector().executeAction({
+            kind: "complete_task",
+            sourceId: "mylist/task-xyz",
+        });
         const patchCall = mockFetch.mock.calls.find(
             ([, o]: [string, RequestInit]) => o?.method === "PATCH",
         );
@@ -259,13 +262,23 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
     it("create_task: POSTs a new task to the target list", async () => {
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             if (String(url).includes("oauth2"))
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            if (opts?.method === "POST") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "POST")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
             return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "create_task", fields: { title: "Buy milk", due: "2026-09-01" } });
-        const postCall = mockFetch.mock.calls.find(([u, o]: [string, RequestInit]) => o?.method === "POST" && !String(u).includes("oauth2"));
+        await new TasksConnector().executeAction({
+            kind: "create_task",
+            fields: { title: "Buy milk", due: "2026-09-01" },
+        });
+        const postCall = mockFetch.mock.calls.find(
+            ([u, o]: [string, RequestInit]) =>
+                o?.method === "POST" && !String(u).includes("oauth2"),
+        );
         expect(postCall).toBeDefined();
         const body = JSON.parse(postCall![1]!.body as string) as { title: string; due: string };
         expect(body.title).toBe("Buy milk");
@@ -275,26 +288,45 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
     it("create_task: uses fields.listId when given instead of the configured default", async () => {
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             if (String(url).includes("oauth2"))
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            if (opts?.method === "POST") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "POST")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
             return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "create_task", fields: { title: "Review PR", listId: "mylist" } });
-        const postCall = mockFetch.mock.calls.find(([u, o]: [string, RequestInit]) => o?.method === "POST" && !String(u).includes("oauth2"));
+        await new TasksConnector().executeAction({
+            kind: "create_task",
+            fields: { title: "Review PR", listId: "mylist" },
+        });
+        const postCall = mockFetch.mock.calls.find(
+            ([u, o]: [string, RequestInit]) =>
+                o?.method === "POST" && !String(u).includes("oauth2"),
+        );
         expect(String(postCall![0]!)).toContain("mylist");
     });
 
     it("delete_task: DELETEs the task at {listId}/{taskId}", async () => {
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             if (String(url).includes("oauth2"))
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            if (opts?.method === "DELETE") return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "DELETE")
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
             return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "delete_task", sourceId: "mylist/task-999" });
-        const delCall = mockFetch.mock.calls.find(([, o]: [string, RequestInit]) => o?.method === "DELETE");
+        await new TasksConnector().executeAction({
+            kind: "delete_task",
+            sourceId: "mylist/task-999",
+        });
+        const delCall = mockFetch.mock.calls.find(
+            ([, o]: [string, RequestInit]) => o?.method === "DELETE",
+        );
         expect(delCall).toBeDefined();
         expect(String(delCall![0]!)).toContain("task-999");
     });
@@ -303,12 +335,19 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
             if (String(url).includes("oauth2"))
-                return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
-            if (opts?.method === "DELETE") return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "DELETE")
+                return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
             return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
         });
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "delete_task", sourceId: "mylist/task-999" });
+        await new TasksConnector().executeAction({
+            kind: "delete_task",
+            sourceId: "mylist/task-999",
+        });
         expect(warnSpy).not.toHaveBeenCalled();
         warnSpy.mockRestore();
     });

@@ -45,11 +45,19 @@ describe("EmailClassificationStore", () => {
 
     it("load() restores a persisted config", async () => {
         h.mockReadFile.mockResolvedValue(
-            JSON.stringify({ vipSenders: ["a@b.com"], urgentKeywords: ["urgent"], normalKeywords: [] }),
+            JSON.stringify({
+                vipSenders: ["a@b.com"],
+                urgentKeywords: ["urgent"],
+                normalKeywords: [],
+            }),
         );
         const store = new EmailClassificationStore("/tmp/x.json");
         await store.load();
-        expect(store.getAll()).toEqual({ vipSenders: ["a@b.com"], urgentKeywords: ["urgent"], normalKeywords: [] });
+        expect(store.getAll()).toEqual({
+            vipSenders: ["a@b.com"],
+            urgentKeywords: ["urgent"],
+            normalKeywords: [],
+        });
     });
 
     it("compileRules() orders vipSenders, then urgentKeywords, then normalKeywords", async () => {

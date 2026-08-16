@@ -36,8 +36,10 @@ export class EmailClassificationStore {
             const raw = await fs.readFile(this.configPath, "utf-8");
             const parsed = JSON.parse(raw) as Partial<EmailClassificationConfig>;
             if (isStringArray(parsed.vipSenders)) this.config.vipSenders = parsed.vipSenders;
-            if (isStringArray(parsed.urgentKeywords)) this.config.urgentKeywords = parsed.urgentKeywords;
-            if (isStringArray(parsed.normalKeywords)) this.config.normalKeywords = parsed.normalKeywords;
+            if (isStringArray(parsed.urgentKeywords))
+                this.config.urgentKeywords = parsed.urgentKeywords;
+            if (isStringArray(parsed.normalKeywords))
+                this.config.normalKeywords = parsed.normalKeywords;
         } catch {
             // File absent or unreadable — keep defaults (empty), that's fine
         }
@@ -64,16 +66,30 @@ export class EmailClassificationStore {
      *  normalKeywords maps to "normal"; first match wins downstream in classifyEmail(). */
     compileRules(): EmailRule[] {
         return [
-            ...this.config.vipSenders.map((s): EmailRule => ({ senderPattern: s, priority: "urgent", label: "VIP" })),
-            ...this.config.urgentKeywords.map((k): EmailRule => ({ senderPattern: k, priority: "urgent", label: "urgent keyword" })),
-            ...this.config.normalKeywords.map((k): EmailRule => ({ senderPattern: k, priority: "normal", label: "normal keyword" })),
+            ...this.config.vipSenders.map((s): EmailRule => ({
+                senderPattern: s,
+                priority: "urgent",
+                label: "VIP",
+            })),
+            ...this.config.urgentKeywords.map((k): EmailRule => ({
+                senderPattern: k,
+                priority: "urgent",
+                label: "urgent keyword",
+            })),
+            ...this.config.normalKeywords.map((k): EmailRule => ({
+                senderPattern: k,
+                priority: "normal",
+                label: "normal keyword",
+            })),
         ];
     }
 
     async patch(updates: Partial<EmailClassificationConfig>): Promise<void> {
         if (isStringArray(updates.vipSenders)) this.config.vipSenders = updates.vipSenders;
-        if (isStringArray(updates.urgentKeywords)) this.config.urgentKeywords = updates.urgentKeywords;
-        if (isStringArray(updates.normalKeywords)) this.config.normalKeywords = updates.normalKeywords;
+        if (isStringArray(updates.urgentKeywords))
+            this.config.urgentKeywords = updates.urgentKeywords;
+        if (isStringArray(updates.normalKeywords))
+            this.config.normalKeywords = updates.normalKeywords;
         await this.save();
     }
 

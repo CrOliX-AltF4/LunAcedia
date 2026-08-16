@@ -275,7 +275,10 @@ describe("GitHubConnector.executeAction", () => {
         delete process.env["GITHUB_TOKEN"];
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo#1" });
+        await new GitHubConnector().executeAction({
+            kind: "close_issue",
+            sourceId: "owner/repo#1",
+        });
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
@@ -295,8 +298,12 @@ describe("GitHubConnector.executeAction", () => {
             body: "Looking into it.",
         });
         const [url, opts] = mockFetch.mock.calls[0]!;
-        expect(String(url)).toBe("https://api.github.com/repos/CrOliX-AltF4/LunAnima/issues/42/comments");
-        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({ body: "Looking into it." });
+        expect(String(url)).toBe(
+            "https://api.github.com/repos/CrOliX-AltF4/LunAnima/issues/42/comments",
+        );
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({
+            body: "Looking into it.",
+        });
     });
 
     it("add_label: POSTs the label array to /issues/:number/labels", async () => {
@@ -309,13 +316,18 @@ describe("GitHubConnector.executeAction", () => {
         });
         const [url, opts] = mockFetch.mock.calls[0]!;
         expect(String(url)).toBe("https://api.github.com/repos/owner/repo/issues/7/labels");
-        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({ labels: ["needs-triage"] });
+        expect(JSON.parse((opts as RequestInit).body as string)).toEqual({
+            labels: ["needs-triage"],
+        });
     });
 
     it("close_issue: PATCHes state to closed", async () => {
         const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
         vi.stubGlobal("fetch", mockFetch);
-        await new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo#3" });
+        await new GitHubConnector().executeAction({
+            kind: "close_issue",
+            sourceId: "owner/repo#3",
+        });
         const [url, opts] = mockFetch.mock.calls[0]!;
         expect((opts as RequestInit).method).toBe("PATCH");
         expect(String(url)).toBe("https://api.github.com/repos/owner/repo/issues/3");
@@ -342,7 +354,13 @@ describe("GitHubConnector.executeAction", () => {
         vi.stubGlobal("fetch", mockFetch);
         await new GitHubConnector().executeAction({
             kind: "open_pr",
-            fields: { repo: "owner/repo", title: "Fix typo", head: "fix/typo", base: "main", body: "" },
+            fields: {
+                repo: "owner/repo",
+                title: "Fix typo",
+                head: "fix/typo",
+                base: "main",
+                body: "",
+            },
         });
         const [url, opts] = mockFetch.mock.calls[0]!;
         expect(String(url)).toBe("https://api.github.com/repos/owner/repo/pulls");
@@ -367,7 +385,10 @@ describe("GitHubConnector.executeAction", () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-        await new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo-no-hash" });
+        await new GitHubConnector().executeAction({
+            kind: "close_issue",
+            sourceId: "owner/repo-no-hash",
+        });
         expect(mockFetch).not.toHaveBeenCalled();
         expect(warnSpy).toHaveBeenCalled();
         warnSpy.mockRestore();

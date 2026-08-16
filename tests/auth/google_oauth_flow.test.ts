@@ -28,11 +28,18 @@ describe("findGoogleOAuthConnector", () => {
 describe("buildGoogleAuthUrl", () => {
     it("includes client_id, redirect_uri, scopes, and state", () => {
         const url = new URL(
-            buildGoogleAuthUrl("cid", "http://localhost:4001/api/oauth/google/callback", ["scope-a", "scope-b"], "gmail"),
+            buildGoogleAuthUrl(
+                "cid",
+                "http://localhost:4001/api/oauth/google/callback",
+                ["scope-a", "scope-b"],
+                "gmail",
+            ),
         );
         expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
         expect(url.searchParams.get("client_id")).toBe("cid");
-        expect(url.searchParams.get("redirect_uri")).toBe("http://localhost:4001/api/oauth/google/callback");
+        expect(url.searchParams.get("redirect_uri")).toBe(
+            "http://localhost:4001/api/oauth/google/callback",
+        );
         expect(url.searchParams.get("scope")).toBe("scope-a scope-b");
         expect(url.searchParams.get("state")).toBe("gmail");
         expect(url.searchParams.get("access_type")).toBe("offline");
@@ -53,7 +60,12 @@ describe("exchangeGoogleCode", () => {
                 json: () => Promise.resolve({ refresh_token: "rt-xyz" }),
             }),
         );
-        const result = await exchangeGoogleCode("cid", "secret", "code123", "http://localhost/callback");
+        const result = await exchangeGoogleCode(
+            "cid",
+            "secret",
+            "code123",
+            "http://localhost/callback",
+        );
         expect(result.refreshToken).toBe("rt-xyz");
     });
 
@@ -62,7 +74,12 @@ describe("exchangeGoogleCode", () => {
             "fetch",
             vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }),
         );
-        const result = await exchangeGoogleCode("cid", "secret", "code123", "http://localhost/callback");
+        const result = await exchangeGoogleCode(
+            "cid",
+            "secret",
+            "code123",
+            "http://localhost/callback",
+        );
         expect(result.refreshToken).toBeNull();
     });
 
@@ -75,8 +92,8 @@ describe("exchangeGoogleCode", () => {
                 text: () => Promise.resolve('{"error":"invalid_grant"}'),
             }),
         );
-        await expect(exchangeGoogleCode("cid", "secret", "bad-code", "http://localhost/callback")).rejects.toThrow(
-            "invalid_grant",
-        );
+        await expect(
+            exchangeGoogleCode("cid", "secret", "bad-code", "http://localhost/callback"),
+        ).rejects.toThrow("invalid_grant");
     });
 });
