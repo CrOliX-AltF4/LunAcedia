@@ -52,6 +52,37 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 #digest-box h3{color:var(--accent);margin-bottom:12px}
 #digest-text{font-size:14px;line-height:1.7;white-space:pre-wrap}
 #digest-close{margin-top:14px}
+/* command bar */
+#cmdbar{padding:10px 20px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)}
+#cmd-input{flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:6px;font-size:13px;font-family:inherit}
+#cmd-input:focus{outline:none;border-color:var(--accent)}
+#cmd-status{font-size:12px;color:var(--muted);white-space:nowrap}
+/* pending actions */
+#pending{padding:0 20px;max-width:900px}
+#pending.empty{display:none}
+.pending-row{background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.pending-row span{flex:1;font-size:13px}
+.pending-row button{padding:4px 12px;font-size:12px}
+.pending-row .confirm{border-color:var(--accent);color:var(--accent)}
+.pending-row .cancel{color:var(--urgent)}
+/* settings modal */
+#settings{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:100}
+#settings.open{display:flex}
+#settings-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:560px;width:90%;max-height:85vh;overflow-y:auto}
+#settings-box h3{color:var(--accent);margin-bottom:14px}
+#settings-box h4{font-size:13px;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+#settings-box h4:first-of-type{margin-top:0}
+.src-row{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px}
+.src-row .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.src-row .dot.on{background:#4ade80}
+.src-row span{flex:1}
+.tier-row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px}
+.tier-row span{flex:1}
+select,textarea{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;font-family:inherit}
+textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
+.field-hint{font-size:11px;color:var(--muted);margin:-6px 0 8px}
+#settings-save{margin-top:14px}
+#settings-status{font-size:12px;color:var(--accent);margin-left:10px}
 </style>
 </head>
 <body>
@@ -67,9 +98,33 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 
 <div id="digest">
   <div id="digest-box">
-    <h3>Digest</h3>
+    <h3 id="digest-title">Digest</h3>
     <div id="digest-text">Loading…</div>
     <button id="digest-close" onclick="closeDigest()">Close</button>
+  </div>
+</div>
+
+<div id="settings">
+  <div id="settings-box">
+    <h3>⚙ Réglages</h3>
+
+    <h4>Sources</h4>
+    <div id="src-list"></div>
+
+    <h4>Paliers d'autonomie</h4>
+    <div class="field-hint">Auto = l'IA agit seule. Confirmation = sur demande explicite ou après proposition. Manuel = jamais l'IA, quoi qu'il arrive.</div>
+    <div id="tier-list"></div>
+
+    <h4>Classification email</h4>
+    <div class="field-hint">Un par ligne. Expéditeurs/mots-clés VIP et urgents passent en priorité urgente, mots-clés normaux en priorité normale.</div>
+    <textarea id="vip-senders" placeholder="boss@corp.com"></textarea>
+    <textarea id="urgent-keywords" placeholder="urgent&#10;deadline"></textarea>
+    <textarea id="normal-keywords" placeholder="newsletter"></textarea>
+
+    <button id="settings-save" onclick="saveSettings()">Enregistrer</button>
+    <span id="settings-status"></span>
+    <br><br>
+    <button onclick="closeSettings()">Fermer</button>
   </div>
 </div>
 
@@ -77,9 +132,18 @@ button:hover{border-color:var(--accent);color:var(--accent)}
   <h1>◆ LunAcedia</h1>
   <span id="badge">0</span>
   <div class="spacer"></div>
+  <button onclick="openProposals()">Propositions</button>
+  <button onclick="openFreeSlots()">Créneaux libres</button>
   <button onclick="openDigest()">Digest</button>
+  <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="markAll()">Mark all read</button>
 </header>
+
+<div id="cmdbar">
+  <input id="cmd-input" type="text" placeholder="Dis-moi ce qu'il faut faire… (ex. crée une tâche pour rappeler le rendez-vous)" onkeydown="if(event.key==='Enter')sendCommand()" />
+  <button onclick="sendCommand()">Envoyer</button>
+  <span id="cmd-status"></span>
+</div>
 
 <div id="filters">
   <span class="chip active" data-f="all">All</span>
@@ -94,6 +158,7 @@ button:hover{border-color:var(--accent);color:var(--accent)}
   <span class="chip" data-f="ha">${CONNECTOR_REGISTRY.ha.label}</span>
 </div>
 
+<div id="pending" class="empty"></div>
 <div id="list"></div>
 <div id="empty">No events yet.</div>
 
@@ -180,18 +245,194 @@ async function markAll(){
   await req('/api/events/read-all',{method:'POST'}).catch(()=>{});
 }
 
-async function openDigest(){
+async function openDigestLike(path,title){
   const d=document.getElementById('digest');
+  const h=document.getElementById('digest-title');
   const t=document.getElementById('digest-text');
+  h.textContent=title;
   d.classList.add('open');
   t.textContent='Loading…';
   try{
-    const r=await req('/api/digest');
+    const r=await req(path);
     const data=await r.json();
-    t.textContent=data.response||data.error||'No response';
+    t.textContent=data.response||data.proposals||data.error||'No response';
   }catch(e){t.textContent='Error: '+e.message;}
 }
+async function sendCommand(){
+  const input=document.getElementById('cmd-input');
+  const status=document.getElementById('cmd-status');
+  const text=input.value.trim();
+  if(!text)return;
+  status.textContent='…';
+  try{
+    const r=await req('/api/intent',{method:'POST',body:JSON.stringify({text})});
+    if(r.status===503){status.textContent="IA non configurée.";return;}
+    const data=await r.json();
+    if(!data.matched){status.textContent="Je n'ai pas compris de commande.";return;}
+    if(data.status==='executed'){status.textContent='✓ Fait.';input.value='';}
+    else if(data.status==='pending'){status.textContent='En attente de confirmation.';input.value='';loadPending();}
+    else if(data.status==='refused'){status.textContent='Refusé — action manuelle uniquement.';}
+    else{status.textContent='Erreur.';}
+  }catch(e){status.textContent='Erreur.';}
+}
+
+function openDigest(){openDigestLike('/api/digest','Digest');}
+function openProposals(){openDigestLike('/api/proposals','Propositions');}
 function closeDigest(){document.getElementById('digest').classList.remove('open');}
+
+function fmtSlot(s){
+  const opts={weekday:'short',hour:'2-digit',minute:'2-digit'};
+  return new Date(s.start).toLocaleString(undefined,opts)+' → '+new Date(s.end).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+
+async function openFreeSlots(){
+  const d=document.getElementById('digest');
+  const h=document.getElementById('digest-title');
+  const t=document.getElementById('digest-text');
+  h.textContent='Créneaux libres (24h, ≥30min)';
+  d.classList.add('open');
+  t.textContent='Loading…';
+  try{
+    const r=await req('/api/calendar/free-slots');
+    const slots=await r.json();
+    t.textContent=Array.isArray(slots)&&slots.length
+      ? slots.map(fmtSlot).join('\\n')
+      : 'Aucun créneau libre trouvé.';
+  }catch(e){t.textContent='Error: '+e.message;}
+}
+
+// ── Pending actions ──────────────────────────────────────────────────────────
+async function loadPending(){
+  try{
+    const r=await req('/api/actions/pending');
+    if(!r.ok)return;
+    const pending=await r.json();
+    renderPending(pending);
+  }catch(e){if(e.message!=='401')console.error(e);}
+}
+
+function describeAction(a){
+  const label=(typeof ACTION_KIND_LABELS!=='undefined'&&ACTION_KIND_LABELS[a.action.kind])||a.action.kind;
+  const detail=a.action.body||a.action.label||(a.action.fields&&(a.action.fields.title||a.action.fields.summary))||a.action.sourceId||'';
+  return esc(label)+(detail?' — '+esc(String(detail)).slice(0,60):'');
+}
+
+function renderPending(pending){
+  const el=document.getElementById('pending');
+  if(!pending.length){el.className='empty';el.innerHTML='';return;}
+  el.className='';
+  // id passed via data-id + this, never interpolated straight into onclick as a JS string
+  // argument — see dashboard.test.ts's toggle()/dedupeKey regression guard for why.
+  el.innerHTML=pending.map(p=>\`
+<div class="pending-row" data-id="\${esc(p.id)}">
+  <span>\${describeAction(p)}</span>
+  <button class="confirm" onclick="confirmPending(this)">Confirmer</button>
+  <button class="cancel" onclick="cancelPending(this)">Annuler</button>
+</div>\`).join('');
+}
+
+async function confirmPending(btn){
+  const id=btn.closest('.pending-row').dataset.id;
+  await req('/api/actions/'+encodeURIComponent(id)+'/confirm',{method:'POST'}).catch(()=>{});
+  loadPending();
+}
+async function cancelPending(btn){
+  const id=btn.closest('.pending-row').dataset.id;
+  await req('/api/actions/'+encodeURIComponent(id)+'/cancel',{method:'POST'}).catch(()=>{});
+  loadPending();
+}
+
+// ── Settings (sources / tiers / email rules) ─────────────────────────────────
+const GOOGLE_SOURCES=[{key:'gmail',label:'Gmail'},{key:'gcal',label:'Google Calendar'},{key:'gtasks',label:'Google Tasks'}];
+
+const ACTION_KIND_LABELS={
+  reply:'Répondre à un email',
+  archive_email:'Archiver un email',
+  delete_email:'Supprimer un email',
+  mark_email_read:'Marquer un email lu',
+  mark_email_unread:'Marquer un email non lu',
+  create_event:'Créer un événement calendrier',
+  update_event:'Modifier un événement',
+  delete_event:'Supprimer un événement',
+  create_task:'Créer une tâche',
+  complete_task:'Compléter une tâche',
+  delete_task:'Supprimer une tâche',
+  comment_issue:'Commenter une issue/PR GitHub',
+  add_label:'Ajouter un label GitHub',
+  create_issue:'Créer une issue GitHub',
+  close_issue:'Fermer une issue GitHub',
+  open_pr:'Ouvrir une PR GitHub',
+  merge_pr:'Merger une PR GitHub',
+};
+
+function renderTiers(tiers){
+  const el=document.getElementById('tier-list');
+  el.innerHTML=Object.keys(ACTION_KIND_LABELS).map(kind=>{
+    const label=esc(ACTION_KIND_LABELS[kind]);
+    if(kind==='merge_pr'){
+      return \`<div class="tier-row"><span>\${label}</span><span style="color:var(--urgent);font-size:12px">Manuel — toujours humain</span></div>\`;
+    }
+    const value=esc(tiers[kind]||'confirm');
+    return \`<div class="tier-row"><span>\${label}</span><select data-tier="\${esc(kind)}"><option value="auto"\${value==='auto'?' selected':''}>Auto</option><option value="confirm"\${value==='confirm'?' selected':''}>Confirmation</option><option value="manual"\${value==='manual'?' selected':''}>Manuel</option></select></div>\`;
+  }).join('');
+}
+
+async function openSettings(){
+  document.getElementById('settings').classList.add('open');
+  try{
+    const [statusRes,tiersRes,rulesRes]=await Promise.all([
+      req('/api/oauth/google/status'),
+      req('/api/config/tiers'),
+      req('/api/config/email-rules').catch(()=>null),
+    ]);
+    const status=await statusRes.json();
+    renderSources(status);
+    const tiers=await tiersRes.json();
+    renderTiers(tiers);
+    if(rulesRes&&rulesRes.ok){
+      const rules=await rulesRes.json();
+      document.getElementById('vip-senders').value=(rules.vipSenders||[]).join('\\n');
+      document.getElementById('urgent-keywords').value=(rules.urgentKeywords||[]).join('\\n');
+      document.getElementById('normal-keywords').value=(rules.normalKeywords||[]).join('\\n');
+    }
+  }catch(e){console.error(e);}
+}
+function closeSettings(){document.getElementById('settings').classList.remove('open');}
+
+function renderSources(status){
+  const el=document.getElementById('src-list');
+  el.innerHTML=GOOGLE_SOURCES.map(s=>\`
+<div class="src-row">
+  <span class="dot\${status[s.key]?' on':''}"></span>
+  <span>\${esc(s.label)} — \${status[s.key]?'connecté':'non connecté'}</span>
+  <button onclick="connectSource('\${s.key}')">\${status[s.key]?'Reconnecter':'Connecter'}</button>
+</div>\`).join('');
+}
+
+function connectSource(key){
+  const url='/api/oauth/google/start?connector='+encodeURIComponent(key);
+  window.open(url,'_blank','width=520,height=680');
+}
+
+async function saveSettings(){
+  const statusEl=document.getElementById('settings-status');
+  statusEl.textContent='Enregistrement…';
+  const tiers={};
+  document.querySelectorAll('select[data-tier]').forEach(sel=>{tiers[sel.dataset.tier]=sel.value;});
+  const rules={
+    vipSenders:document.getElementById('vip-senders').value.split('\\n').map(s=>s.trim()).filter(Boolean),
+    urgentKeywords:document.getElementById('urgent-keywords').value.split('\\n').map(s=>s.trim()).filter(Boolean),
+    normalKeywords:document.getElementById('normal-keywords').value.split('\\n').map(s=>s.trim()).filter(Boolean),
+  };
+  try{
+    await Promise.all([
+      req('/api/config/tiers',{method:'PATCH',body:JSON.stringify(tiers)}),
+      req('/api/config/email-rules',{method:'PATCH',body:JSON.stringify(rules)}),
+    ]);
+    statusEl.textContent='Enregistré ✓';
+    setTimeout(()=>{statusEl.textContent='';},2000);
+  }catch(e){statusEl.textContent='Erreur';}
+}
 
 document.querySelectorAll('.chip').forEach(c=>{
   c.addEventListener('click',()=>{
@@ -207,11 +448,12 @@ document.querySelectorAll('.chip').forEach(c=>{
   try{
     const r=await fetch('/api/events?limit=100');
     if(r.status===401){showAuth();return;}
-    if(r.ok){hideAuth();events=(await r.json()).events||[];render();}
+    if(r.ok){hideAuth();events=(await r.json()).events||[];render();loadPending();}
   }catch(e){console.error(e);}
 })();
 
 setInterval(load,15000);
+setInterval(loadPending,15000);
 </script>
 </body>
 </html>`;

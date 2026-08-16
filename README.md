@@ -48,8 +48,9 @@ Tasks  ──┤    + EventStore            ├── Natsume           AI compa
 RSS    ──┤    + Web dashboard         └── Any WS/HTTP client
 HA     ──┘
 
-              Actions back: reply email · complete task · update event
+              Actions back: 17 kinds across Gmail/Calendar/Tasks/GitHub, gated by autonomy tier
               AI butler: openai / ollama (standalone) or delegate to Natsume
+              Voice/chat commands: free text -> structured action via /api/intent
 ```
 
 **Headless by design** — LunAcedia exposes a REST API and a WebSocket stream. Clients are independent: the Android app, the Natsume bridge, and the built-in dashboard all talk to the same API. No client is required for LunAcedia to run.
@@ -58,9 +59,19 @@ HA     ──┘
 
 **Events** — Structured `AcediaEvent` objects: type, source, priority, dedupeKey, body — 7-day dedup TTL
 
-**Actions** — Reply to emails, complete tasks, update calendar events — via `POST /api/actions`
+**Actions** — 17 kinds via `POST /api/actions`: Gmail (reply, archive, delete, mark read/unread), Calendar (create/update/delete event), Tasks (create/complete/delete), GitHub (comment, label, create/close issue, open PR, merge PR). Each kind has an autonomy tier, `GET/PATCH /api/config/tiers`:
 
-**AI butler** — Optional synthesis layer: `openai` or `ollama` for standalone use, `natsume` to delegate to Natsume Core with shared LTM and personality
+- **auto** — the butler acts with no human signal at all
+- **confirm** — needs a human signal first, either an explicit request or a proposal it made and is waiting on a "yes" (`POST /api/actions` queues it, `POST /api/actions/:id/confirm` executes it)
+- **manual** — never executable through the API no matter how explicitly it's requested (the butler may only suggest it as text)
+
+`merge_pr` is hardcoded to `manual` and cannot be relaxed — merging is always a human action.
+
+**Voice/chat commands** — `POST /api/intent` turns free text ("crée-moi une tâche pour rappeler le rendez-vous") into a structured action and dispatches it through the same tier gate as `POST /api/actions`. Requires `AI_PROVIDER != none`; the model's JSON reply is re-validated field by field before anything executes.
+
+**Calendar conflict detection & rescheduling** — overlapping timed events emit a `calendar.conflict` entry automatically; `GET /api/calendar/free-slots` computes open gaps deterministically (no LLM); `GET /api/proposals` names an actual free slot when proposing a fix for a conflict.
+
+**AI butler** — Optional synthesis layer: `openai` or `ollama` for standalone use, `natsume` to delegate to Natsume Core with shared LTM and personality. Also powers `GET /api/proposals` (suggests next actions for urgent/conflict items) and `POST /api/intent`.
 
 **Push notifications** — FCM: register Android tokens, filter by priority, deliver via Firebase
 
@@ -107,7 +118,7 @@ npm start
 
 ## Google OAuth setup (Gmail · Calendar · Tasks)
 
-LunAcedia uses **refresh tokens** — no browser interaction at runtime. You generate the token once and put it in `.env`.
+LunAcedia uses **refresh tokens** — no browser interaction at runtime once connected. Steps 1-2 (create the app, enable the APIs) are shared by both connection methods below; pick one for step 3.
 
 **1. Create an OAuth 2.0 app**
 
@@ -115,7 +126,6 @@ LunAcedia uses **refresh tokens** — no browser interaction at runtime. You gen
 - **APIs & Services → OAuth consent screen** — set User type: **External**
 - Under **Audience** (or "Test users" in older UI) → **+ Add users** → add your Google account
 - **APIs & Services → Credentials → + Create credentials → OAuth client ID** → Application type: **Web application**
-- Add `https://developers.google.com/oauthplayground` as an authorized redirect URI
 - Note your **Client ID** and **Client Secret**
 
 **2. Enable the required APIs**
@@ -126,8 +136,20 @@ In **APIs & Services → Library**, enable:
 - Google Calendar API
 - Google Tasks API
 
-**3. Get the refresh token (once)**
+**3a. Connect in-app (recommended)** — one click per connector from the dashboard, no manual token copying:
 
+- Add `http://<your-host>:<HTTP_PORT>/api/oauth/google/callback` as an authorized redirect URI on the OAuth client (e.g. `http://localhost:4001/api/oauth/google/callback`) — this is a _different_ redirect URI from the OAuth Playground one in 3b, register both if you might use either method
+- Fill in `.env`:
+    ```bash
+    GOOGLE_CLIENT_ID=...
+    GOOGLE_CLIENT_SECRET=...
+    ```
+- Start LunAcedia, open the dashboard → **⚙ Réglages** → click **Connecter** next to Gmail / Google Calendar / Google Tasks — each opens Google's consent screen and stores the refresh token automatically (`GoogleTokenStore`, no restart needed, `GET /api/oauth/google/status` reports connection state)
+- `GMAIL_ENABLED` / `GCAL_ENABLED` / `GTASKS_ENABLED` still need to be `true` at process start for the connector to exist at all — this flow fixes "enabled but missing/expired token", not "never enabled"
+
+**3b. Manual, via OAuth Playground (alternative)** — no dashboard access, or you'd rather not expose a callback endpoint:
+
+- Add `https://developers.google.com/oauthplayground` as an authorized redirect URI on the OAuth client
 - Go to [developers.google.com/oauthplayground](https://developers.google.com/oauthplayground)
 - Click ⚙️ → check **"Use your own OAuth credentials"** → enter your Client ID + Secret
 - Select these scopes:
@@ -136,24 +158,20 @@ In **APIs & Services → Library**, enable:
     - `https://www.googleapis.com/auth/tasks.readonly`
 - **Authorize APIs** → sign in → accept (you will see "This app isn't verified" — click **Continue**, you are a test user)
 - **Step 2 → Exchange authorization code for tokens** → copy the `refresh_token`
+- Fill in `.env` — the same Client ID, Client Secret, and refresh token work for all three Google connectors:
+    ```bash
+    GMAIL_CLIENT_ID=...
+    GMAIL_CLIENT_SECRET=...
+    GMAIL_REFRESH_TOKEN=<token from OAuth Playground>
 
-**4. Fill in `.env`**
+    GCAL_CLIENT_ID=...        # same values
+    GCAL_CLIENT_SECRET=...
+    GCAL_REFRESH_TOKEN=<same token>
 
-The same Client ID, Client Secret, and refresh token work for all three Google connectors:
-
-```bash
-GMAIL_CLIENT_ID=...
-GMAIL_CLIENT_SECRET=...
-GMAIL_REFRESH_TOKEN=<token from Step 3>
-
-GCAL_CLIENT_ID=...        # same values
-GCAL_CLIENT_SECRET=...
-GCAL_REFRESH_TOKEN=<same token>
-
-GTASKS_CLIENT_ID=...
-GTASKS_CLIENT_SECRET=...
-GTASKS_REFRESH_TOKEN=<same token>
-```
+    GTASKS_CLIENT_ID=...
+    GTASKS_CLIENT_SECRET=...
+    GTASKS_REFRESH_TOKEN=<same token>
+    ```
 
 ---
 

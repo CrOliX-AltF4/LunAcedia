@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "node:http";
+import path from "node:path";
+import os from "node:os";
 import { AcediaApiServer } from "../../source/http/api_server.js";
 import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { NullAIProvider } from "../../source/ai/null_provider.js";
+import { ActionTierStore } from "../../source/actions/action_tier_store.js";
+import { PendingActionStore } from "../../source/actions/pending_action_store.js";
+import { EmailClassificationStore } from "../../source/connectors/email/email_classification_store.js";
+import { GoogleTokenStore } from "../../source/auth/google_token_store.js";
+import { DEFAULT_ACTION_TIERS } from "../../source/types/action_tier.js";
 import type { IAIProvider } from "../../source/ai/ai_provider.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
@@ -76,6 +83,63 @@ function post(
     });
 }
 
+function getNoRedirect(
+    url: string,
+    headers: Record<string, string> = {},
+): Promise<{ status: number; location: string | undefined; body: string }> {
+    return new Promise((resolve, reject) => {
+        http.get(url, { headers }, (res) => {
+            let data = "";
+            res.on("data", (c: Buffer) => {
+                data += c.toString();
+            });
+            res.on("end", () =>
+                resolve({
+                    status: res.statusCode ?? 0,
+                    location: res.headers.location,
+                    body: data,
+                }),
+            );
+        }).on("error", reject);
+    });
+}
+
+function patch(
+    url: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+): Promise<{ status: number; body: unknown }> {
+    return new Promise((resolve, reject) => {
+        const payload = JSON.stringify(body);
+        const parsed = new URL(url);
+        const req = http.request(
+            {
+                hostname: parsed.hostname,
+                port: parsed.port,
+                path: parsed.pathname,
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(payload),
+                    ...headers,
+                },
+            },
+            (res) => {
+                let data = "";
+                res.on("data", (c: Buffer) => {
+                    data += c.toString();
+                });
+                res.on("end", () =>
+                    resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : null }),
+                );
+            },
+        );
+        req.on("error", reject);
+        req.write(payload);
+        req.end();
+    });
+}
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const SECRET = "test-secret";
@@ -95,13 +159,37 @@ function makeConnector(
 
 const nullAI = new NullAIProvider();
 
+// Isolated tmp file per call — writing tiers must never touch the real ~/.lunacedia.
+function tmpTierStore(): ActionTierStore {
+    return new ActionTierStore(
+        path.join(
+            os.tmpdir(),
+            `lunacedia-test-tiers-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+        ),
+    );
+}
+
 function makeServer(
     store: EventStore,
     connectors: IConnector[] = [],
     ai: IAIProvider = nullAI,
     secret: string | undefined = SECRET,
+    tierStore: ActionTierStore = new ActionTierStore(),
+    emailClassificationStore?: EmailClassificationStore,
+    googleTokenStore?: GoogleTokenStore,
 ): AcediaApiServer {
-    return new AcediaApiServer(store, connectors, new IngestionHub(connectors), null, ai, secret);
+    return new AcediaApiServer(
+        store,
+        connectors,
+        new IngestionHub(connectors),
+        null,
+        ai,
+        secret,
+        tierStore,
+        new PendingActionStore(),
+        emailClassificationStore,
+        googleTokenStore,
+    );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -186,6 +274,8 @@ describe("AcediaApiServer — auth", () => {
             null,
             nullAI,
             undefined,
+            new ActionTierStore(),
+            new PendingActionStore(),
         );
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events`);
@@ -282,7 +372,7 @@ describe("AcediaApiServer — GET /api/stats", () => {
 });
 
 describe("AcediaApiServer — POST /api/actions", () => {
-    it("should dispatch action to matching connector", async () => {
+    it("defaults to the 'confirm' tier — queues instead of executing immediately", async () => {
         const port = nextPort();
         const store = new EventStore();
         let called = false;
@@ -297,8 +387,112 @@ describe("AcediaApiServer — POST /api/actions", () => {
             AUTH,
         );
         server.stop();
+        expect(res.status).toBe(202);
+        expect((res.body as { status: string }).status).toBe("pending");
+        expect(called).toBe(false);
+    });
+
+    it("executes immediately when the action kind's tier is 'auto'", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        let called = false;
+        const conn = makeConnector("Gmail", async () => {
+            called = true;
+        });
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ reply: "auto" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        server.stop();
         expect(res.status).toBe(204);
         expect(called).toBe(true);
+    });
+
+    it("rejects with 403 when the action kind's tier is 'manual'", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        let called = false;
+        const conn = makeConnector("Gmail", async () => {
+            called = true;
+        });
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ reply: "manual" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(403);
+        expect(called).toBe(false);
+    });
+
+    it("confirm tier: POST /api/actions/:id/confirm executes the pending action", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        let called: ConnectorAction | null = null;
+        const conn = makeConnector("Gmail", async (a) => {
+            called = a;
+        });
+        const server = makeServer(store, [conn]);
+        server.start(port);
+        const create = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        const id = (create.body as { id: string }).id;
+        const confirm = await post(`http://localhost:${port}/api/actions/${id}/confirm`, {}, AUTH);
+        server.stop();
+        expect(confirm.status).toBe(204);
+        expect(called).toEqual({ kind: "reply", sourceId: "msg1", body: "Hi" });
+    });
+
+    it("confirm tier: POST /api/actions/:id/cancel discards the pending action without executing it", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        let called = false;
+        const conn = makeConnector("Gmail", async () => {
+            called = true;
+        });
+        const server = makeServer(store, [conn]);
+        server.start(port);
+        const create = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        const id = (create.body as { id: string }).id;
+        const cancel = await post(`http://localhost:${port}/api/actions/${id}/cancel`, {}, AUTH);
+        const confirmAfterCancel = await post(
+            `http://localhost:${port}/api/actions/${id}/confirm`,
+            {},
+            AUTH,
+        );
+        server.stop();
+        expect(cancel.status).toBe(204);
+        expect(confirmAfterCancel.status).toBe(404);
+        expect(called).toBe(false);
+    });
+
+    it("returns 404 confirming an unknown or already-resolved pending action id", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions/does-not-exist/confirm`,
+            {},
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(404);
     });
 
     it("should return 404 when connector not found", async () => {
@@ -307,7 +501,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
-            { connector: "NoSuchConnector", action: { kind: "complete", sourceId: "x" } },
+            { connector: "NoSuchConnector", action: { kind: "complete_task", sourceId: "x" } },
             AUTH,
         );
         server.stop();
@@ -321,7 +515,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/actions`,
-            { connector: "ReadOnly", action: { kind: "complete", sourceId: "x" } },
+            { connector: "ReadOnly", action: { kind: "complete_task", sourceId: "x" } },
             AUTH,
         );
         server.stop();
@@ -338,12 +532,277 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 });
 
+describe("AcediaApiServer — GET /api/actions/pending", () => {
+    it("lists a pending action created via POST /api/actions (confirm tier)", async () => {
+        const port = nextPort();
+        const conn = makeConnector("Gmail", async () => {});
+        const server = makeServer(new EventStore(), [conn]);
+        server.start(port);
+        await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        const res = await get(`http://localhost:${port}/api/actions/pending`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect((res.body as unknown[]).length).toBe(1);
+    });
+});
+
+describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
+    // Isolated tmp file per test — writing tiers must never touch the real ~/.lunacedia.
+    function tmpTierStore(): ActionTierStore {
+        return new ActionTierStore(
+            path.join(
+                os.tmpdir(),
+                `lunacedia-test-tiers-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+            ),
+        );
+    }
+
+    it("GET returns the default tiers when nothing was ever patched", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore(), [], nullAI, SECRET, tmpTierStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/config/tiers`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual(DEFAULT_ACTION_TIERS);
+    });
+
+    it("PATCH updates a tier and it takes effect on the very next POST /api/actions", async () => {
+        const port = nextPort();
+        let called = false;
+        const conn = makeConnector("Tasks", async () => {
+            called = true;
+        });
+        const server = makeServer(new EventStore(), [conn], nullAI, SECRET, tmpTierStore());
+        server.start(port);
+        const patchRes = await patch(
+            `http://localhost:${port}/api/config/tiers`,
+            { complete_task: "auto" },
+            AUTH,
+        );
+        const actionRes = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Tasks", action: { kind: "complete_task", sourceId: "t1" } },
+            AUTH,
+        );
+        server.stop();
+        expect(patchRes.status).toBe(200);
+        expect((patchRes.body as { changed: string[] }).changed).toEqual(["complete_task"]);
+        expect(actionRes.status).toBe(204);
+        expect(called).toBe(true);
+    });
+
+    it("PATCH ignores unknown action kinds and invalid tier values", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore(), [], nullAI, SECRET, tmpTierStore());
+        server.start(port);
+        const res = await patch(
+            `http://localhost:${port}/api/config/tiers`,
+            { notAKind: "auto", reply: "not-a-real-tier" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect((res.body as { changed: string[] }).changed).toEqual([]);
+    });
+});
+
+describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
+    function tmpClassificationStore(): EmailClassificationStore {
+        return new EmailClassificationStore(
+            path.join(
+                os.tmpdir(),
+                `lunacedia-test-email-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+            ),
+        );
+    }
+
+    it("returns 503 when no classification store is wired", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/config/email-rules`, AUTH);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("GET returns empty lists by default", async () => {
+        const port = nextPort();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            tmpClassificationStore(),
+        );
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/config/email-rules`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ vipSenders: [], urgentKeywords: [], normalKeywords: [] });
+    });
+
+    it("PATCH updates the config and GET reflects it afterwards", async () => {
+        const port = nextPort();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            tmpClassificationStore(),
+        );
+        server.start(port);
+        const patchRes = await patch(
+            `http://localhost:${port}/api/config/email-rules`,
+            { vipSenders: ["boss@corp.com"] },
+            AUTH,
+        );
+        const getRes = await get(`http://localhost:${port}/api/config/email-rules`, AUTH);
+        server.stop();
+        expect(patchRes.status).toBe(200);
+        expect((patchRes.body as { vipSenders: string[] }).vipSenders).toEqual(["boss@corp.com"]);
+        expect((getRes.body as { vipSenders: string[] }).vipSenders).toEqual(["boss@corp.com"]);
+    });
+});
+
+describe("AcediaApiServer — GET /api/oauth/google/*", () => {
+    beforeEach(() => {
+        process.env["GOOGLE_CLIENT_ID"] = "test-client-id";
+        process.env["GOOGLE_CLIENT_SECRET"] = "test-client-secret";
+    });
+    afterEach(() => {
+        delete process.env["GOOGLE_CLIENT_ID"];
+        delete process.env["GOOGLE_CLIENT_SECRET"];
+        vi.unstubAllGlobals();
+    });
+
+    function tmpTokenStore(): GoogleTokenStore {
+        return new GoogleTokenStore(
+            path.join(
+                os.tmpdir(),
+                `lunacedia-test-tokens-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+            ),
+        );
+    }
+
+    it("start: redirects to Google's consent screen without requiring auth", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore(), [], nullAI, undefined);
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
+        );
+        server.stop();
+        expect(res.status).toBe(302);
+        expect(res.location).toContain("https://accounts.google.com/o/oauth2/v2/auth");
+        expect(res.location).toContain("state=gmail");
+    });
+
+    it("start: returns 400 for an unknown connector", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/start?connector=dropbox`,
+        );
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("start: returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
+        delete process.env["GOOGLE_CLIENT_ID"];
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
+        );
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("callback: exchanges the code, persists the token, and does not require auth", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ refresh_token: "rt-abc" }),
+            }),
+        );
+        const port = nextPort();
+        const tokenStore = tmpTokenStore();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            undefined,
+            tokenStore,
+        );
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/callback?code=abc&state=gmail`,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("Gmail connecté");
+        expect(tokenStore.get("gmail")).toBe("rt-abc");
+    });
+
+    it("callback: shows an error page and does not throw when Google reports an error", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/callback?error=access_denied&state=gmail`,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("refusée");
+    });
+
+    it("status: reports which connectors have a stored token", async () => {
+        const port = nextPort();
+        const tokenStore = tmpTokenStore();
+        await tokenStore.set("gcal", "rt-xyz");
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            undefined,
+            tokenStore,
+        );
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/oauth/google/status`, AUTH);
+        server.stop();
+        expect(res.body).toEqual({ gmail: false, gcal: true, gtasks: false });
+    });
+});
+
 describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
     it("should return 200 and ok:true when the poll succeeds", async () => {
         const port = nextPort();
         const conn: IConnector = { slug: "github", name: "GitHub", poll: async () => [] };
         const hub = new IngestionHub([conn]);
-        const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
+        const server = new AcediaApiServer(
+            new EventStore(),
+            [conn],
+            hub,
+            null,
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            new PendingActionStore(),
+        );
         server.start(port);
         const res = await post(
             `http://localhost:${port}/api/connectors/github/reconnect`,
@@ -365,7 +824,16 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             },
         };
         const hub = new IngestionHub([conn]);
-        const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
+        const server = new AcediaApiServer(
+            new EventStore(),
+            [conn],
+            hub,
+            null,
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            new PendingActionStore(),
+        );
         server.start(port);
         const res = await post(`http://localhost:${port}/api/connectors/email/reconnect`, {}, AUTH);
         server.stop();
@@ -386,7 +854,16 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
         const port = nextPort();
         const conn: IConnector = { slug: "rss", name: "RSS", poll: async () => [] };
         const hub = new IngestionHub([conn]);
-        const server = new AcediaApiServer(new EventStore(), [conn], hub, null, nullAI, SECRET);
+        const server = new AcediaApiServer(
+            new EventStore(),
+            [conn],
+            hub,
+            null,
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            new PendingActionStore(),
+        );
         server.start(port);
         expect(hub.getConnectorHealth()[0]!.lastSuccessAt).toBeNull();
         await post(`http://localhost:${port}/api/connectors/rss/reconnect`, {}, AUTH);
@@ -445,6 +922,171 @@ describe("AcediaApiServer — POST /api/chat", () => {
     });
 });
 
+describe("AcediaApiServer — POST /api/intent", () => {
+    it("should return 503 when AI provider is none", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "mark it read" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("should return 400 when text is missing", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn(), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/intent`, {}, AUTH);
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("returns { matched: false } when the AI reply doesn't parse into a known action", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue('{"matched": false}'),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "what's the weather" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ matched: false });
+    });
+
+    it("dispatches a matched intent through the same tier as POST /api/actions — confirm queues it", async () => {
+        const port = nextPort();
+        const conn = makeConnector("Tasks", async () => {});
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi
+                .fn()
+                .mockResolvedValue(
+                    '{"matched":true,"connector":"Tasks","action":{"kind":"create_task","fields":{"title":"Buy milk"}}}',
+                ),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [conn], mockAI);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "reminds me to buy milk" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        const body = res.body as { matched: boolean; status: string; id: string };
+        expect(body.matched).toBe(true);
+        expect(body.status).toBe("pending");
+        expect(body.id).toBeTruthy();
+    });
+
+    it("dispatches through the auto tier when configured, executing immediately", async () => {
+        const port = nextPort();
+        let called = false;
+        const conn = makeConnector("Gmail", async () => {
+            called = true;
+        });
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ mark_email_read: "auto" });
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi
+                .fn()
+                .mockResolvedValue(
+                    '{"matched":true,"connector":"Gmail","action":{"kind":"mark_email_read","sourceId":"msg1"}}',
+                ),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [conn], mockAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "mark that email as read" },
+            AUTH,
+        );
+        server.stop();
+        const body = res.body as { status: string };
+        expect(body.status).toBe("executed");
+        expect(called).toBe(true);
+    });
+
+    it("never executes merge_pr, even if the AI hallucinates one", async () => {
+        const port = nextPort();
+        let called = false;
+        const conn = makeConnector("GitHub", async () => {
+            called = true;
+        });
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi
+                .fn()
+                .mockResolvedValue(
+                    '{"matched":true,"connector":"GitHub","action":{"kind":"merge_pr","sourceId":"o/r#1"}}',
+                ),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [conn], mockAI);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "merge my PR please" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.body).toEqual({ matched: false });
+        expect(called).toBe(false);
+    });
+
+    it("returns matched:false, not a 502, when the AI reply is malformed JSON", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue("not json"),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "do something" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ matched: false });
+    });
+
+    it("should return 502 when the AI provider itself throws", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockRejectedValue(new Error("timeout")),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "do something" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(502);
+    });
+});
+
 describe("AcediaApiServer — GET /api/digest", () => {
     it("should return 503 when AI provider is none", async () => {
         const port = nextPort();
@@ -484,6 +1126,167 @@ describe("AcediaApiServer — GET /api/digest", () => {
         const server = makeServer(new EventStore(), [], mockAI);
         server.start(port);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        server.stop();
+        expect(res.status).toBe(502);
+    });
+});
+
+describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
+    it("returns the whole default window as free when there are no calendar events", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/calendar/free-slots`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const slots = res.body as { start: string; end: string }[];
+        expect(slots).toHaveLength(1);
+    });
+
+    it("excludes busy timed calendar events from the free slots", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        const start = new Date(Date.now() + 2 * 3_600_000).toISOString();
+        const end = new Date(Date.now() + 3 * 3_600_000).toISOString();
+        store.push(
+            makeEvent({
+                dedupeKey: "cal-1",
+                source: "calendar",
+                type: "calendar.upcoming",
+                meta: { start, end },
+            }),
+        );
+        const server = makeServer(store);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/calendar/free-slots?minGapMin=5`, AUTH);
+        server.stop();
+        const slots = res.body as { start: string; end: string }[];
+        // Busy 2h-3h from now splits the 24h window into a before-gap and an after-gap.
+        expect(slots.length).toBe(2);
+    });
+
+    it("ignores all-day events (date-only, no time component)", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "cal-1",
+                source: "calendar",
+                type: "calendar.upcoming",
+                meta: { start: "2026-08-20", end: "2026-08-21" },
+            }),
+        );
+        const server = makeServer(store);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/calendar/free-slots`, AUTH);
+        server.stop();
+        const slots = res.body as { start: string; end: string }[];
+        expect(slots).toHaveLength(1);
+    });
+});
+
+describe("AcediaApiServer — GET /api/proposals", () => {
+    it("should return 503 when AI provider is none", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(res.status).toBe(503);
+    });
+
+    it("only sends urgent/conflict unread events to the AI, not routine ones", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "info", title: "Newsletter" }));
+        store.push(makeEvent({ dedupeKey: "e2", priority: "urgent", title: "Server down" }));
+        store.push(
+            makeEvent({
+                dedupeKey: "e3",
+                type: "calendar.conflict",
+                title: "Overlap",
+                priority: "urgent",
+            }),
+        );
+        const chatSpy = vi.fn().mockResolvedValue("1. Restart the server. 2. Decline one meeting.");
+        const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const body = res.body as { proposals: string; count: number };
+        expect(body.count).toBe(2);
+        expect(body.proposals).toContain("Restart the server");
+        const promptSent = chatSpy.mock.calls[0]![0] as string;
+        expect(promptSent).toContain("Server down");
+        expect(promptSent).toContain("Overlap");
+        expect(promptSent).not.toContain("Newsletter");
+    });
+
+    it("passes open calendar slots to the AI when a conflict is present", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "e1",
+                type: "calendar.conflict",
+                title: "Overlap",
+                priority: "urgent",
+            }),
+        );
+        const chatSpy = vi.fn().mockResolvedValue("Move the second meeting to the open slot.");
+        const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        const promptSent = chatSpy.mock.calls[0]![0] as string;
+        expect(promptSent).toContain("Open calendar slots");
+    });
+
+    it("does not include a slots block when there is no conflict, even with free calendar time", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "urgent", title: "Server down" }));
+        const chatSpy = vi.fn().mockResolvedValue("Restart it.");
+        const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        const promptSent = chatSpy.mock.calls[0]![0] as string;
+        expect(promptSent).not.toContain("Open calendar slots");
+    });
+
+    it("does not mark events as read — proposals are read-only", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "urgent", title: "Urgent thing" }));
+        const mockAI: IAIProvider = {
+            mode: "natsume",
+            chat: vi.fn().mockResolvedValue("Do it."),
+            digest: vi.fn(),
+        };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(store.unreadCount).toBe(1);
+    });
+
+    it("should return 502 when AI provider throws", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", priority: "urgent" }));
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockRejectedValue(new Error("Timeout")),
+            digest: vi.fn(),
+        };
+        const server = makeServer(store, [], mockAI);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         expect(res.status).toBe(502);
     });

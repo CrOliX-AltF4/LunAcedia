@@ -73,6 +73,49 @@ describe("DASHBOARD_HTML render() sink", () => {
     });
 });
 
+describe("DASHBOARD_HTML renderPending() sink", () => {
+    it("passes the pending action's id via data-id + this, never as a JS string argument", () => {
+        // Same regression class as the dedupeKey/onclick fix above: an id interpolated
+        // straight into onclick="confirmPending('ID')" would survive esc()'s HTML-entity
+        // encoding only until the browser decodes the attribute back to a literal string
+        // before running it as JS — at that point a quote in the id breaks out of the
+        // string literal. data-id + reading it from the clicked element sidesteps that
+        // entirely, the same way toggle(el) already does for dedupeKey.
+        const block = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("function renderPending"),
+            DASHBOARD_HTML.indexOf("function confirmPending"),
+        );
+        expect(block).toContain('data-id="${esc(p.id)}"');
+        expect(block).toContain('onclick="confirmPending(this)"');
+        expect(block).toContain('onclick="cancelPending(this)"');
+        expect(block).not.toMatch(/onclick="confirmPending\('/);
+        expect(block).not.toMatch(/onclick="cancelPending\('/);
+    });
+
+    it("wraps every interpolated pending-action field in esc(...) — label and detail alike", () => {
+        // describeAction() covers 17 action kinds generically (label lookup + a single
+        // "detail" field pulled from whichever of body/label/fields.title/sourceId the kind
+        // actually has) rather than one branch per kind — both the label and the extracted
+        // detail must still go through esc() before landing in the pending-row's innerHTML.
+        const block = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("function describeAction"),
+            DASHBOARD_HTML.indexOf("function renderPending"),
+        );
+        expect(block).toContain("esc(label)");
+        expect(block).toContain("esc(String(detail))");
+        // The raw fields feeding `detail` must never be interpolated a second time unescaped.
+        expect(block).not.toMatch(/\$\{a\.action\.(body|sourceId|label)\}/);
+    });
+
+    it("confirmPending/cancelPending read the id from the clicked element's closest row", () => {
+        const block = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("async function confirmPending"),
+            DASHBOARD_HTML.indexOf("// ── Settings"),
+        );
+        expect(block).toContain("btn.closest('.pending-row').dataset.id");
+    });
+});
+
 describe("dashboard toggle()", () => {
     it("reads the key from the element's data-key attribute, not a function argument", () => {
         const toggleBlock = DASHBOARD_HTML.slice(

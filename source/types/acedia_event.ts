@@ -8,6 +8,7 @@ export type AcediaEventType =
     | "github.review.requested"
     | "github.mention"
     | "calendar.upcoming"
+    | "calendar.conflict"
     | "email.received"
     | "rss.item"
     | "ha.state_changed"

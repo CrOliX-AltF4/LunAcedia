@@ -6,6 +6,8 @@ import type { ConnectorAction } from "../../types/connector_action.js";
 import { getAccessToken, clearTokenCache } from "./gmail_auth.js";
 import { parseRules, classifyEmail } from "./email_rules.js";
 import type { EmailRule } from "./email_rules.js";
+import type { EmailClassificationStore } from "./email_classification_store.js";
+import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -28,9 +30,12 @@ interface GmailMessageMeta {
  *
  * Config (in .env):
  *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN — OAuth2 credentials
+ *                — GMAIL_REFRESH_TOKEN is a fallback; ignored once GoogleTokenStore has one
+ *                  for "gmail" (obtained via GET /api/oauth/google/start?connector=gmail)
  *   GMAIL_MAX_AGE_HOURS=24            — ignore messages older than N hours
  *   GMAIL_POLL_INTERVAL_MIN=5         — poll frequency
  *   GMAIL_RULES='[{"senderPattern":"boss@corp.com","priority":"urgent"}]'
+ *                — fallback only; ignored once EmailClassificationStore has anything configured
  *
  * Rule: classification by senderPattern substring match only — never by LLM.
  */
@@ -43,14 +48,19 @@ export class GmailConnector implements IConnector {
 
     private readonly clientId: string;
     private readonly clientSecret: string;
-    private readonly refreshToken: string;
+    private readonly staticRefreshToken: string;
     private readonly maxAgeMs: number;
-    private readonly rules: EmailRule[];
+    /** Legacy fallback, parsed once from GMAIL_RULES at construction. */
+    private readonly staticRules: EmailRule[];
+    private readonly classificationStore?: EmailClassificationStore;
+    private readonly tokenStore?: GoogleTokenStore;
 
-    constructor() {
+    constructor(classificationStore?: EmailClassificationStore, tokenStore?: GoogleTokenStore) {
+        this.classificationStore = classificationStore;
+        this.tokenStore = tokenStore;
         this.clientId = process.env["GMAIL_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GMAIL_CLIENT_SECRET"] ?? "";
-        this.refreshToken = process.env["GMAIL_REFRESH_TOKEN"] ?? "";
+        this.staticRefreshToken = process.env["GMAIL_REFRESH_TOKEN"] ?? "";
 
         const intervalMin = parseInt(process.env["GMAIL_POLL_INTERVAL_MIN"] ?? "5", 10);
         this.preferredPollIntervalMs = Math.max(2, intervalMin) * 60_000;
@@ -58,24 +68,31 @@ export class GmailConnector implements IConnector {
         const maxAgeHours = parseInt(process.env["GMAIL_MAX_AGE_HOURS"] ?? "24", 10);
         this.maxAgeMs = Math.max(1, maxAgeHours) * 3_600_000;
 
-        this.rules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
+        this.staticRules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
 
-        // GMAIL_ENABLED=true gates whether this connector is even constructed — if we're
-        // here without credentials, that's a real misconfiguration, not an intentional
-        // disable. poll() silently returning [] every cycle gave no visibility into this.
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) {
+        // GMAIL_ENABLED=true gates whether this connector is even constructed — if we're here
+        // without credentials AND no stored token, that's a real misconfiguration, not an
+        // intentional disable. poll() silently returning [] every cycle gave no visibility.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken()) {
             console.warn(
-                "[Gmail] GMAIL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed.",
+                "[Gmail] GMAIL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed (or connect via the dashboard).",
             );
         }
     }
 
+    /** Read fresh, not cached — a token obtained through the OAuth flow after startup takes
+     *  effect on the very next poll, no restart needed (same reasoning as classificationStore). */
+    private refreshToken(): string {
+        return this.tokenStore?.get("gmail") ?? this.staticRefreshToken;
+    }
+
     async poll(): Promise<AcediaEvent[]> {
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) return [];
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return [];
 
         let token: string;
         try {
-            token = await getAccessToken(this.clientId, this.clientSecret, this.refreshToken);
+            token = await getAccessToken(this.clientId, this.clientSecret, refreshToken);
         } catch (e) {
             console.error("[Gmail] token refresh error:", (e as Error).message);
             return [];
@@ -122,7 +139,10 @@ export class GmailConnector implements IConnector {
 
                 const from = header("From");
                 const subject = header("Subject") || "(no subject)";
-                const priority = classifyEmail(from, subject, this.rules);
+                const rules = this.classificationStore?.isConfigured()
+                    ? this.classificationStore.compileRules()
+                    : this.staticRules;
+                const priority = classifyEmail(from, subject, rules);
 
                 events.push({
                     type: "email.received",
@@ -143,14 +163,33 @@ export class GmailConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "reply") return;
-        if (!this.clientId || !this.clientSecret || !this.refreshToken) return;
+        if (
+            action.kind !== "reply" &&
+            action.kind !== "archive_email" &&
+            action.kind !== "delete_email" &&
+            action.kind !== "mark_email_read" &&
+            action.kind !== "mark_email_unread"
+        ) {
+            return;
+        }
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
         let token: string;
         try {
-            token = await getAccessToken(this.clientId, this.clientSecret, this.refreshToken);
+            token = await getAccessToken(this.clientId, this.clientSecret, refreshToken);
         } catch (e) {
             console.error("[Gmail] action token error:", (e as Error).message);
+            return;
+        }
+
+        if (
+            action.kind === "archive_email" ||
+            action.kind === "delete_email" ||
+            action.kind === "mark_email_read" ||
+            action.kind === "mark_email_unread"
+        ) {
+            await this.modifyMessage(token, action.kind, action.sourceId);
             return;
         }
 
@@ -214,6 +253,42 @@ export class GmailConnector implements IConnector {
             }
         } catch (e) {
             console.error("[Gmail] reply send error:", (e as Error).message);
+        }
+    }
+
+    /** archive/delete/mark-read/mark-unread all reduce to a Gmail label mutation.
+     *  delete_email moves to Trash (recoverable, not a permanent delete) — matches what
+     *  "delete" means in a normal Gmail client. */
+    private async modifyMessage(
+        token: string,
+        kind: "archive_email" | "delete_email" | "mark_email_read" | "mark_email_unread",
+        messageId: string,
+    ): Promise<void> {
+        const endpoint = kind === "delete_email" ? "trash" : "modify";
+        const body: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined =
+            kind === "archive_email"
+                ? { removeLabelIds: ["INBOX"] }
+                : kind === "mark_email_read"
+                  ? { removeLabelIds: ["UNREAD"] }
+                  : kind === "mark_email_unread"
+                    ? { addLabelIds: ["UNREAD"] }
+                    : undefined;
+
+        try {
+            const resp = await fetch(
+                `${GMAIL_API}/messages/${encodeURIComponent(messageId)}/${endpoint}`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                    },
+                    ...(body ? { body: JSON.stringify(body) } : {}),
+                },
+            );
+            if (!resp.ok) console.warn(`[Gmail] ${kind} returned ${resp.status}`);
+        } catch (e) {
+            console.error(`[Gmail] ${kind} error:`, (e as Error).message);
         }
     }
 }
