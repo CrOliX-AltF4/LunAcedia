@@ -532,6 +532,145 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 });
 
+// Regression: connector.executeAction() touches Gmail/GCal/Tasks for real, but EventStore
+// (what /api/events actually serves) never heard about it — a deleted email's notification
+// kept showing up as if nothing had happened. See source/store/event_sync.ts.
+describe("AcediaApiServer — EventStore sync after action execution", () => {
+    it("delete_email removes the matching buffered event ('auto' tier, direct execute path)", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "Test",
+            priority: "normal",
+            dedupeKey: "email-msg1",
+        });
+        const conn = makeConnector("Gmail", async () => {});
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ delete_email: "auto" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "delete_email", sourceId: "msg1" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(204);
+        expect(store.get("email-msg1")).toBeUndefined();
+    });
+
+    it("mark_email_read marks the matching event read, without removing it", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "Test",
+            priority: "normal",
+            dedupeKey: "email-msg1",
+        });
+        const conn = makeConnector("Gmail", async () => {});
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ mark_email_read: "auto" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "mark_email_read", sourceId: "msg1" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(204);
+        expect(store.get("email-msg1")?.read).toBe(true);
+    });
+
+    it("delete_task removes the matching event, resolving '{listId}/{taskId}' to the bare taskId", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push({
+            type: "task.due",
+            ts: Date.now(),
+            source: "tasks",
+            title: "Test",
+            priority: "normal",
+            dedupeKey: "task-abc",
+        });
+        const conn = makeConnector("Tasks", async () => {});
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ delete_task: "auto" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Tasks", action: { kind: "delete_task", sourceId: "listX/abc" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(204);
+        expect(store.get("task-abc")).toBeUndefined();
+    });
+
+    it("reply has no derivable mapping — the buffered event is untouched", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "Test",
+            priority: "normal",
+            dedupeKey: "email-msg1",
+        });
+        const conn = makeConnector("Gmail", async () => {});
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ reply: "auto" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(204);
+        expect(store.get("email-msg1")?.read).toBeUndefined();
+    });
+
+    it("syncs after execution via the confirm-tier path too (POST /api/actions/:id/confirm)", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "Test",
+            priority: "normal",
+            dedupeKey: "email-msg1",
+        });
+        const conn = makeConnector("Gmail", async () => {});
+        // delete_email defaults to "manual" (refused outright) — force "confirm" so this test
+        // exercises the pending-action path, not the default tier.
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ delete_email: "confirm" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const create = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "delete_email", sourceId: "msg1" } },
+            AUTH,
+        );
+        const id = (create.body as { id: string }).id;
+        const confirm = await post(`http://localhost:${port}/api/actions/${id}/confirm`, {}, AUTH);
+        server.stop();
+        expect(confirm.status).toBe(204);
+        expect(store.get("email-msg1")).toBeUndefined();
+    });
+});
+
 describe("AcediaApiServer — GET /api/actions/pending", () => {
     it("lists a pending action created via POST /api/actions (confirm tier)", async () => {
         const port = nextPort();

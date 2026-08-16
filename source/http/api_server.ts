@@ -14,6 +14,7 @@ import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
+import { resolveEventSync } from "../store/event_sync.js";
 import type { PendingActionStore } from "../actions/pending_action_store.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
@@ -147,6 +148,19 @@ export class AcediaApiServer {
             .filter((x): x is TimeSlot => x !== null);
     }
 
+    /** Keeps the notification in sync with the real-world effect an action just had — a
+     *  deleted email's notification used to keep showing up as unread/present forever, since
+     *  connector.executeAction() touches Gmail/GCal/Tasks for real but EventStore (what
+     *  /api/events actually serves) never heard about it. Best-effort: a no-op for actions
+     *  with no derivable mapping (create_*, GitHub, reply) or no matching buffered event. */
+    private syncStoreAfterAction(action: ConnectorAction): void {
+        const sync = resolveEventSync(action);
+        if (!sync) return;
+        if (sync.effect === "remove") this.store.remove(sync.dedupeKey);
+        else if (sync.effect === "read") this.store.markRead(sync.dedupeKey);
+        else this.store.markUnread(sync.dedupeKey);
+    }
+
     private async executeConnectorAction(
         res: http.ServerResponse,
         connector: IConnector,
@@ -154,6 +168,7 @@ export class AcediaApiServer {
     ): Promise<void> {
         try {
             await connector.executeAction!(action);
+            this.syncStoreAfterAction(action);
             return json(res, 204, null);
         } catch (e) {
             console.error("[API] action error:", (e as Error).message);
@@ -194,6 +209,7 @@ export class AcediaApiServer {
         }
         try {
             await connector.executeAction(action);
+            this.syncStoreAfterAction(action);
             return { status: "executed" };
         } catch (e) {
             console.error("[API] action error:", (e as Error).message);
