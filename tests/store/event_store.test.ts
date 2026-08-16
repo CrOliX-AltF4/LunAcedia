@@ -154,6 +154,47 @@ describe("EventStore.markRead", () => {
     });
 });
 
+describe("EventStore.markUnread", () => {
+    it("should mark a previously-read event as unread again", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.markRead("e1");
+        store.markUnread("e1");
+        expect(store.get("e1")?.read).toBe(false);
+    });
+
+    it("should not throw for unknown dedupeKey", () => {
+        const store = new EventStore();
+        expect(() => store.markUnread("no-such-key")).not.toThrow();
+    });
+});
+
+describe("EventStore.remove", () => {
+    it("should drop the matching event entirely", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.remove("e1");
+        expect(store.get("e1")).toBeUndefined();
+        expect(store.get("e2")).toBeDefined();
+        expect(store.size).toBe(1);
+    });
+
+    it("should not throw for unknown dedupeKey", () => {
+        const store = new EventStore();
+        expect(() => store.remove("no-such-key")).not.toThrow();
+    });
+
+    it("removed event no longer appears in query() results", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.remove("e1");
+        const { events, total } = store.query();
+        expect(events).toHaveLength(0);
+        expect(total).toBe(0);
+    });
+});
+
 describe("EventStore.markAllRead", () => {
     it("should mark all events as read", () => {
         const store = new EventStore();
