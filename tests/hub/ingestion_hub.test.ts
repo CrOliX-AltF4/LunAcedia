@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
@@ -217,6 +220,70 @@ describe("IngestionHub", () => {
             expect(health.connected).toBe(false);
             expect(health.lastError).toBe("token expired");
             expect(health.lastSuccessAt).toBe(successAt);
+        });
+    });
+
+    describe("dedup persistence", () => {
+        let seenPath: string;
+
+        afterEach(async () => {
+            await fs.rm(seenPath, { force: true });
+        });
+
+        it("persists a seen dedupeKey to disk on dispatch", async () => {
+            seenPath = path.join(
+                os.tmpdir(),
+                `dedup-seen-${Math.random().toString(36).slice(2)}.json`,
+            );
+            const connector = makeConnector([baseEvent]);
+            hub = new IngestionHub([connector], seenPath);
+            hub.start();
+
+            await new Promise((r) => setTimeout(r, 50));
+
+            const raw = await fs.readFile(seenPath, "utf-8");
+            expect(JSON.parse(raw)).toEqual({ [baseEvent.dedupeKey]: baseEvent.ts });
+        });
+
+        it("load() restores dedup state so a previously-seen event isn't redispatched after restart", async () => {
+            seenPath = path.join(
+                os.tmpdir(),
+                `dedup-seen-${Math.random().toString(36).slice(2)}.json`,
+            );
+            await fs.writeFile(
+                seenPath,
+                JSON.stringify({ [baseEvent.dedupeKey]: baseEvent.ts }),
+                "utf-8",
+            );
+
+            const connector = makeConnector([baseEvent]);
+            hub = new IngestionHub([connector], seenPath);
+            await hub.load();
+
+            const received: AcediaEvent[] = [];
+            hub.onEvent((e) => received.push(e));
+            hub.start();
+
+            await new Promise((r) => setTimeout(r, 50));
+            expect(received).toHaveLength(0);
+        });
+
+        it("load() is a no-op when the file is absent (first run)", async () => {
+            seenPath = path.join(
+                os.tmpdir(),
+                `dedup-seen-missing-${Math.random().toString(36).slice(2)}.json`,
+            );
+            const connector = makeConnector([baseEvent]);
+            hub = new IngestionHub([connector], seenPath);
+
+            await expect(hub.load()).resolves.toBeUndefined();
+
+            const received: AcediaEvent[] = [];
+            hub.onEvent((e) => received.push(e));
+            hub.start();
+
+            await new Promise((r) => setTimeout(r, 50));
+            expect(received).toHaveLength(1);
         });
     });
 });
