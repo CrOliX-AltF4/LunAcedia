@@ -1,8 +1,16 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 
 const DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const URGENT_POLL_MS = 60_000;
+
+function resolveSeenPath(): string {
+    const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
+    return path.join(storageDir, "dedup_seen.json");
+}
 
 type EventHandler = (event: AcediaEvent) => void;
 
@@ -30,13 +38,35 @@ export class IngestionHub {
     private readonly handlers = new Set<EventHandler>();
     private readonly seen = new Map<string, number>(); // dedupeKey → ts
     private readonly health = new Map<string, HealthState>(); // connector slug → poll health
+    private readonly seenPath: string;
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
     private normalTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
 
-    constructor(private readonly connectors: IConnector[]) {
+    constructor(
+        private readonly connectors: IConnector[],
+        seenPath?: string,
+    ) {
+        this.seenPath = seenPath ?? resolveSeenPath();
         for (const c of connectors) {
             this.health.set(c.slug, { lastSuccessAt: null, lastError: null });
+        }
+    }
+
+    /**
+     * Restores dedup state from the last run — without this, every restart replayed every
+     * currently-unread source event from scratch (AlertQueue.push() masks the duplicate
+     * *entry*, but JarvisClient.handleEvent() still re-triggers proactive voice for each one
+     * unconditionally, so a LunAcedia restart re-announced every open alert). Call before
+     * start(), same convention as ActionTierStore/GoogleTokenStore's load().
+     */
+    async load(): Promise<void> {
+        try {
+            const raw = await fs.readFile(this.seenPath, "utf-8");
+            const parsed = JSON.parse(raw) as Record<string, number>;
+            for (const [key, ts] of Object.entries(parsed)) this.seen.set(key, ts);
+        } catch {
+            // File absent or unreadable — start empty, that's fine
         }
     }
 
@@ -153,6 +183,7 @@ export class IngestionHub {
         if (this.seen.has(event.dedupeKey)) return;
 
         this.seen.set(event.dedupeKey, event.ts);
+        void this.saveSeen();
         for (const handler of this.handlers) {
             try {
                 handler(event);
@@ -164,8 +195,26 @@ export class IngestionHub {
 
     private purgeSeen(): void {
         const cutoff = Date.now() - DEDUP_TTL_MS;
+        let purged = false;
         for (const [key, ts] of this.seen) {
-            if (ts < cutoff) this.seen.delete(key);
+            if (ts < cutoff) {
+                this.seen.delete(key);
+                purged = true;
+            }
+        }
+        if (purged) void this.saveSeen();
+    }
+
+    private async saveSeen(): Promise<void> {
+        try {
+            await fs.mkdir(path.dirname(this.seenPath), { recursive: true });
+            await fs.writeFile(
+                this.seenPath,
+                JSON.stringify(Object.fromEntries(this.seen)),
+                "utf-8",
+            );
+        } catch (e) {
+            console.error("[Hub] Failed to persist dedup state:", (e as Error).message);
         }
     }
 }

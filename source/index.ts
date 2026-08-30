@@ -63,6 +63,7 @@ const api = new AcediaApiServer(
 
 if (fcm) await fcm.load();
 await tierStore.load();
+await hub.load();
 
 ws.start(wsPort);
 api.start(httpPort);
