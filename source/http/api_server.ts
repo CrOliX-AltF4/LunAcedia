@@ -14,6 +14,8 @@ import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
+import { ACTION_RISK } from "../types/action_tier.js";
+import { ActionCooldownTracker } from "../actions/action_cooldown.js";
 import { resolveEventSync } from "../store/event_sync.js";
 import type { PendingActionStore } from "../actions/pending_action_store.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
@@ -79,12 +81,15 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/connectors/:slug/reconnect  → { ok: boolean, error?: string }
  *   POST /api/actions              body: ConnectorAction & { connector: string }
  *                                  → 204 (auto tier, executed) | 202 { id } (confirm tier, pending)
- *                                  | 403 (manual tier — not executable via this endpoint)
+ *                                  | 403 (manual tier, or the kind is on cooldown — too many
+ *                                    recent executions, see ActionCooldownTracker)
  *   POST /api/actions/:id/confirm  → 204, executes a pending action
+ *                                  | 429 if the kind is on cooldown (see ActionCooldownTracker)
  *   POST /api/actions/:id/cancel   → 204, discards a pending action
  *   GET  /api/actions/pending      → PendingAction[]
  *   GET  /api/config/tiers         → ActionTierConfig
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
+ *   GET  /api/config/risk          → Record<ActionKind, ActionRisk> — static, not configurable
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
  *   GET  /api/calendar/free-slots?hours=24&minGapMin=30  → TimeSlot[] (deterministic, no LLM)
@@ -115,6 +120,7 @@ export class AcediaApiServer {
         private readonly pendingStore: PendingActionStore,
         private readonly emailClassificationStore?: EmailClassificationStore,
         private readonly googleTokenStore?: GoogleTokenStore,
+        private readonly cooldown: ActionCooldownTracker = new ActionCooldownTracker(),
     ) {}
 
     start(port: number): void {
@@ -167,6 +173,11 @@ export class AcediaApiServer {
         connector: IConnector,
         action: ConnectorAction,
     ): Promise<void> {
+        if (!this.cooldown.tryConsume(action.kind)) {
+            return json(res, 429, {
+                error: `'${action.kind}' hit its cooldown — too many executions in a short window`,
+            });
+        }
         try {
             await connector.executeAction!(action);
             this.syncStoreAfterAction(action);
@@ -207,6 +218,12 @@ export class AcediaApiServer {
         if (tier === "confirm") {
             const pending = this.pendingStore.create(connectorName, action);
             return { status: "pending", id: pending.id };
+        }
+        if (!this.cooldown.tryConsume(action.kind)) {
+            return {
+                status: "refused",
+                reason: `'${action.kind}' hit its cooldown — too many executions in a short window`,
+            };
         }
         try {
             await connector.executeAction(action);
@@ -496,6 +513,11 @@ export class AcediaApiServer {
             }
             const changed = await this.tierStore.patch(body as Record<string, string>);
             return json(res, 200, { changed, tiers: this.tierStore.getAll() });
+        }
+
+        // GET /api/config/risk — static, not user-configurable (see ACTION_RISK's own doc)
+        if (method === "GET" && path === "/api/config/risk") {
+            return json(res, 200, ACTION_RISK);
         }
 
         // GET /api/config/email-rules

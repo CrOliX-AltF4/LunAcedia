@@ -50,3 +50,43 @@ export const DEFAULT_ACTION_TIERS: ActionTierConfig = {
     merge_pr: "manual",
     mark_notification_read: "confirm",
 };
+
+/**
+ * How bad it is if this action fires wrongly — orthogonal to ActionTier (who must approve).
+ * A "confirm"-tier action can still be low-risk (archive_email — fully reversible), and a
+ * "manual"-tier one is always high (merge_pr). Purely descriptive today: surfaced on the
+ * Confiance panel screen so CrOliX can see risk at a glance, not read yet by dispatchAction()
+ * or any gating logic — see backlog #327 P2 "ré-consentement sur franchissement de seuil de
+ * risque" for where this would plug in if that's ever built.
+ *
+ *   low    — reversible, no data loss, nothing sent to anyone else (mark read/unread, archive,
+ *            complete a task, mark a GitHub thread read).
+ *   medium — creates or sends something new, but doesn't destroy anything (reply, comment,
+ *            label, create_*, update_event, open_pr).
+ *   high   — destructive or hard to reverse, or reaches other people irreversibly (delete_*,
+ *            close_issue, merge_pr).
+ */
+export type ActionRisk = "low" | "medium" | "high";
+
+export const ACTION_RISK: Record<ActionKind, ActionRisk> = {
+    mark_email_read: "low",
+    mark_email_unread: "low",
+    archive_email: "low",
+    complete_task: "low",
+    mark_notification_read: "low",
+
+    reply: "medium",
+    comment_issue: "medium",
+    add_label: "medium",
+    create_event: "medium",
+    create_task: "medium",
+    create_issue: "medium",
+    open_pr: "medium",
+    update_event: "medium",
+
+    delete_email: "high",
+    delete_event: "high",
+    delete_task: "high",
+    close_issue: "high",
+    merge_pr: "high",
+};
