@@ -16,6 +16,7 @@ import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
 import { ACTION_RISK } from "../types/action_tier.js";
 import { ActionCooldownTracker } from "../actions/action_cooldown.js";
+import { resolveTierScope } from "../actions/resolve_tier_scope.js";
 import { resolveEventSync } from "../store/event_sync.js";
 import type { PendingActionStore } from "../actions/pending_action_store.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
@@ -90,6 +91,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/config/tiers         → ActionTierConfig
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
  *   GET  /api/config/risk          → Record<ActionKind, ActionRisk> — static, not configurable
+ *   GET  /api/config/tier-overrides  → Record<"{kind}:{scope}", ActionTier> — per-sender
+ *                                    (email kinds) / per-repo (GitHub kinds) tier overrides
+ *   PATCH /api/config/tier-overrides body: { kind, scope, tier: ActionTier | null }
+ *                                    tier: null removes the override
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
  *   GET  /api/calendar/free-slots?hours=24&minGapMin=30  → TimeSlot[] (deterministic, no LLM)
@@ -208,7 +213,10 @@ export class AcediaApiServer {
         if (!connector) return { status: "not_found" };
         if (!connector.executeAction) return { status: "unsupported" };
 
-        const tier = this.tierStore.getTier(action.kind);
+        const tier = this.tierStore.getTier(
+            action.kind,
+            resolveTierScope(action, this.store) ?? undefined,
+        );
         if (tier === "manual") {
             return {
                 status: "refused",
@@ -518,6 +526,39 @@ export class AcediaApiServer {
         // GET /api/config/risk — static, not user-configurable (see ACTION_RISK's own doc)
         if (method === "GET" && path === "/api/config/risk") {
             return json(res, 200, ACTION_RISK);
+        }
+
+        // GET /api/config/tier-overrides — per-{sender,repo} tier overrides (backlog #329 P1)
+        if (method === "GET" && path === "/api/config/tier-overrides") {
+            return json(res, 200, this.tierStore.getOverrides());
+        }
+
+        // PATCH /api/config/tier-overrides
+        // body: { kind: string, scope: string, tier: "auto" | "confirm" | "manual" | null }
+        // tier: null removes the override, falling back to the kind-level tier.
+        if (method === "PATCH" && path === "/api/config/tier-overrides") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const b = body as { kind?: unknown; scope?: unknown; tier?: unknown };
+            if (
+                typeof b.kind !== "string" ||
+                typeof b.scope !== "string" ||
+                (b.tier !== null && typeof b.tier !== "string")
+            ) {
+                return json(res, 400, {
+                    error: "Body must be { kind: string, scope: string, tier: string | null }",
+                });
+            }
+            const ok = await this.tierStore.patchOverride(b.kind, b.scope, b.tier);
+            if (!ok)
+                return json(res, 400, {
+                    error: "Unknown kind, immutable kind, invalid tier, or no matching override to remove",
+                });
+            return json(res, 200, { overrides: this.tierStore.getOverrides() });
         }
 
         // GET /api/config/email-rules
