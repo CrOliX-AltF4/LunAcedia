@@ -1512,6 +1512,33 @@ describe("AcediaApiServer — POST /api/events/read-all", () => {
     });
 });
 
+describe("AcediaApiServer — POST /api/events/clear-read", () => {
+    it("should drop only read events and report how many were removed", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        const server = makeServer(store);
+        server.start(port);
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.markRead("e1");
+        const res = await post(`http://localhost:${port}/api/events/clear-read`, {}, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ removed: 1 });
+        expect(store.get("e1")).toBeUndefined();
+        expect(store.get("e2")).toBeDefined();
+    });
+
+    it("should return 401 without auth", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/events/clear-read`, {}, {});
+        server.stop();
+        expect(res.status).toBe(401);
+    });
+});
+
 describe("AcediaApiServer — GET /api/events?unread=true", () => {
     let port: number;
     let store: EventStore;

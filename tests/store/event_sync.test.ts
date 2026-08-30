@@ -73,6 +73,14 @@ describe("resolveEventSync — calendar", () => {
     });
 });
 
+describe("resolveEventSync — github", () => {
+    it("mark_notification_read maps sourceId straight through as the dedupeKey, effect 'read'", () => {
+        expect(
+            resolveEventSync({ kind: "mark_notification_read", sourceId: "gh-mention-98765" }),
+        ).toEqual({ dedupeKey: "gh-mention-98765", effect: "read" });
+    });
+});
+
 describe("resolveEventSync — no derivable mapping", () => {
     const noSyncCases: ConnectorAction[] = [
         { kind: "reply", sourceId: "msg1", body: "hi" },

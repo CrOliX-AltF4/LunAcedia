@@ -381,6 +381,18 @@ describe("GitHubConnector.executeAction", () => {
         expect(String(url)).toBe("https://api.github.com/repos/owner/repo/pulls/9/merge");
     });
 
+    it("mark_notification_read: PATCHes /notifications/threads/:id, id parsed from the dedupeKey", async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await new GitHubConnector().executeAction({
+            kind: "mark_notification_read",
+            sourceId: "gh-mention-98765",
+        });
+        const [url, opts] = mockFetch.mock.calls[0]!;
+        expect((opts as RequestInit).method).toBe("PATCH");
+        expect(String(url)).toBe("https://api.github.com/notifications/threads/98765");
+    });
+
     it("warns and does nothing for a malformed sourceId (no '#')", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);

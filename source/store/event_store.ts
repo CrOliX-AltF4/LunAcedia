@@ -89,6 +89,16 @@ export class EventStore {
         if (idx !== -1) this.buf.splice(idx, 1);
     }
 
+    /** Drops every already-read event — the "vider les lus" bulk action. Unread events are
+     *  never touched, no matter how old. Returns the number removed, for UI feedback. */
+    removeAllRead(): number {
+        const before = this.buf.length;
+        for (let i = this.buf.length - 1; i >= 0; i--) {
+            if (this.buf[i]!.read) this.buf.splice(i, 1);
+        }
+        return before - this.buf.length;
+    }
+
     get size(): number {
         return this.buf.length;
     }

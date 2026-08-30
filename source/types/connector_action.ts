@@ -44,4 +44,12 @@ export type ConnectorAction =
       }
     // merge_pr's tier is hardcoded to "manual" in ActionTierStore and cannot be relaxed —
     // "ouvrir une PR peut être auto ou confirmation, mais merger reste toujours humain."
-    | { kind: "merge_pr"; sourceId: string };
+    | { kind: "merge_pr"; sourceId: string }
+    // GitHub notification thread — sourceId is the *dedupeKey* of the originating
+    // github.formatThread() event ("gh-{reason}-{threadId}"), not "{owner}/{repo}#{number}"
+    // like every other GitHub action: a notification thread has no issue/PR number of its
+    // own (it can point at a push, a commit, a whole repo), only a thread id, and that id is
+    // always the dedupeKey's last "-"-separated segment (reason values never contain a dash).
+    // Encoding sourceId as the full dedupeKey rather than the bare thread id lets
+    // event_sync.ts map straight back to the EventStore entry with zero extra bookkeeping.
+    | { kind: "mark_notification_read"; sourceId: string };

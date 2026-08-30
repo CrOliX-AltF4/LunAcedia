@@ -73,6 +73,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
+ *   POST /api/events/clear-read    → 200 { removed: number } — drops every already-read event
  *   POST /api/events/:dedupeKey/read → 204
  *   GET  /api/stats
  *   POST /api/connectors/:slug/reconnect  → { ok: boolean, error?: string }
@@ -373,6 +374,12 @@ export class AcediaApiServer {
         if (method === "POST" && path === "/api/events/read-all") {
             this.store.markAllRead();
             return json(res, 204, null);
+        }
+
+        // POST /api/events/clear-read
+        if (method === "POST" && path === "/api/events/clear-read") {
+            const removed = this.store.removeAllRead();
+            return json(res, 200, { removed });
         }
 
         // POST /api/events/:dedupeKey/read
