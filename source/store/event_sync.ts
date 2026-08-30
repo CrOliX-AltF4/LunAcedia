@@ -9,9 +9,11 @@ export type EventSyncEffect = "read" | "unread" | "remove";
  * Tasks for real, but EventStore (what /api/events actually serves) never heard about it, so
  * a "deleted" email's notification kept showing up as if nothing had happened.
  *
- * GitHub is deliberately absent: its notification dedupeKey is built from a GitHub
- * notification thread id or CI run id (github_formatter.ts), not the "{owner}/{repo}#{number}"
- * sourceId its actions use — there is no derivable mapping between the two id spaces today.
+ * GitHub's issue/PR actions (comment_issue, add_label, ...) are deliberately absent: their
+ * sourceId is "{owner}/{repo}#{number}", not the GitHub notification thread id or CI run id
+ * github_formatter.ts builds dedupeKeys from — there is no derivable mapping between the two
+ * id spaces. mark_notification_read is the one GitHub action that *can* map back: its
+ * sourceId is already the full dedupeKey (see connector_action.ts), so no derivation needed.
  * "reply"/"create_*" actions don't address an existing event, so they have nothing to sync.
  */
 export function resolveEventSync(
@@ -36,6 +38,9 @@ export function resolveEventSync(
             return { dedupeKey: `cal-${eventIdFrom(action.sourceId)}`, effect: "read" };
         case "delete_event":
             return { dedupeKey: `cal-${eventIdFrom(action.sourceId)}`, effect: "remove" };
+
+        case "mark_notification_read":
+            return { dedupeKey: action.sourceId, effect: "read" };
 
         default:
             return null;

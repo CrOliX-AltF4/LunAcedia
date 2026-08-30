@@ -48,4 +48,5 @@ export const DEFAULT_ACTION_TIERS: ActionTierConfig = {
     close_issue: "confirm",
     open_pr: "confirm",
     merge_pr: "manual",
+    mark_notification_read: "confirm",
 };

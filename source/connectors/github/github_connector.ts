@@ -175,7 +175,8 @@ export class GitHubConnector implements IConnector {
             action.kind !== "create_issue" &&
             action.kind !== "close_issue" &&
             action.kind !== "open_pr" &&
-            action.kind !== "merge_pr"
+            action.kind !== "merge_pr" &&
+            action.kind !== "mark_notification_read"
         ) {
             return;
         }
@@ -187,6 +188,24 @@ export class GitHubConnector implements IConnector {
             "X-GitHub-Api-Version": "2022-11-28",
             "Content-Type": "application/json",
         };
+
+        if (action.kind === "mark_notification_read") {
+            // sourceId is the event's dedupeKey ("gh-{reason}-{threadId}") — see
+            // connector_action.ts for why. The notification thread id GitHub's API needs is
+            // always the last "-"-separated segment.
+            const threadId = action.sourceId.slice(action.sourceId.lastIndexOf("-") + 1);
+            try {
+                const resp = await fetch(`${GITHUB_API}/notifications/threads/${threadId}`, {
+                    method: "PATCH",
+                    headers,
+                });
+                if (!resp.ok)
+                    console.warn(`[GitHub] mark_notification_read returned ${resp.status}`);
+            } catch (e) {
+                console.error("[GitHub] mark_notification_read error:", (e as Error).message);
+            }
+            return;
+        }
 
         if (action.kind === "create_issue") {
             try {
