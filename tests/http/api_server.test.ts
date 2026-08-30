@@ -8,6 +8,7 @@ import { EventStore } from "../../source/store/event_store.js";
 import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
+import { ActionCooldownTracker } from "../../source/actions/action_cooldown.js";
 import { EmailClassificationStore } from "../../source/connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "../../source/auth/google_token_store.js";
 import { DEFAULT_ACTION_TIERS } from "../../source/types/action_tier.js";
@@ -177,6 +178,7 @@ function makeServer(
     tierStore: ActionTierStore = new ActionTierStore(),
     emailClassificationStore?: EmailClassificationStore,
     googleTokenStore?: GoogleTokenStore,
+    cooldown?: ActionCooldownTracker,
 ): AcediaApiServer {
     return new AcediaApiServer(
         store,
@@ -189,6 +191,7 @@ function makeServer(
         new PendingActionStore(),
         emailClassificationStore,
         googleTokenStore,
+        cooldown,
     );
 }
 
@@ -413,6 +416,38 @@ describe("AcediaApiServer — POST /api/actions", () => {
         expect(called).toBe(true);
     });
 
+    it("rejects with 403 once the action kind hits its cooldown, even on 'auto' tier", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        let calls = 0;
+        const conn = makeConnector("Gmail", async () => {
+            calls++;
+        });
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ reply: "auto" });
+        const server = makeServer(
+            store,
+            [conn],
+            nullAI,
+            SECRET,
+            tierStore,
+            undefined,
+            undefined,
+            new ActionCooldownTracker(5 * 60_000, 1),
+        );
+        server.start(port);
+        const body = {
+            connector: "Gmail",
+            action: { kind: "reply", sourceId: "msg1", body: "Hi" },
+        };
+        const first = await post(`http://localhost:${port}/api/actions`, body, AUTH);
+        const second = await post(`http://localhost:${port}/api/actions`, body, AUTH);
+        server.stop();
+        expect(first.status).toBe(204);
+        expect(second.status).toBe(403);
+        expect(calls).toBe(1);
+    });
+
     it("rejects with 403 when the action kind's tier is 'manual'", async () => {
         const port = nextPort();
         const store = new EventStore();
@@ -453,6 +488,51 @@ describe("AcediaApiServer — POST /api/actions", () => {
         server.stop();
         expect(confirm.status).toBe(204);
         expect(called).toEqual({ kind: "reply", sourceId: "msg1", body: "Hi" });
+    });
+
+    it("confirm tier: POST /api/actions/:id/confirm rejects with 429 once the kind hits its cooldown", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        let calls = 0;
+        const conn = makeConnector("Gmail", async () => {
+            calls++;
+        });
+        const cooldown = new ActionCooldownTracker(5 * 60_000, 1);
+        const server = makeServer(
+            store,
+            [conn],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            undefined,
+            undefined,
+            cooldown,
+        );
+        server.start(port);
+        const body = {
+            connector: "Gmail",
+            action: { kind: "reply", sourceId: "msg1", body: "Hi" },
+        };
+        const create1 = await post(`http://localhost:${port}/api/actions`, body, AUTH);
+        const id1 = (create1.body as { id: string }).id;
+        const confirm1 = await post(
+            `http://localhost:${port}/api/actions/${id1}/confirm`,
+            {},
+            AUTH,
+        );
+
+        const create2 = await post(`http://localhost:${port}/api/actions`, body, AUTH);
+        const id2 = (create2.body as { id: string }).id;
+        const confirm2 = await post(
+            `http://localhost:${port}/api/actions/${id2}/confirm`,
+            {},
+            AUTH,
+        );
+        server.stop();
+
+        expect(confirm1.status).toBe(204);
+        expect(confirm2.status).toBe(429);
+        expect(calls).toBe(1);
     });
 
     it("confirm tier: POST /api/actions/:id/cancel discards the pending action without executing it", async () => {
@@ -747,6 +827,20 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
         server.stop();
         expect(res.status).toBe(200);
         expect((res.body as { changed: string[] }).changed).toEqual([]);
+    });
+});
+
+describe("AcediaApiServer — GET /api/config/risk", () => {
+    it("returns the static ACTION_RISK map", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/config/risk`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect((res.body as Record<string, string>)["merge_pr"]).toBe("high");
+        expect((res.body as Record<string, string>)["mark_email_read"]).toBe("low");
+        expect((res.body as Record<string, string>)["reply"]).toBe("medium");
     });
 });
 
