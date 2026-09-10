@@ -15,6 +15,18 @@ function resolveTierPath(): string {
     return path.join(storageDir, "action_tiers.json");
 }
 
+function resolveOverridesPath(): string {
+    const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
+    return path.join(storageDir, "action_tier_overrides.json");
+}
+
+/** "{kind}:{scope}" — scope is a sender email (email kinds) or "{owner}/{repo}" (GitHub kinds). */
+export type TierOverrides = Record<string, ActionTier>;
+
+function overrideKey(kind: ActionKind, scope: string): string {
+    return `${kind}:${scope}`;
+}
+
 /**
  * Persists the autonomy tier for each action kind — same STORAGE_DIR convention as
  * FcmSender's device token. Defaults to DEFAULT_ACTION_TIERS (everything "confirm", merge_pr
@@ -26,10 +38,13 @@ function resolveTierPath(): string {
  */
 export class ActionTierStore {
     private tiers: ActionTierConfig = { ...DEFAULT_ACTION_TIERS };
+    private overrides: TierOverrides = {};
     private readonly tierPath: string;
+    private readonly overridesPath: string;
 
-    constructor(tierPath?: string) {
+    constructor(tierPath?: string, overridesPath?: string) {
         this.tierPath = tierPath ?? resolveTierPath();
+        this.overridesPath = overridesPath ?? resolveOverridesPath();
     }
 
     async load(): Promise<void> {
@@ -44,14 +59,49 @@ export class ActionTierStore {
         } catch {
             // File absent or unreadable — keep defaults, that's fine
         }
+
+        try {
+            const raw = await fs.readFile(this.overridesPath, "utf-8");
+            const parsed = JSON.parse(raw) as Record<string, string>;
+            const clean: TierOverrides = {};
+            for (const [key, tier] of Object.entries(parsed)) {
+                const kind = key.slice(0, key.indexOf(":")) as ActionKind;
+                if (
+                    VALID_KINDS.has(kind) &&
+                    !(kind in IMMUTABLE_TIERS) &&
+                    VALID_TIERS.has(tier as ActionTier)
+                ) {
+                    clean[key] = tier as ActionTier;
+                }
+            }
+            this.overrides = clean;
+        } catch {
+            // File absent or unreadable — no overrides yet, that's fine
+        }
     }
 
     getAll(): ActionTierConfig {
         return { ...this.tiers, ...IMMUTABLE_TIERS };
     }
 
-    getTier(kind: ActionKind): ActionTier {
-        return IMMUTABLE_TIERS[kind] ?? this.tiers[kind];
+    getOverrides(): TierOverrides {
+        return { ...this.overrides };
+    }
+
+    /**
+     * Backlog #329 P1 "paliers d'autonomie par type d'action ET par expéditeur/repo" — scope
+     * is a sender email (email kinds) or "{owner}/{repo}" (GitHub kinds), resolved by the
+     * caller (see resolve_tier_scope.ts) since ActionTierStore has no access to EventStore.
+     * IMMUTABLE_TIERS always wins regardless of scope — merge_pr stays manual no matter what
+     * override might exist for a specific repo.
+     */
+    getTier(kind: ActionKind, scope?: string): ActionTier {
+        if (kind in IMMUTABLE_TIERS) return IMMUTABLE_TIERS[kind]!;
+        if (scope) {
+            const override = this.overrides[overrideKey(kind, scope)];
+            if (override) return override;
+        }
+        return this.tiers[kind];
     }
 
     /** Applies only valid, mutable (kind, tier) pairs from the patch; returns the keys actually changed. */
@@ -68,12 +118,44 @@ export class ActionTierStore {
         return changed;
     }
 
+    /**
+     * Sets or clears a per-scope override. `tier: null` removes the override (falls back to
+     * the kind-level tier). Silently no-ops for an unknown kind, an immutable kind, or an
+     * invalid tier value — mirrors patch()'s own validation posture.
+     */
+    async patchOverride(kind: string, scope: string, tier: string | null): Promise<boolean> {
+        if (!VALID_KINDS.has(kind as ActionKind) || kind in IMMUTABLE_TIERS || !scope) return false;
+        const key = overrideKey(kind as ActionKind, scope);
+        if (tier === null) {
+            if (!(key in this.overrides)) return false;
+            delete this.overrides[key];
+        } else {
+            if (!VALID_TIERS.has(tier as ActionTier)) return false;
+            this.overrides[key] = tier as ActionTier;
+        }
+        await this.saveOverrides();
+        return true;
+    }
+
     private async save(): Promise<void> {
         try {
             await fs.mkdir(path.dirname(this.tierPath), { recursive: true });
             await fs.writeFile(this.tierPath, JSON.stringify(this.tiers, null, 2), "utf-8");
         } catch (e) {
             console.error("[ActionTiers] Failed to persist:", (e as Error).message);
+        }
+    }
+
+    private async saveOverrides(): Promise<void> {
+        try {
+            await fs.mkdir(path.dirname(this.overridesPath), { recursive: true });
+            await fs.writeFile(
+                this.overridesPath,
+                JSON.stringify(this.overrides, null, 2),
+                "utf-8",
+            );
+        } catch (e) {
+            console.error("[ActionTiers] Failed to persist overrides:", (e as Error).message);
         }
     }
 }

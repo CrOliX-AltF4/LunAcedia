@@ -844,6 +844,172 @@ describe("AcediaApiServer — GET /api/config/risk", () => {
     });
 });
 
+describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
+    // Isolated tmp files per test — writing overrides must never touch the real ~/.lunacedia.
+    function tmpTierStoreWithOverrides(): ActionTierStore {
+        const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        return new ActionTierStore(
+            path.join(os.tmpdir(), `lunacedia-test-tiers-${stamp}.json`),
+            path.join(os.tmpdir(), `lunacedia-test-overrides-${stamp}.json`),
+        );
+    }
+
+    it("GET returns an empty map when nothing was ever set", async () => {
+        const port = nextPort();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            tmpTierStoreWithOverrides(),
+        );
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/config/tier-overrides`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({});
+    });
+
+    it("PATCH sets a scoped override that takes effect on the very next POST /api/actions", async () => {
+        const port = nextPort();
+        let called = false;
+        const conn = makeConnector("Tasks", async () => {
+            called = true;
+        });
+        const server = makeServer(
+            new EventStore(),
+            [conn],
+            nullAI,
+            SECRET,
+            tmpTierStoreWithOverrides(),
+        );
+        server.start(port);
+        const patchRes = await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "reply", scope: "boss@corp.com", tier: "manual" },
+            AUTH,
+        );
+        server.stop();
+        expect(patchRes.status).toBe(200);
+        expect((patchRes.body as { overrides: Record<string, string> }).overrides).toEqual({
+            "reply:boss@corp.com": "manual",
+        });
+        expect(called).toBe(false); // sanity — no action was submitted in this test
+    });
+
+    it("an email reply from an overridden sender is refused even though 'reply' defaults to confirm", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "Hi",
+            priority: "normal",
+            dedupeKey: "email-msg1",
+            meta: { from: "boss@corp.com" },
+        });
+        const conn = makeConnector("Gmail", async () => {});
+        const server = makeServer(store, [conn], nullAI, SECRET, tmpTierStoreWithOverrides());
+        server.start(port);
+        await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "reply", scope: "boss@corp.com", tier: "manual" },
+            AUTH,
+        );
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(403);
+    });
+
+    it("a GitHub action on an overridden repo is refused via the sourceId-derived scope", async () => {
+        const port = nextPort();
+        const conn = makeConnector("GitHub", async () => {});
+        const server = makeServer(
+            new EventStore(),
+            [conn],
+            nullAI,
+            SECRET,
+            tmpTierStoreWithOverrides(),
+        );
+        server.start(port);
+        await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "close_issue", scope: "owner/repo", tier: "manual" },
+            AUTH,
+        );
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "GitHub", action: { kind: "close_issue", sourceId: "owner/repo#42" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(403);
+    });
+
+    it("tier: null removes an existing override", async () => {
+        const port = nextPort();
+        const tierStore = tmpTierStoreWithOverrides();
+        const server = makeServer(new EventStore(), [], nullAI, SECRET, tierStore);
+        server.start(port);
+        await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "reply", scope: "boss@corp.com", tier: "manual" },
+            AUTH,
+        );
+        const res = await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "reply", scope: "boss@corp.com", tier: null },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect((res.body as { overrides: Record<string, string> }).overrides).toEqual({});
+    });
+
+    it("PATCH rejects an unknown kind with 400", async () => {
+        const port = nextPort();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            tmpTierStoreWithOverrides(),
+        );
+        server.start(port);
+        const res = await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "notAKind", scope: "x", tier: "manual" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("PATCH rejects a malformed body with 400", async () => {
+        const port = nextPort();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            tmpTierStoreWithOverrides(),
+        );
+        server.start(port);
+        const res = await patch(
+            `http://localhost:${port}/api/config/tier-overrides`,
+            { kind: "reply" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+});
+
 describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
     function tmpClassificationStore(): EmailClassificationStore {
         return new EmailClassificationStore(
