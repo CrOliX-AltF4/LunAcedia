@@ -15,6 +15,8 @@ _A headless information infrastructure server. Polls GitHub, Gmail, Calendar, Ta
 
 > [!NOTE]
 > **Fully standalone** — no Natsume or LunAvaritia required. LunAcedia is a headless backend; any HTTP or WebSocket client can consume it. Official clients: [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) (Android) and the Natsume admin panel (desktop). Part of the [Lun' ecosystem](https://github.com/CrOliX-AltF4).
+>
+> **Doctrine** — the ecosystem's constitution and standards (UX, security/auth, satellite readiness bar) live in LunAnima's `docs/constitution.md` and `docs/standards/` (private repo). Rewritten 2026-09-15 — see LunAnima's `docs/adr/ADR-003-refonte-doctrine-2026-09.md` for what changed and why, in particular `04-securite-auth.md` which covers this repo's Google OAuth token storage.
 
 ---
 
