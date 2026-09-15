@@ -46,8 +46,8 @@ export class GoogleTokenStore {
         if (this.encryptionEnabled && !this.masterKey) {
             throw new Error(
                 "[GoogleTokenStore] ACEDIA_TOKEN_ENCRYPTION_ENABLED=true but no master key is " +
-                "configured (ACEDIA_MASTER_KEY or ACEDIA_MASTER_KEY_FILE). Refusing to start " +
-                "rather than fall back to writing refresh tokens in clear text.",
+                    "configured (ACEDIA_MASTER_KEY or ACEDIA_MASTER_KEY_FILE). Refusing to start " +
+                    "rather than fall back to writing refresh tokens in clear text.",
             );
         }
     }
@@ -57,7 +57,8 @@ export class GoogleTokenStore {
             const raw = await fs.readFile(this.tokenPath, "utf-8");
             // Plaintext from before encryption was turned on stays readable — re-encrypted on
             // the next save() rather than requiring a manual migration.
-            const json = this.masterKey && isEncryptedValue(raw) ? decryptValue(raw, this.masterKey) : raw;
+            const json =
+                this.masterKey && isEncryptedValue(raw) ? decryptValue(raw, this.masterKey) : raw;
             const parsed = JSON.parse(json) as TokenMap;
             if (parsed && typeof parsed === "object") this.tokens = parsed;
         } catch {
@@ -91,7 +92,7 @@ export class GoogleTokenStore {
         try {
             await fs.mkdir(path.dirname(this.tokenPath), { recursive: true });
             const json = JSON.stringify(this.tokens, null, 2);
-            const out  = this.masterKey ? encryptValue(json, this.masterKey) : json;
+            const out = this.masterKey ? encryptValue(json, this.masterKey) : json;
             await fs.writeFile(this.tokenPath, out, "utf-8");
         } catch (e) {
             console.error("[GoogleTokenStore] Failed to persist:", (e as Error).message);

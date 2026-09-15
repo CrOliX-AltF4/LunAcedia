@@ -72,8 +72,10 @@ describe("GoogleTokenStore — encryption at rest (ACEDIA_TOKEN_ENCRYPTION_ENABL
     });
 
     afterEach(() => {
-        if (ORIGINAL_ENABLED === undefined) delete process.env["ACEDIA_TOKEN_ENCRYPTION_ENABLED"]; else process.env["ACEDIA_TOKEN_ENCRYPTION_ENABLED"] = ORIGINAL_ENABLED;
-        if (ORIGINAL_KEY === undefined) delete process.env["ACEDIA_MASTER_KEY"]; else process.env["ACEDIA_MASTER_KEY"] = ORIGINAL_KEY;
+        if (ORIGINAL_ENABLED === undefined) delete process.env["ACEDIA_TOKEN_ENCRYPTION_ENABLED"];
+        else process.env["ACEDIA_TOKEN_ENCRYPTION_ENABLED"] = ORIGINAL_ENABLED;
+        if (ORIGINAL_KEY === undefined) delete process.env["ACEDIA_MASTER_KEY"];
+        else process.env["ACEDIA_MASTER_KEY"] = ORIGINAL_KEY;
     });
 
     it("refuses to construct when enabled without a configured key — fails closed, never writes plaintext", () => {

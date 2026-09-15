@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { randomBytes } from "crypto";
-import { encryptValue, decryptValue, isEncryptedValue, loadMasterKey } from "../../source/auth/secret_crypto.js";
+import {
+    encryptValue,
+    decryptValue,
+    isEncryptedValue,
+    loadMasterKey,
+} from "../../source/auth/secret_crypto.js";
 
 const KEY = randomBytes(32);
 
@@ -42,8 +47,10 @@ describe("loadMasterKey", () => {
     });
 
     afterEach(() => {
-        if (ORIGINAL_KEY === undefined) delete process.env["ACEDIA_MASTER_KEY"]; else process.env["ACEDIA_MASTER_KEY"] = ORIGINAL_KEY;
-        if (ORIGINAL_KEY_FILE === undefined) delete process.env["ACEDIA_MASTER_KEY_FILE"]; else process.env["ACEDIA_MASTER_KEY_FILE"] = ORIGINAL_KEY_FILE;
+        if (ORIGINAL_KEY === undefined) delete process.env["ACEDIA_MASTER_KEY"];
+        else process.env["ACEDIA_MASTER_KEY"] = ORIGINAL_KEY;
+        if (ORIGINAL_KEY_FILE === undefined) delete process.env["ACEDIA_MASTER_KEY_FILE"];
+        else process.env["ACEDIA_MASTER_KEY_FILE"] = ORIGINAL_KEY_FILE;
     });
 
     it("returns null when neither var is set", () => {

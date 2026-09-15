@@ -6,11 +6,11 @@ import * as fs from "fs";
 // docs/standards/02-architecture-ecosystem.md on the LunAnima side), so this is a deliberate
 // copy, not an import, kept small enough that drift is easy to notice.
 
-const ALGO    = "aes-256-gcm";
+const ALGO = "aes-256-gcm";
 const KEY_LEN = 32; // AES-256
-const IV_LEN  = 12; // recommended for GCM
+const IV_LEN = 12; // recommended for GCM
 const TAG_LEN = 16;
-const PREFIX  = "enc:v1:";
+const PREFIX = "enc:v1:";
 
 /** Whether a raw stored value is one produced by encryptValue() (vs. still plaintext). */
 export function isEncryptedValue(value: string): boolean {
@@ -18,7 +18,7 @@ export function isEncryptedValue(value: string): boolean {
 }
 
 export function encryptValue(plaintext: string, key: Buffer): string {
-    const iv     = crypto.randomBytes(IV_LEN);
+    const iv = crypto.randomBytes(IV_LEN);
     const cipher = crypto.createCipheriv(ALGO, key, iv);
     const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
     const tag = cipher.getAuthTag();
@@ -29,9 +29,9 @@ export function decryptValue(encoded: string, key: Buffer): string {
     if (!isEncryptedValue(encoded)) {
         throw new Error(`decryptValue: value does not start with "${PREFIX}"`);
     }
-    const raw        = Buffer.from(encoded.slice(PREFIX.length), "base64");
-    const iv         = raw.subarray(0, IV_LEN);
-    const tag        = raw.subarray(IV_LEN, IV_LEN + TAG_LEN);
+    const raw = Buffer.from(encoded.slice(PREFIX.length), "base64");
+    const iv = raw.subarray(0, IV_LEN);
+    const tag = raw.subarray(IV_LEN, IV_LEN + TAG_LEN);
     const ciphertext = raw.subarray(IV_LEN + TAG_LEN);
     const decipher = crypto.createDecipheriv(ALGO, key, iv);
     decipher.setAuthTag(tag);
@@ -50,7 +50,11 @@ export function loadMasterKey(): Buffer | null {
     let hex: string | undefined;
     const keyFile = process.env["ACEDIA_MASTER_KEY_FILE"];
     if (keyFile) {
-        try { hex = fs.readFileSync(keyFile, "utf8").trim(); } catch { hex = undefined; }
+        try {
+            hex = fs.readFileSync(keyFile, "utf8").trim();
+        } catch {
+            hex = undefined;
+        }
     }
     hex ??= process.env["ACEDIA_MASTER_KEY"];
     if (!hex) return null;
@@ -59,7 +63,7 @@ export function loadMasterKey(): Buffer | null {
     if (key.length !== KEY_LEN) {
         throw new Error(
             `ACEDIA_MASTER_KEY must be a ${KEY_LEN * 2}-character hex string (${KEY_LEN} bytes) — ` +
-            `got ${key.length} bytes. Generate one with: openssl rand -hex ${KEY_LEN}`
+                `got ${key.length} bytes. Generate one with: openssl rand -hex ${KEY_LEN}`,
         );
     }
     return key;
