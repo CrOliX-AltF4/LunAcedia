@@ -4,6 +4,7 @@ import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { formatThread, formatFailedCheckRun } from "./github_formatter.js";
+import { assertHttpOk } from "../connector_http.js";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -199,10 +200,10 @@ export class GitHubConnector implements IConnector {
                     method: "PATCH",
                     headers,
                 });
-                if (!resp.ok)
-                    console.warn(`[GitHub] mark_notification_read returned ${resp.status}`);
+                await assertHttpOk(resp, "[GitHub] mark_notification_read");
             } catch (e) {
                 console.error("[GitHub] mark_notification_read error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -214,9 +215,10 @@ export class GitHubConnector implements IConnector {
                     headers,
                     body: JSON.stringify({ title: action.fields.title, body: action.fields.body }),
                 });
-                if (!resp.ok) console.warn(`[GitHub] create_issue returned ${resp.status}`);
+                await assertHttpOk(resp, "[GitHub] create_issue");
             } catch (e) {
                 console.error("[GitHub] create_issue error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -233,9 +235,10 @@ export class GitHubConnector implements IConnector {
                         body: action.fields.body,
                     }),
                 });
-                if (!resp.ok) console.warn(`[GitHub] open_pr returned ${resp.status}`);
+                await assertHttpOk(resp, "[GitHub] open_pr");
             } catch (e) {
                 console.error("[GitHub] open_pr error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -278,9 +281,10 @@ export class GitHubConnector implements IConnector {
                     headers,
                 });
             }
-            if (!resp.ok) console.warn(`[GitHub] ${action.kind} returned ${resp.status}`);
+            await assertHttpOk(resp, `[GitHub] ${action.kind}`);
         } catch (e) {
             console.error(`[GitHub] ${action.kind} error:`, (e as Error).message);
+            throw e;
         }
     }
 }

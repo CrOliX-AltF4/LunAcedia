@@ -416,6 +416,29 @@ describe("AcediaApiServer — POST /api/actions", () => {
         expect(called).toBe(true);
     });
 
+    // Connectors used to swallow their own HTTP failures (log + return) instead of throwing,
+    // so dispatchAction's try/catch never fired and a broken action reported success (204)
+    // to the caller — see source/connectors/connector_http.ts.
+    it("returns 500 instead of a false success when the connector's executeAction throws", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        const conn = makeConnector("Gmail", async () => {
+            throw new Error("[Gmail] reply send returned 401");
+        });
+        const tierStore = tmpTierStore();
+        await tierStore.patch({ reply: "auto" });
+        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(500);
+        expect((res.body as { error: string }).error).toBe("Action failed");
+    });
+
     it("rejects with 403 once the action kind hits its cooldown, even on 'auto' tier", async () => {
         const port = nextPort();
         const store = new EventStore();

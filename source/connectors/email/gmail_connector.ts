@@ -8,6 +8,7 @@ import { parseRules, classifyEmail } from "./email_rules.js";
 import type { EmailRule } from "./email_rules.js";
 import type { EmailClassificationStore } from "./email_classification_store.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
+import { assertHttpOk } from "../connector_http.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -180,7 +181,7 @@ export class GmailConnector implements IConnector {
             token = await getAccessToken(this.clientId, this.clientSecret, refreshToken);
         } catch (e) {
             console.error("[Gmail] action token error:", (e as Error).message);
-            return;
+            throw e;
         }
 
         if (
@@ -204,12 +205,7 @@ export class GmailConnector implements IConnector {
                     `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-Id`,
                 { headers: { Authorization: `Bearer ${token}` } },
             );
-            if (!resp.ok) {
-                console.warn(
-                    `[Gmail] reply: fetch message ${action.sourceId} returned ${resp.status}`,
-                );
-                return;
-            }
+            await assertHttpOk(resp, `[Gmail] reply: fetch message ${action.sourceId}`);
             const msg = (await resp.json()) as GmailMessageMeta & {
                 payload: { headers: MessageHeader[] };
             };
@@ -222,7 +218,7 @@ export class GmailConnector implements IConnector {
             messageId = h("Message-Id");
         } catch (e) {
             console.error("[Gmail] reply: fetch error:", (e as Error).message);
-            return;
+            throw e;
         }
 
         // Build minimal MIME reply
@@ -248,11 +244,10 @@ export class GmailConnector implements IConnector {
                 },
                 body: JSON.stringify({ raw, threadId }),
             });
-            if (!resp.ok) {
-                console.warn(`[Gmail] reply send returned ${resp.status}`);
-            }
+            await assertHttpOk(resp, "[Gmail] reply send");
         } catch (e) {
             console.error("[Gmail] reply send error:", (e as Error).message);
+            throw e;
         }
     }
 
@@ -286,9 +281,10 @@ export class GmailConnector implements IConnector {
                     ...(body ? { body: JSON.stringify(body) } : {}),
                 },
             );
-            if (!resp.ok) console.warn(`[Gmail] ${kind} returned ${resp.status}`);
+            await assertHttpOk(resp, `[Gmail] ${kind}`);
         } catch (e) {
             console.error(`[Gmail] ${kind} error:`, (e as Error).message);
+            throw e;
         }
     }
 }

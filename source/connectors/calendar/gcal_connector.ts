@@ -5,6 +5,7 @@ import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
+import { assertHttpOk } from "../connector_http.js";
 
 const GCAL_API = "https://www.googleapis.com/calendar/v3";
 
@@ -200,7 +201,7 @@ export class GcalConnector implements IConnector {
             token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gcal");
         } catch (e) {
             console.error("[GCal] action token error:", (e as Error).message);
-            return;
+            throw e;
         }
         const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
@@ -222,9 +223,10 @@ export class GcalConnector implements IConnector {
                         body: JSON.stringify(body),
                     },
                 );
-                if (!resp.ok) console.warn(`[GCal] create_event returned ${resp.status}`);
+                await assertHttpOk(resp, "[GCal] create_event");
             } catch (e) {
                 console.error("[GCal] create_event error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -235,10 +237,11 @@ export class GcalConnector implements IConnector {
         if (action.kind === "delete_event") {
             try {
                 const resp = await fetch(eventUrl, { method: "DELETE", headers });
-                if (!resp.ok && resp.status !== 410)
-                    console.warn(`[GCal] delete_event returned ${resp.status}`);
+                // 410 = already gone — same outcome the caller wanted, not a failure.
+                await assertHttpOk(resp, "[GCal] delete_event", [410]);
             } catch (e) {
                 console.error("[GCal] delete_event error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -254,9 +257,10 @@ export class GcalConnector implements IConnector {
                 headers,
                 body: JSON.stringify(patch),
             });
-            if (!resp.ok) console.warn(`[GCal] update_event returned ${resp.status}`);
+            await assertHttpOk(resp, "[GCal] update_event");
         } catch (e) {
             console.error("[GCal] update_event error:", (e as Error).message);
+            throw e;
         }
     }
 

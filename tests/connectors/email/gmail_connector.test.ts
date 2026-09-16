@@ -382,4 +382,83 @@ describe("GmailConnector.executeAction — reply", () => {
         await new GmailConnector().executeAction({ kind: "complete", sourceId: "msg1" });
         expect(mockFetch).not.toHaveBeenCalled();
     });
+
+    // Regression: this used to log-and-swallow the failure, so dispatchAction's own
+    // try/catch never saw it and the caller was told the action succeeded.
+    it("should throw (not swallow) when the Gmail API rejects the reply send", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (u.includes("/messages/msg1?"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            id: "msg1",
+                            threadId: "thread-1",
+                            payload: { headers: [{ name: "From", value: "alice@example.com" }] },
+                        }),
+                });
+            if (u.includes("/messages/send") && opts?.method === "POST")
+                return Promise.resolve({ ok: false, status: 401, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GmailConnector().executeAction({ kind: "reply", sourceId: "msg1", body: "Hi" }),
+        ).rejects.toThrow("returned 401");
+    });
+
+    it("should throw when fetching the original message for reply fails", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GmailConnector().executeAction({ kind: "reply", sourceId: "msg1", body: "Hi" }),
+        ).rejects.toThrow("returned 404");
+    });
+});
+
+describe("GmailConnector.executeAction — archive/delete/mark (modifyMessage)", () => {
+    beforeEach(() => {
+        clearTokenCache();
+        process.env["GMAIL_CLIENT_ID"] = "cid";
+        process.env["GMAIL_CLIENT_SECRET"] = "csec";
+        process.env["GMAIL_REFRESH_TOKEN"] = "rtoken";
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("should throw (not swallow) when the Gmail API rejects an archive_email call", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GmailConnector().executeAction({ kind: "archive_email", sourceId: "msg1" }),
+        ).rejects.toThrow("returned 403");
+    });
+
+    it("should throw when the token fetch itself fails", async () => {
+        const mockFetch = vi.fn().mockRejectedValue(new Error("network down"));
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GmailConnector().executeAction({ kind: "archive_email", sourceId: "msg1" }),
+        ).rejects.toThrow("network down");
+    });
 });

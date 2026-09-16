@@ -405,4 +405,42 @@ describe("GitHubConnector.executeAction", () => {
         expect(warnSpy).toHaveBeenCalled();
         warnSpy.mockRestore();
     });
+
+    // Regression: this used to log-and-swallow the failure, so dispatchAction's own
+    // try/catch never saw it and the caller was told the action succeeded.
+    it("close_issue: throws (not swallows) when the GitHub API rejects the request", async () => {
+        const mockFetch = vi
+            .fn()
+            .mockResolvedValue({ ok: false, status: 403, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "owner/repo#3" }),
+        ).rejects.toThrow("returned 403");
+    });
+
+    it("create_issue: throws when the GitHub API rejects the request", async () => {
+        const mockFetch = vi
+            .fn()
+            .mockResolvedValue({ ok: false, status: 422, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GitHubConnector().executeAction({
+                kind: "create_issue",
+                fields: { repo: "owner/repo", title: "Bug", body: "..." },
+            }),
+        ).rejects.toThrow("returned 422");
+    });
+
+    it("mark_notification_read: throws when the GitHub API rejects the request", async () => {
+        const mockFetch = vi
+            .fn()
+            .mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GitHubConnector().executeAction({
+                kind: "mark_notification_read",
+                sourceId: "gh-mention-98765",
+            }),
+        ).rejects.toThrow("returned 404");
+    });
 });
