@@ -351,4 +351,49 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
         expect(warnSpy).not.toHaveBeenCalled();
         warnSpy.mockRestore();
     });
+
+    // Regression: this used to log-and-swallow the failure, so dispatchAction's own
+    // try/catch never saw it and the caller was told the action succeeded.
+    it("delete_task: throws (not swallows) on a real failure status, e.g. 403", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "DELETE")
+                return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new TasksConnector().executeAction({
+                kind: "delete_task",
+                sourceId: "mylist/task-999",
+            }),
+        ).rejects.toThrow("returned 403");
+    });
+
+    it("complete_task: throws when the Tasks API rejects the request", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            return Promise.resolve({ ok: false, status: 401, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new TasksConnector().executeAction({ kind: "complete_task", sourceId: "task-abc" }),
+        ).rejects.toThrow("returned 401");
+    });
+
+    it("throws when the token fetch itself fails", async () => {
+        const mockFetch = vi.fn().mockRejectedValue(new Error("network down"));
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new TasksConnector().executeAction({ kind: "complete_task", sourceId: "task-abc" }),
+        ).rejects.toThrow("network down");
+    });
 });

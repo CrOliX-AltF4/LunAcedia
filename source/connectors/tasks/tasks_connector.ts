@@ -5,6 +5,7 @@ import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
+import { assertHttpOk } from "../connector_http.js";
 
 const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
 
@@ -146,7 +147,7 @@ export class TasksConnector implements IConnector {
             token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gtasks");
         } catch (e) {
             console.error("[Tasks] action token error:", (e as Error).message);
-            return;
+            throw e;
         }
         const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
@@ -162,9 +163,10 @@ export class TasksConnector implements IConnector {
                     headers,
                     body: JSON.stringify(body),
                 });
-                if (!resp.ok) console.warn(`[Tasks] create_task returned ${resp.status}`);
+                await assertHttpOk(resp, "[Tasks] create_task");
             } catch (e) {
                 console.error("[Tasks] create_task error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -179,10 +181,11 @@ export class TasksConnector implements IConnector {
         if (action.kind === "delete_task") {
             try {
                 const resp = await fetch(taskUrl, { method: "DELETE", headers });
-                if (!resp.ok && resp.status !== 404)
-                    console.warn(`[Tasks] delete_task returned ${resp.status}`);
+                // 404 = already gone — same outcome the caller wanted, not a failure.
+                await assertHttpOk(resp, "[Tasks] delete_task", [404]);
             } catch (e) {
                 console.error("[Tasks] delete_task error:", (e as Error).message);
+                throw e;
             }
             return;
         }
@@ -193,11 +196,10 @@ export class TasksConnector implements IConnector {
                 headers,
                 body: JSON.stringify({ status: "completed" }),
             });
-            if (!resp.ok) {
-                console.warn(`[Tasks] complete_task returned ${resp.status}`);
-            }
+            await assertHttpOk(resp, "[Tasks] complete_task");
         } catch (e) {
             console.error("[Tasks] complete_task error:", (e as Error).message);
+            throw e;
         }
     }
 }

@@ -539,4 +539,61 @@ describe("GcalConnector.executeAction — update_event / create_event / delete_e
         expect(warnSpy).not.toHaveBeenCalled();
         warnSpy.mockRestore();
     });
+
+    // Regression: this used to log-and-swallow the failure, so dispatchAction's own
+    // try/catch never saw it and the caller was told the action succeeded.
+    it("delete_event: throws (not swallows) on a real failure status, e.g. 403", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "DELETE")
+                return Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({
+                kind: "delete_event",
+                sourceId: "primary/event-999",
+            }),
+        ).rejects.toThrow("returned 403");
+    });
+
+    it("create_event: throws when the GCal API rejects the request", async () => {
+        const mockFetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (opts?.method === "POST")
+                return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+        });
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({
+                kind: "create_event",
+                fields: {
+                    summary: "New meeting",
+                    start: "2026-09-01T10:00:00Z",
+                    end: "2026-09-01T10:30:00Z",
+                },
+            }),
+        ).rejects.toThrow("returned 400");
+    });
+
+    it("throws when the token fetch itself fails", async () => {
+        const mockFetch = vi.fn().mockRejectedValue(new Error("network down"));
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({
+                kind: "delete_event",
+                sourceId: "primary/event-999",
+            }),
+        ).rejects.toThrow("network down");
+    });
 });
