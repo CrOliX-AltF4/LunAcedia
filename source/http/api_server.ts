@@ -22,6 +22,8 @@ import type { PendingActionStore } from "../actions/pending_action_store.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
 import type { GoogleTokenStore } from "../auth/google_token_store.js";
+import type { GuardServices } from "../guards/guard_services.js";
+import { validateRules } from "../guards/guard_rules_store.js";
 import {
     findGoogleOAuthConnector,
     buildGoogleAuthUrl,
@@ -97,6 +99,12 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                    tier: null removes the override
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
+ *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards, chantier A)
+ *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error } if invalid
+ *   GET  /api/guard/journal        ?limit=  events a rule dropped, newest first (never silent, restorable)
+ *   POST /api/guard/journal/restore body: { dedupeKey }  re-dispatches a dropped event, bypassing dedup + guard
+ *   POST /api/guard/preview        body: { rules? }  what-if against the store + journal, changes nothing
+ *   GET  /api/events               also accepts ?tag=  (guard tag, case-insensitive)
  *   GET  /api/calendar/free-slots?hours=24&minGapMin=30  → TimeSlot[] (deterministic, no LLM)
  *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
@@ -126,7 +134,79 @@ export class AcediaApiServer {
         private readonly emailClassificationStore?: EmailClassificationStore,
         private readonly googleTokenStore?: GoogleTokenStore,
         private readonly cooldown: ActionCooldownTracker = new ActionCooldownTracker(),
+        private readonly guards?: GuardServices,
     ) {}
+
+    /** GET/PUT /api/guard/rules · GET /api/guard/journal · POST /api/guard/journal/restore · POST /api/guard/preview */
+    private async handleGuard(
+        method: string,
+        path: string,
+        url: URL,
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        g: GuardServices,
+    ): Promise<void> {
+        const rulesPayload = () => ({ version: g.rules.getVersion(), rules: g.rules.getRules(), stats: g.stats.getAll() });
+
+        if (method === "GET" && path === "/api/guard/rules") return json(res, 200, rulesPayload());
+
+        if (method === "PUT" && path === "/api/guard/rules") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const rules = (body as { rules?: unknown } | null)?.rules;
+            const result = await g.rules.replaceAll(rules);
+            if (!result.ok) return json(res, 400, { error: result.error });
+            g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
+            return json(res, 200, rulesPayload());
+        }
+
+        if (method === "GET" && path === "/api/guard/journal") {
+            const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
+            return json(res, 200, { total: g.journal.size, entries: g.journal.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)) });
+        }
+
+        if (method === "POST" && path === "/api/guard/journal/restore") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const key = (body as { dedupeKey?: unknown } | null)?.dedupeKey;
+            if (typeof key !== "string" || !key) return json(res, 400, { error: "dedupeKey is required" });
+            const event = g.pipeline.restore(key);
+            if (!event) return json(res, 404, { error: "Not in the journal" });
+            this.hub.dispatchRestored(event);
+            return json(res, 200, { restored: key });
+        }
+
+        if (method === "POST" && path === "/api/guard/preview") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const candidateInput = (body as { rules?: unknown } | null)?.rules;
+            let candidate = g.rules.getRules();
+            if (candidateInput !== undefined) {
+                const parsed = validateRules(candidateInput);
+                if (!parsed.ok) return json(res, 400, { error: parsed.error });
+                candidate = parsed.rules;
+            }
+            // What a rule could be tested against: what already passed (the store) and what was dropped (the journal).
+            const byKey = new Map<string, AcediaEvent>();
+            for (const e of this.store.query({ limit: 1000 }).events) byKey.set(e.dedupeKey, e);
+            for (const entry of g.journal.list(500)) byKey.set(entry.event.dedupeKey, entry.event);
+            return json(res, 200, g.pipeline.preview(candidate, [...byKey.values()]));
+        }
+
+        return json(res, 404, { error: "Not found" });
+    }
 
     start(port: number): void {
         this.server = http.createServer((req, res) => {
@@ -380,8 +460,10 @@ export class AcediaApiServer {
             const limit = url.searchParams.get("limit");
             const offset = url.searchParams.get("offset");
             const unreadParam = url.searchParams.get("unread");
+            const tag = url.searchParams.get("tag");
 
             const result = this.store.query({
+                tag: tag ? tag : undefined,
                 source: source && SOURCES.has(source) ? (source as AcediaEventSource) : undefined,
                 priority:
                     priority && PRIORITIES.has(priority)
@@ -578,6 +660,12 @@ export class AcediaApiServer {
             }
             await this.emailClassificationStore.patch(body as Partial<EmailClassificationConfig>);
             return json(res, 200, this.emailClassificationStore.getAll());
+        }
+
+        // Ingestion guards (chantier A): /api/guard/{rules,journal,journal/restore,preview}
+        if (path.startsWith("/api/guard/")) {
+            if (!this.guards) return json(res, 503, { error: "Guards not configured" });
+            return this.handleGuard(method, path, url, req, res, this.guards);
         }
 
         // GET /api/calendar/free-slots?hours=24&minGapMin=30

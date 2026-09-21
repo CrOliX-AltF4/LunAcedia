@@ -7,6 +7,8 @@ export interface EventQuery {
     limit?: number;
     offset?: number;
     unread?: boolean;
+    /** Only events carrying this guard tag (case-insensitive). */
+    tag?: string;
 }
 
 /**
@@ -29,12 +31,14 @@ export class EventStore {
     }
 
     query(opts: EventQuery = {}): { events: AcediaEvent[]; total: number } {
-        const { source, priority, since, limit = 50, offset = 0, unread } = opts;
+        const { source, priority, since, limit = 50, offset = 0, unread, tag } = opts;
+        const wantedTag = tag?.toLowerCase();
         const filtered = this.buf.filter((e) => {
             if (source && e.source !== source) return false;
             if (priority && e.priority !== priority) return false;
             if (since && e.ts < since) return false;
             if (unread && e.read) return false;
+            if (wantedTag && !(e.tags ?? []).some((t) => t.toLowerCase() === wantedTag)) return false;
             return true;
         });
         // Most recent first

@@ -177,6 +177,30 @@ In **APIs & Services → Library**, enable:
 
 ---
 
+## Ingestion guards (drop the noise before it reaches you)
+
+A deterministic stage between a connector's poll and dispatch. You write **rules**; each rule has structured
+**conditions** (ANDed) and **actions**. There is no free-form regex and no LLM in this layer — mail content is
+untrusted data, so the guard only compares text and reads metadata.
+
+| Conditions | Actions |
+|---|---|
+| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, *not* the full body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** (adds a label to `AcediaEvent.tags`) · **set_priority** |
+
+- **Nothing is dropped by default**: with no rule configured, behaviour is unchanged.
+- **Never silent**: every dropped event is written to a journal (`guard_filtered.jsonl`, 30 days by default,
+  `GUARD_JOURNAL_RETENTION_DAYS`) and can be **restored**. Per-rule hit counters show dead or over-eager rules.
+- **The VIP list always wins over a drop** (the existing `vipSenders`).
+- **Preview before you commit**: `POST /api/guard/preview` runs candidate rules against recent events and the
+  journal and changes nothing.
+- **No repeated fetching**: an unread mail stays in the inbox, so LunAcedia remembers what it already decided
+  (dispatched, or dropped under the current rules) and does not re-fetch its metadata on every poll.
+- Events that pass carry `tags` and `ruleId` (both optional) so you can see which rule touched them; filter with
+  `GET /api/events?tag=…`.
+
+Routes: `GET/PUT /api/guard/rules` · `GET /api/guard/journal` · `POST /api/guard/journal/restore` ·
+`POST /api/guard/preview`. Design: `docs/adr/ADR-010` in the Lun'Anima repository.
+
 ## Design rules
 
 - Connectors classify by **rules only** — no LLM inside the connector layer
