@@ -710,8 +710,16 @@ export class AcediaApiServer {
             if (typeof text !== "string" || text.trim().length === 0) {
                 return json(res, 400, { error: "Body must be { text: string }" });
             }
+            const callerId = (body as Record<string, unknown>)["callerId"];
+            if (typeof callerId === "string" && callerId.trim()) {
+                console.warn(`[API] chat from ${callerId}`);
+            }
+            const context = (body as Record<string, unknown>)["context"];
+            const query = Array.isArray(context) && context.length > 0
+                ? `Context:\n${context.filter((c) => typeof c === "string").join("\n")}\n\n${text.trim()}`
+                : text.trim();
             try {
-                const response = await this.ai.chat(text.trim());
+                const response = await this.ai.chat(query);
                 return json(res, 200, { response });
             } catch (e) {
                 console.error("[API] chat error:", (e as Error).message);
@@ -738,6 +746,10 @@ export class AcediaApiServer {
             const text = (body as Record<string, unknown>)["text"];
             if (typeof text !== "string" || text.trim().length === 0) {
                 return json(res, 400, { error: "Body must be { text: string }" });
+            }
+            const intentCallerId = (body as Record<string, unknown>)["callerId"];
+            if (typeof intentCallerId === "string" && intentCallerId.trim()) {
+                console.warn(`[API] intent from ${intentCallerId}`);
             }
             let raw: string;
             try {

@@ -1342,6 +1342,36 @@ describe("AcediaApiServer — POST /api/chat", () => {
         server.stop();
         expect(res.status).toBe(502);
     });
+
+    it("should prepend context facts to the query sent to the AI provider", async () => {
+        const port = nextPort();
+        const chatSpy = vi.fn().mockResolvedValue("Butler response");
+        const mockAI: IAIProvider = { mode: "openai", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        await post(
+            `http://localhost:${port}/api/chat`,
+            { text: "Any urgent mail?", context: ["Boss is on leave until Friday"] },
+            AUTH,
+        );
+        server.stop();
+        const query = chatSpy.mock.calls[0]![0] as string;
+        expect(query).toContain("Boss is on leave until Friday");
+        expect(query).toContain("Any urgent mail?");
+    });
+
+    it("should log the caller identity when provided", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn().mockResolvedValue("ok"), digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await post(`http://localhost:${port}/api/chat`, { text: "hello", callerId: "natsume-core" }, AUTH);
+        server.stop();
+        const logged = warnSpy.mock.calls.some((call) => String(call[0]).includes("natsume-core"));
+        warnSpy.mockRestore();
+        expect(logged).toBe(true);
+    });
 });
 
 describe("AcediaApiServer — POST /api/intent", () => {
@@ -1506,6 +1536,27 @@ describe("AcediaApiServer — POST /api/intent", () => {
         );
         server.stop();
         expect(res.status).toBe(502);
+    });
+
+    it("should log the caller identity when provided", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue('{"matched": false}'),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "mark it read", callerId: "natsume-core" },
+            AUTH,
+        );
+        server.stop();
+        const logged = warnSpy.mock.calls.some((call) => String(call[0]).includes("natsume-core"));
+        warnSpy.mockRestore();
+        expect(logged).toBe(true);
     });
 });
 

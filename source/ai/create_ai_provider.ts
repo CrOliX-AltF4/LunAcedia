@@ -5,7 +5,6 @@ import type { IAIProvider } from "./ai_provider.js";
 import { NullAIProvider } from "./null_provider.js";
 import { OpenAIProvider } from "./openai_provider.js";
 import { OllamaProvider } from "./ollama_provider.js";
-import { NatsumeProvider } from "./natsume_provider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,15 +37,14 @@ export function createAIProvider(): IAIProvider {
             const model = process.env["AI_MODEL"] ?? "llama3.2";
             return new OllamaProvider(url, model, loadSystemPrompt());
         }
-        case "natsume": {
-            const url = process.env["NATSUME_CORE_URL"];
-            const secret = process.env["NATSUME_CORE_SECRET"];
-            if (!url || !secret)
-                throw new Error(
-                    "AI_PROVIDER=natsume requires NATSUME_CORE_URL and NATSUME_CORE_SECRET",
-                );
-            return new NatsumeProvider(url, secret);
-        }
+        case "natsume":
+            // Retired (ADR-008 D2, chantier I6, 2026-09-22): the Core is no longer LunAcedia's
+            // LLM backend. LunAcedia keeps its own provider (openai/ollama) for its own
+            // perimeter; the Core delegates to LunAcedia's existing /api/chat and /api/intent
+            // instead of LunAcedia delegating to the Core's /api/core/synthesize (now removed).
+            throw new Error(
+                "AI_PROVIDER=natsume is retired — set openai or ollama instead (see ADR-008 D2)",
+            );
         default:
             return new NullAIProvider();
     }
