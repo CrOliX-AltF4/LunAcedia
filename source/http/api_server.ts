@@ -9,6 +9,8 @@ import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import { formatProposalsPrompt } from "../ai/ai_provider.js";
 import { formatIntentPrompt, parseIntentResponse } from "../ai/intent_parser.js";
+import { createAIProvider } from "../ai/create_ai_provider.js";
+import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
 import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
 import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
@@ -127,7 +129,10 @@ export class AcediaApiServer {
         private readonly connectors: IConnector[],
         private readonly hub: IngestionHub,
         private readonly fcm: FcmSender | null,
-        private readonly ai: IAIProvider,
+        // Not readonly — POST /api/config/ai-provider swaps this in place after a successful
+        // write, so a first-time key configured from the dashboard takes effect immediately
+        // (no restart, ADR-013 I1).
+        private ai: IAIProvider,
         private readonly secret: string | undefined,
         private readonly tierStore: ActionTierStore,
         private readonly pendingStore: PendingActionStore,
@@ -693,6 +698,26 @@ export class AcediaApiServer {
                 200,
                 this.googleTokenStore?.status() ?? { gmail: false, gcal: false, gtasks: false },
             );
+        }
+
+        // POST /api/config/ai-provider — first-run onboarding (ADR-013 I1): LunAcedia ships
+        // with AI_PROVIDER=none and no default key to guess at (D2, ADR-008 — LunAcedia always
+        // keeps its own LLM, the Core never picks one for it). Writes .env and swaps this.ai
+        // live so the dashboard's setup screen takes effect without a restart.
+        if (method === "POST" && path === "/api/config/ai-provider") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const validated = validateAiProviderPatch(body);
+            if (!validated.ok) {
+                return json(res, 400, { error: validated.error });
+            }
+            writeAiProviderConfig(validated.patch);
+            this.ai = createAIProvider();
+            return json(res, 200, { ok: true, provider: this.ai.mode });
         }
 
         // POST /api/chat

@@ -126,3 +126,34 @@ describe("dashboard toggle()", () => {
         expect(toggleBlock).toContain("el.dataset.key");
     });
 });
+
+describe("dashboard AI provider onboarding (ADR-013 I1)", () => {
+    it("checks /api/health's ai field to decide whether to show the onboarding banner", () => {
+        expect(DASHBOARD_HTML).toContain("function checkAiProvider");
+        const block = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("function checkAiProvider"),
+            DASHBOARD_HTML.indexOf("function checkAiProvider") + 300,
+        );
+        expect(block).toContain("/api/health");
+        expect(block).toContain("data.ai");
+    });
+
+    it("saveAiProvider() posts to /api/config/ai-provider with the form's provider/apiKey", () => {
+        expect(DASHBOARD_HTML).toContain("function saveAiProvider");
+        const block = DASHBOARD_HTML.slice(
+            DASHBOARD_HTML.indexOf("function saveAiProvider"),
+            DASHBOARD_HTML.indexOf("function saveAiProvider") + 500,
+        );
+        expect(block).toContain("/api/config/ai-provider");
+        expect(block).toContain("method:'POST'");
+        expect(block).toContain("provider");
+        expect(block).toContain("apiKey");
+    });
+
+    it("calls checkAiProvider() during the initial bootstrap", () => {
+        const bootstrapStart = DASHBOARD_HTML.indexOf("// Initial load");
+        expect(bootstrapStart).toBeGreaterThan(-1);
+        const bootstrapBlock = DASHBOARD_HTML.slice(bootstrapStart, bootstrapStart + 400);
+        expect(bootstrapBlock).toContain("checkAiProvider()");
+    });
+});

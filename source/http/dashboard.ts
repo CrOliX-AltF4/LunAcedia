@@ -83,6 +83,14 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
 .field-hint{font-size:11px;color:var(--muted);margin:-6px 0 8px}
 #settings-save{margin-top:14px}
 #settings-status{font-size:12px;color:var(--accent);margin-left:10px}
+#ai-banner{display:none;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--urgent);border-radius:8px;margin:10px 20px;padding:10px 16px;font-size:13px}
+#ai-banner button{border-color:var(--accent);color:var(--accent)}
+#ai-setup{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:100}
+#ai-setup.open{display:flex}
+#ai-setup-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:420px;width:90%}
+#ai-setup-box h3{color:var(--accent);margin-bottom:14px}
+#ai-setup-box select,#ai-setup-box input{width:100%;margin-bottom:12px}
+#ai-setup-status{font-size:12px;margin-left:8px}
 </style>
 </head>
 <body>
@@ -128,6 +136,23 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   </div>
 </div>
 
+<div id="ai-setup">
+  <div id="ai-setup-box">
+    <h3>⚙ Configurer l'IA</h3>
+    <div class="field-hint">LunAcedia garde toujours son propre fournisseur IA (chat, digest, propositions, commandes) — le Core ne le fournit plus (ADR-008 D2).</div>
+    <select id="ai-provider-select" onchange="onAiProviderChange()">
+      <option value="openai">OpenAI</option>
+      <option value="ollama">Ollama (local)</option>
+    </select>
+    <input id="ai-api-key" type="password" placeholder="Clé API OpenAI (sk-...)" />
+    <input id="ai-ollama-url" type="text" placeholder="http://localhost:11434" style="display:none" />
+    <button onclick="saveAiProvider()">Enregistrer</button>
+    <span id="ai-setup-status"></span>
+    <br><br>
+    <button onclick="closeAiSetup()">Fermer</button>
+  </div>
+</div>
+
 <header>
   <h1>◆ LunAcedia</h1>
   <span id="badge">0</span>
@@ -138,6 +163,11 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="markAll()">Mark all read</button>
 </header>
+
+<div id="ai-banner">
+  <span>⚠ IA non configurée — chat, digest, propositions et commandes sont désactivés.</span>
+  <button onclick="openAiSetup()">Configurer</button>
+</div>
 
 <div id="cmdbar">
   <input id="cmd-input" type="text" placeholder="Dis-moi ce qu'il faut faire… (ex. crée une tâche pour rappeler le rendez-vous)" onkeydown="if(event.key==='Enter')sendCommand()" />
@@ -274,6 +304,37 @@ async function sendCommand(){
     else if(data.status==='refused'){status.textContent='Refusé — action manuelle uniquement.';}
     else{status.textContent='Erreur.';}
   }catch(e){status.textContent='Erreur.';}
+}
+
+// ── AI provider onboarding (ADR-013 I1) ──────────────────────────────────────
+function openAiSetup(){document.getElementById('ai-setup').classList.add('open');}
+function closeAiSetup(){document.getElementById('ai-setup').classList.remove('open');}
+function onAiProviderChange(){
+  const p=document.getElementById('ai-provider-select').value;
+  document.getElementById('ai-api-key').style.display=p==='openai'?'':'none';
+  document.getElementById('ai-ollama-url').style.display=p==='ollama'?'':'none';
+}
+async function saveAiProvider(){
+  const status=document.getElementById('ai-setup-status');
+  const provider=document.getElementById('ai-provider-select').value;
+  const apiKey=document.getElementById('ai-api-key').value.trim();
+  const ollamaUrl=document.getElementById('ai-ollama-url').value.trim();
+  status.textContent='…';
+  try{
+    const r=await req('/api/config/ai-provider',{method:'POST',body:JSON.stringify({provider,apiKey,ollamaUrl})});
+    const data=await r.json();
+    if(!r.ok){status.textContent=data.error||'Erreur';return;}
+    status.textContent='Configuré ✓';
+    document.getElementById('ai-banner').style.display='none';
+    setTimeout(closeAiSetup,900);
+  }catch(e){status.textContent='Erreur';}
+}
+async function checkAiProvider(){
+  try{
+    const r=await fetch('/api/health');
+    const data=await r.json();
+    document.getElementById('ai-banner').style.display=data.ai==='none'?'flex':'none';
+  }catch(e){}
 }
 
 function openDigest(){openDigestLike('/api/digest','Digest');}
@@ -448,7 +509,7 @@ document.querySelectorAll('.chip').forEach(c=>{
   try{
     const r=await fetch('/api/events?limit=100');
     if(r.status===401){showAuth();return;}
-    if(r.ok){hideAuth();events=(await r.json()).events||[];render();loadPending();}
+    if(r.ok){hideAuth();events=(await r.json()).events||[];render();loadPending();checkAiProvider();}
   }catch(e){console.error(e);}
 })();
 
