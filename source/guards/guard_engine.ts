@@ -21,7 +21,8 @@ function viewOf(event: AcediaEvent): EventView {
     const rawHeaders = meta["headers"];
     const headers = new Set<string>();
     if (rawHeaders && typeof rawHeaders === "object") {
-        for (const name of Object.keys(rawHeaders as Record<string, unknown>)) headers.add(name.toLowerCase());
+        for (const name of Object.keys(rawHeaders as Record<string, unknown>))
+            headers.add(name.toLowerCase());
     }
     return {
         from: asString(meta["from"]),
@@ -49,7 +50,10 @@ function conditionMatches(c: GuardCondition, view: EventView): boolean {
     switch (c.field) {
         case "from": {
             const value = c.value.toLowerCase();
-            if (c.op === "equals") return extractAddress(view.from) === value || view.from.trim().toLowerCase() === value;
+            if (c.op === "equals")
+                return (
+                    extractAddress(view.from) === value || view.from.trim().toLowerCase() === value
+                );
             if (c.op === "contains") return view.from.toLowerCase().includes(value);
             // domain: the sender's domain, or any subdomain of it (mail.aliexpress.com ⊂ aliexpress.com)
             const domain = senderDomain(view.from);
@@ -68,7 +72,11 @@ function conditionMatches(c: GuardCondition, view: EventView): boolean {
 
 function ruleMatches(rule: GuardRule, view: EventView): boolean {
     // A rule without conditions would match everything — refuse it here as well as at validation.
-    return rule.enabled && rule.conditions.length > 0 && rule.conditions.every((c) => conditionMatches(c, view));
+    return (
+        rule.enabled &&
+        rule.conditions.length > 0 &&
+        rule.conditions.every((c) => conditionMatches(c, view))
+    );
 }
 
 /**
@@ -96,7 +104,12 @@ export function evaluateGuard(
     isVip: (event: AcediaEvent) => boolean,
 ): GuardVerdict {
     const view = viewOf(event);
-    const verdict: GuardVerdict = { drop: false, tags: [], matchedRuleIds: [], vipProtected: false };
+    const verdict: GuardVerdict = {
+        drop: false,
+        tags: [],
+        matchedRuleIds: [],
+        vipProtected: false,
+    };
     const seenTags = new Set<string>();
     let wantsDrop = false;
     let dropRuleId: string | undefined;
@@ -107,11 +120,17 @@ export function evaluateGuard(
         verdict.matchedRuleIds.push(rule.id);
         for (const action of rule.actions) {
             if (action.type === "drop") {
-                if (!wantsDrop) { wantsDrop = true; dropRuleId = rule.id; }
+                if (!wantsDrop) {
+                    wantsDrop = true;
+                    dropRuleId = rule.id;
+                }
                 firstEffectRuleId ??= rule.id;
             } else if (action.type === "tag") {
                 const key = action.tag.toLowerCase();
-                if (!seenTags.has(key)) { seenTags.add(key); verdict.tags.push(action.tag); }
+                if (!seenTags.has(key)) {
+                    seenTags.add(key);
+                    verdict.tags.push(action.tag);
+                }
                 firstEffectRuleId ??= rule.id;
             } else if (action.type === "set_priority") {
                 if (verdict.priority === undefined) verdict.priority = action.priority;

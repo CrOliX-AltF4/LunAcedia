@@ -39,8 +39,14 @@ export class GuardJournal {
 
     constructor(filePath?: string, retentionDays?: number) {
         this.filePath = filePath ?? resolvePath();
-        const days = retentionDays ?? parseInt(process.env["GUARD_JOURNAL_RETENTION_DAYS"] ?? `${DEFAULT_RETENTION_DAYS}`, 10);
-        this.retentionMs = Math.max(1, Number.isFinite(days) ? days : DEFAULT_RETENTION_DAYS) * DAY_MS;
+        const days =
+            retentionDays ??
+            parseInt(
+                process.env["GUARD_JOURNAL_RETENTION_DAYS"] ?? `${DEFAULT_RETENTION_DAYS}`,
+                10,
+            );
+        this.retentionMs =
+            Math.max(1, Number.isFinite(days) ? days : DEFAULT_RETENTION_DAYS) * DAY_MS;
     }
 
     async load(now: number = Date.now()): Promise<void> {
@@ -62,9 +68,16 @@ export class GuardJournal {
     }
 
     private apply(line: JournalLine): void {
-        if (line.kind === "filtered") this.active.set(line.event.dedupeKey, { ts: line.ts, ruleId: line.ruleId, event: line.event });
-        else if (line.kind === "restored") { this.active.delete(line.dedupeKey); this.restored.set(line.dedupeKey, line.ts); }
-        else this.active.delete(line.dedupeKey);
+        if (line.kind === "filtered")
+            this.active.set(line.event.dedupeKey, {
+                ts: line.ts,
+                ruleId: line.ruleId,
+                event: line.event,
+            });
+        else if (line.kind === "restored") {
+            this.active.delete(line.dedupeKey);
+            this.restored.set(line.dedupeKey, line.ts);
+        } else this.active.delete(line.dedupeKey);
     }
 
     private append(line: JournalLine): void {
@@ -73,7 +86,9 @@ export class GuardJournal {
                 await fs.mkdir(path.dirname(this.filePath), { recursive: true });
                 await fs.appendFile(this.filePath, JSON.stringify(line) + "\n", "utf-8");
             })
-            .catch((e: Error) => console.error("[Guards] Failed to append to the journal:", e.message));
+            .catch((e: Error) =>
+                console.error("[Guards] Failed to append to the journal:", e.message),
+            );
     }
 
     /** Waits for pending writes — used by tests and by graceful shutdown. */
@@ -132,19 +147,42 @@ export class GuardJournal {
     async prune(now: number = Date.now()): Promise<void> {
         const cutoff = now - this.retentionMs;
         let changed = false;
-        for (const [key, entry] of this.active) if (entry.ts < cutoff) { this.active.delete(key); changed = true; }
-        for (const [key, ts] of this.restored) if (ts < cutoff) { this.restored.delete(key); changed = true; }
+        for (const [key, entry] of this.active)
+            if (entry.ts < cutoff) {
+                this.active.delete(key);
+                changed = true;
+            }
+        for (const [key, ts] of this.restored)
+            if (ts < cutoff) {
+                this.restored.delete(key);
+                changed = true;
+            }
         if (!changed) return;
         const lines: JournalLine[] = [
-            ...[...this.active.values()].map((e): JournalLine => ({ kind: "filtered", ts: e.ts, ruleId: e.ruleId, event: e.event })),
-            ...[...this.restored].map(([dedupeKey, ts]): JournalLine => ({ kind: "restored", ts, dedupeKey })),
+            ...[...this.active.values()].map((e): JournalLine => ({
+                kind: "filtered",
+                ts: e.ts,
+                ruleId: e.ruleId,
+                event: e.event,
+            })),
+            ...[...this.restored].map(([dedupeKey, ts]): JournalLine => ({
+                kind: "restored",
+                ts,
+                dedupeKey,
+            })),
         ];
         this.chain = this.chain
             .then(async () => {
                 await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-                await fs.writeFile(this.filePath, lines.map((l) => JSON.stringify(l)).join("\n") + (lines.length ? "\n" : ""), "utf-8");
+                await fs.writeFile(
+                    this.filePath,
+                    lines.map((l) => JSON.stringify(l)).join("\n") + (lines.length ? "\n" : ""),
+                    "utf-8",
+                );
             })
-            .catch((e: Error) => console.error("[Guards] Failed to compact the journal:", e.message));
+            .catch((e: Error) =>
+                console.error("[Guards] Failed to compact the journal:", e.message),
+            );
         await this.chain;
     }
 }

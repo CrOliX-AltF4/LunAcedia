@@ -30,9 +30,13 @@ export class GuardStats {
 
     async load(): Promise<void> {
         try {
-            const parsed = JSON.parse(await fs.readFile(this.filePath, "utf-8")) as Record<string, Partial<RuleStats>>;
+            const parsed = JSON.parse(await fs.readFile(this.filePath, "utf-8")) as Record<
+                string,
+                Partial<RuleStats>
+            >;
             for (const [id, s] of Object.entries(parsed)) {
-                if (typeof s.hits === "number" && typeof s.lastHitTs === "number") this.stats.set(id, { hits: s.hits, lastHitTs: s.lastHitTs });
+                if (typeof s.hits === "number" && typeof s.lastHitTs === "number")
+                    this.stats.set(id, { hits: s.hits, lastHitTs: s.lastHitTs });
             }
         } catch {
             // no stats yet
@@ -61,18 +65,28 @@ export class GuardStats {
     /** Forgets counters of rules that no longer exist. */
     prune(existingRuleIds: Set<string>): void {
         let changed = false;
-        for (const id of this.stats.keys()) if (!existingRuleIds.has(id)) { this.stats.delete(id); changed = true; }
+        for (const id of this.stats.keys())
+            if (!existingRuleIds.has(id)) {
+                this.stats.delete(id);
+                changed = true;
+            }
         if (changed) this.schedule();
     }
 
     private schedule(): void {
         if (this.timer) return;
-        this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, SAVE_DEBOUNCE_MS);
+        this.timer = setTimeout(() => {
+            this.timer = null;
+            void this.flush();
+        }, SAVE_DEBOUNCE_MS);
         this.timer.unref?.();
     }
 
     async flush(): Promise<void> {
-        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
         try {
             await fs.mkdir(path.dirname(this.filePath), { recursive: true });
             await fs.writeFile(this.filePath, JSON.stringify(this.getAll(), null, 2), "utf-8");

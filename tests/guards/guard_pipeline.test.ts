@@ -11,15 +11,40 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 const DAY = 24 * 60 * 60 * 1000;
 
 function mail(id: string, from = "deals@mail.aliexpress.com", title = "Promo"): AcediaEvent {
-    return { type: "email.received", ts: 1, source: "email", title, priority: "info", dedupeKey: `email-${id}`, meta: { from, labels: ["INBOX"], headers: {} } };
+    return {
+        type: "email.received",
+        ts: 1,
+        source: "email",
+        title,
+        priority: "info",
+        dedupeKey: `email-${id}`,
+        meta: { from, labels: ["INBOX"], headers: {} },
+    };
 }
 
-const dropAli = { id: "drop-ali", name: "AliExpress", enabled: true, conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }], actions: [{ type: "drop" }] };
-const tagWork = { id: "tag-work", name: "Travail", enabled: true, conditions: [{ field: "from", op: "domain", value: "corp.com" }], actions: [{ type: "tag", tag: "travail" }, { type: "set_priority", priority: "normal" }] };
+const dropAli = {
+    id: "drop-ali",
+    name: "AliExpress",
+    enabled: true,
+    conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }],
+    actions: [{ type: "drop" }],
+};
+const tagWork = {
+    id: "tag-work",
+    name: "Travail",
+    enabled: true,
+    conditions: [{ field: "from", op: "domain", value: "corp.com" }],
+    actions: [
+        { type: "tag", tag: "travail" },
+        { type: "set_priority", priority: "normal" },
+    ],
+};
 
 describe("GuardPipeline", () => {
     let dir: string;
-    afterEach(async () => { if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }); });
+    afterEach(async () => {
+        if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+    });
 
     async function setup(rules: unknown[] = [], vip: string[] = []) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "guard-pipeline-"));
@@ -27,7 +52,12 @@ describe("GuardPipeline", () => {
         await rulesStore.replaceAll(rules);
         const journal = new GuardJournal(path.join(dir, "journal.jsonl"));
         const stats = new GuardStats(path.join(dir, "stats.json"));
-        const pipeline = new GuardPipeline({ rules: rulesStore, journal, stats, vipSenders: () => vip });
+        const pipeline = new GuardPipeline({
+            rules: rulesStore,
+            journal,
+            stats,
+            vipSenders: () => vip,
+        });
         return { rulesStore, journal, stats, pipeline };
     }
 
@@ -54,7 +84,11 @@ describe("GuardPipeline", () => {
         const event = mail("3", "boss@corp.com");
         const out = pipeline.process(event);
         expect(out.dropped).toBe(false);
-        expect(out.event).toMatchObject({ tags: ["travail"], priority: "normal", ruleId: "tag-work" });
+        expect(out.event).toMatchObject({
+            tags: ["travail"],
+            priority: "normal",
+            ruleId: "tag-work",
+        });
         expect(event.tags).toBeUndefined();
         expect(event.priority).toBe("info");
     });
@@ -97,12 +131,26 @@ describe("GuardPipeline", () => {
 
     it("previews candidate rules without recording, counting or journaling anything", async () => {
         const { pipeline, journal, stats } = await setup([], ["boss@corp.com"]);
-        const events = [mail("a"), mail("b"), mail("c", "boss@corp.com"), mail("d", "friend@home.org")];
+        const events = [
+            mail("a"),
+            mail("b"),
+            mail("c", "boss@corp.com"),
+            mail("d", "friend@home.org"),
+        ];
         const preview = pipeline.preview(
-            [dropAli, { ...tagWork, conditions: [{ field: "from", op: "domain", value: "home.org" }] }] as never,
+            [
+                dropAli,
+                { ...tagWork, conditions: [{ field: "from", op: "domain", value: "home.org" }] },
+            ] as never,
             events,
         );
-        expect(preview).toMatchObject({ evaluated: 4, wouldDrop: 2, wouldTag: 1, wouldChangePriority: 1, vipProtected: 0 });
+        expect(preview).toMatchObject({
+            evaluated: 4,
+            wouldDrop: 2,
+            wouldTag: 1,
+            wouldChangePriority: 1,
+            vipProtected: 0,
+        });
         expect(preview.sample.map((s) => s.outcome)).toEqual(["drop", "drop", "tag"]);
         expect(journal.size).toBe(0);
         expect(stats.getAll()).toEqual({});
@@ -117,7 +165,9 @@ describe("GuardPipeline", () => {
 
 describe("GuardJournal", () => {
     let dir: string;
-    afterEach(async () => { if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }); });
+    afterEach(async () => {
+        if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+    });
 
     async function freshFile(): Promise<string> {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "guard-journal-"));

@@ -18,7 +18,13 @@ export interface GuardPreview {
     wouldChangePriority: number;
     vipProtected: number;
     /** A few concrete examples so the effect of a rule is visible before it is activated. */
-    sample: Array<{ dedupeKey: string; title: string; from: string; outcome: "drop" | "tag" | "priority" | "vip-protected"; ruleId?: string }>;
+    sample: Array<{
+        dedupeKey: string;
+        title: string;
+        from: string;
+        outcome: "drop" | "tag" | "priority" | "vip-protected";
+        ruleId?: string;
+    }>;
 }
 
 const PREVIEW_SAMPLE = 20;
@@ -57,7 +63,11 @@ export class GuardPipeline {
         // A user-restored event is never evaluated again: the user's decision beats the rules.
         if (this.deps.journal.isRestored(key)) return { dropped: false, event };
 
-        const verdict = evaluateGuard(event, this.deps.rules.peekRules() as GuardRule[], makeVipMatcher(this.deps.vipSenders()));
+        const verdict = evaluateGuard(
+            event,
+            this.deps.rules.peekRules() as GuardRule[],
+            makeVipMatcher(this.deps.vipSenders()),
+        );
         const version = this.deps.rules.getVersion();
         if (this.counted.get(key) !== version) {
             if (this.counted.size > 5_000) this.counted.clear();
@@ -75,10 +85,12 @@ export class GuardPipeline {
         this.dropped.delete(key);
         if (this.deps.journal.isFiltered(key)) this.deps.journal.release(key);
 
-        if (verdict.tags.length === 0 && verdict.priority === undefined) return { dropped: false, event };
+        if (verdict.tags.length === 0 && verdict.priority === undefined)
+            return { dropped: false, event };
         const out: AcediaEvent = { ...event };
         if (verdict.priority !== undefined) out.priority = verdict.priority;
-        if (verdict.tags.length > 0) out.tags = [...new Set([...(event.tags ?? []), ...verdict.tags])];
+        if (verdict.tags.length > 0)
+            out.tags = [...new Set([...(event.tags ?? []), ...verdict.tags])];
         if (verdict.ruleId !== undefined) out.ruleId = verdict.ruleId;
         return { dropped: false, event: out };
     }
@@ -92,17 +104,43 @@ export class GuardPipeline {
     /** Pure what-if: candidate rules against sample events, nothing recorded or counted. */
     preview(candidate: GuardRule[], events: AcediaEvent[]): GuardPreview {
         const isVip = makeVipMatcher(this.deps.vipSenders());
-        const result: GuardPreview = { evaluated: events.length, wouldDrop: 0, wouldTag: 0, wouldChangePriority: 0, vipProtected: 0, sample: [] };
+        const result: GuardPreview = {
+            evaluated: events.length,
+            wouldDrop: 0,
+            wouldTag: 0,
+            wouldChangePriority: 0,
+            vipProtected: 0,
+            sample: [],
+        };
         for (const event of events) {
             const v = evaluateGuard(event, candidate, isVip);
-            const from = typeof event.meta?.["from"] === "string" ? (event.meta["from"] as string) : "";
+            const from =
+                typeof event.meta?.["from"] === "string" ? (event.meta["from"] as string) : "";
             const push = (outcome: GuardPreview["sample"][number]["outcome"]): void => {
-                if (result.sample.length < PREVIEW_SAMPLE) result.sample.push({ dedupeKey: event.dedupeKey, title: event.title, from, outcome, ruleId: v.ruleId });
+                if (result.sample.length < PREVIEW_SAMPLE)
+                    result.sample.push({
+                        dedupeKey: event.dedupeKey,
+                        title: event.title,
+                        from,
+                        outcome,
+                        ruleId: v.ruleId,
+                    });
             };
-            if (v.drop) { result.wouldDrop += 1; push("drop"); }
-            else if (v.vipProtected) { result.vipProtected += 1; push("vip-protected"); }
-            if (v.tags.length > 0) { result.wouldTag += 1; if (!v.drop && !v.vipProtected) push("tag"); }
-            if (v.priority !== undefined && v.priority !== event.priority) { result.wouldChangePriority += 1; if (!v.drop && v.tags.length === 0) push("priority"); }
+            if (v.drop) {
+                result.wouldDrop += 1;
+                push("drop");
+            } else if (v.vipProtected) {
+                result.vipProtected += 1;
+                push("vip-protected");
+            }
+            if (v.tags.length > 0) {
+                result.wouldTag += 1;
+                if (!v.drop && !v.vipProtected) push("tag");
+            }
+            if (v.priority !== undefined && v.priority !== event.priority) {
+                result.wouldChangePriority += 1;
+                if (!v.drop && v.tags.length === 0) push("priority");
+            }
         }
         return result;
     }

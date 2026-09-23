@@ -1,9 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { evaluateGuard, extractAddress, makeVipMatcher, senderDomain } from "../../source/guards/guard_engine.js";
+import {
+    evaluateGuard,
+    extractAddress,
+    makeVipMatcher,
+    senderDomain,
+} from "../../source/guards/guard_engine.js";
 import type { GuardRule } from "../../source/guards/guard_types.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-function mail(overrides: Partial<AcediaEvent> & { meta?: Record<string, unknown> } = {}): AcediaEvent {
+function mail(
+    overrides: Partial<AcediaEvent> & { meta?: Record<string, unknown> } = {},
+): AcediaEvent {
     return {
         type: "email.received",
         ts: 1,
@@ -13,19 +20,33 @@ function mail(overrides: Partial<AcediaEvent> & { meta?: Record<string, unknown>
         priority: "info",
         dedupeKey: "email-1",
         ...overrides,
-        meta: { from: "AliExpress <deals@mail.aliexpress.com>", labels: ["INBOX", "CATEGORY_PROMOTIONS"], headers: { "list-unsubscribe": "<mailto:x@y>" }, ...overrides.meta },
+        meta: {
+            from: "AliExpress <deals@mail.aliexpress.com>",
+            labels: ["INBOX", "CATEGORY_PROMOTIONS"],
+            headers: { "list-unsubscribe": "<mailto:x@y>" },
+            ...overrides.meta,
+        },
     };
 }
 
 function rule(overrides: Partial<GuardRule>): GuardRule {
-    return { id: "r1", name: "r", enabled: true, conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }], actions: [{ type: "drop" }], ...overrides };
+    return {
+        id: "r1",
+        name: "r",
+        enabled: true,
+        conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }],
+        actions: [{ type: "drop" }],
+        ...overrides,
+    };
 }
 
 const noVip = () => false;
 
 describe("extractAddress / senderDomain", () => {
     it("reads the address out of a display-name From header, lowercased", () => {
-        expect(extractAddress("Ali Express <Deals@Mail.AliExpress.com>")).toBe("deals@mail.aliexpress.com");
+        expect(extractAddress("Ali Express <Deals@Mail.AliExpress.com>")).toBe(
+            "deals@mail.aliexpress.com",
+        );
         expect(extractAddress("bob@corp.io")).toBe("bob@corp.io");
         expect(extractAddress("no address here")).toBe("");
     });
@@ -38,43 +59,76 @@ describe("extractAddress / senderDomain", () => {
 describe("evaluateGuard — conditions", () => {
     it("matches a sender domain including its subdomains, and not lookalike domains", () => {
         expect(evaluateGuard(mail(), [rule({})], noVip).drop).toBe(true);
-        expect(evaluateGuard(mail({ meta: { from: "x@aliexpress.com" } }), [rule({})], noVip).drop).toBe(true);
-        expect(evaluateGuard(mail({ meta: { from: "x@notaliexpress.com" } }), [rule({})], noVip).drop).toBe(false);
-        expect(evaluateGuard(mail({ meta: { from: "x@aliexpress.com.evil.io" } }), [rule({})], noVip).drop).toBe(false);
+        expect(
+            evaluateGuard(mail({ meta: { from: "x@aliexpress.com" } }), [rule({})], noVip).drop,
+        ).toBe(true);
+        expect(
+            evaluateGuard(mail({ meta: { from: "x@notaliexpress.com" } }), [rule({})], noVip).drop,
+        ).toBe(false);
+        expect(
+            evaluateGuard(mail({ meta: { from: "x@aliexpress.com.evil.io" } }), [rule({})], noVip)
+                .drop,
+        ).toBe(false);
     });
 
     it("supports from equals (address or full header) and contains", () => {
-        const eq = rule({ conditions: [{ field: "from", op: "equals", value: "deals@mail.aliexpress.com" }] });
+        const eq = rule({
+            conditions: [{ field: "from", op: "equals", value: "deals@mail.aliexpress.com" }],
+        });
         expect(evaluateGuard(mail(), [eq], noVip).drop).toBe(true);
-        const contains = rule({ conditions: [{ field: "from", op: "contains", value: "ALIEXPRESS" }] });
+        const contains = rule({
+            conditions: [{ field: "from", op: "contains", value: "ALIEXPRESS" }],
+        });
         expect(evaluateGuard(mail(), [contains], noVip).drop).toBe(true);
-        const no = rule({ conditions: [{ field: "from", op: "equals", value: "other@mail.aliexpress.com" }] });
+        const no = rule({
+            conditions: [{ field: "from", op: "equals", value: "other@mail.aliexpress.com" }],
+        });
         expect(evaluateGuard(mail(), [no], noVip).drop).toBe(false);
     });
 
     it("matches subject and snippet case-insensitively", () => {
-        const subject = rule({ conditions: [{ field: "subject", op: "contains", value: "COLIS" }] });
+        const subject = rule({
+            conditions: [{ field: "subject", op: "contains", value: "COLIS" }],
+        });
         expect(evaluateGuard(mail(), [subject], noVip).drop).toBe(true);
-        const snippet = rule({ conditions: [{ field: "snippet", op: "contains", value: "commande" }] });
+        const snippet = rule({
+            conditions: [{ field: "snippet", op: "contains", value: "commande" }],
+        });
         expect(evaluateGuard(mail(), [snippet], noVip).drop).toBe(true);
     });
 
     it("matches a Gmail label and a present header", () => {
-        const label = rule({ conditions: [{ field: "label", op: "equals", value: "category_promotions" }] });
+        const label = rule({
+            conditions: [{ field: "label", op: "equals", value: "category_promotions" }],
+        });
         expect(evaluateGuard(mail(), [label], noVip).drop).toBe(true);
-        const header = rule({ conditions: [{ field: "header", op: "present", name: "List-Unsubscribe" }] });
+        const header = rule({
+            conditions: [{ field: "header", op: "present", name: "List-Unsubscribe" }],
+        });
         expect(evaluateGuard(mail(), [header], noVip).drop).toBe(true);
         expect(evaluateGuard(mail({ meta: { headers: {} } }), [header], noVip).drop).toBe(false);
     });
 
     it("ANDs the conditions of a rule", () => {
-        const both = rule({ conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }, { field: "subject", op: "contains", value: "facture" }] });
+        const both = rule({
+            conditions: [
+                { field: "from", op: "domain", value: "aliexpress.com" },
+                { field: "subject", op: "contains", value: "facture" },
+            ],
+        });
         expect(evaluateGuard(mail(), [both], noVip).drop).toBe(false);
         expect(evaluateGuard(mail({ title: "Votre facture" }), [both], noVip).drop).toBe(true);
     });
 
     it("never matches on a non-mail event lacking the field, and ignores disabled or condition-less rules", () => {
-        const rss: AcediaEvent = { type: "rss.item", ts: 1, source: "rss", title: "News", priority: "info", dedupeKey: "rss-1" };
+        const rss: AcediaEvent = {
+            type: "rss.item",
+            ts: 1,
+            source: "rss",
+            title: "News",
+            priority: "info",
+            dedupeKey: "rss-1",
+        };
         expect(evaluateGuard(rss, [rule({})], noVip).drop).toBe(false);
         expect(evaluateGuard(mail(), [rule({ enabled: false })], noVip).drop).toBe(false);
         expect(evaluateGuard(mail(), [rule({ conditions: [] })], noVip).drop).toBe(false);
@@ -84,8 +138,23 @@ describe("evaluateGuard — conditions", () => {
 describe("evaluateGuard — actions and precedence", () => {
     it("accumulates tags across rules without duplicates (case-insensitive) and keeps the first priority", () => {
         const rules = [
-            rule({ id: "a", conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }], actions: [{ type: "tag", tag: "Promo" }, { type: "set_priority", priority: "info" }] }),
-            rule({ id: "b", conditions: [{ field: "label", op: "equals", value: "CATEGORY_PROMOTIONS" }], actions: [{ type: "tag", tag: "promo" }, { type: "tag", tag: "shopping" }, { type: "set_priority", priority: "normal" }] }),
+            rule({
+                id: "a",
+                conditions: [{ field: "from", op: "domain", value: "aliexpress.com" }],
+                actions: [
+                    { type: "tag", tag: "Promo" },
+                    { type: "set_priority", priority: "info" },
+                ],
+            }),
+            rule({
+                id: "b",
+                conditions: [{ field: "label", op: "equals", value: "CATEGORY_PROMOTIONS" }],
+                actions: [
+                    { type: "tag", tag: "promo" },
+                    { type: "tag", tag: "shopping" },
+                    { type: "set_priority", priority: "normal" },
+                ],
+            }),
         ];
         const v = evaluateGuard(mail(), rules, noVip);
         expect(v.drop).toBe(false);
@@ -96,7 +165,11 @@ describe("evaluateGuard — actions and precedence", () => {
     });
 
     it("attributes a drop to the first dropping rule", () => {
-        const rules = [rule({ id: "t", actions: [{ type: "tag", tag: "x" }] }), rule({ id: "d1" }), rule({ id: "d2" })];
+        const rules = [
+            rule({ id: "t", actions: [{ type: "tag", tag: "x" }] }),
+            rule({ id: "d1" }),
+            rule({ id: "d2" }),
+        ];
         const v = evaluateGuard(mail(), rules, noVip);
         expect(v.drop).toBe(true);
         expect(v.ruleId).toBe("d1");
@@ -105,7 +178,16 @@ describe("evaluateGuard — actions and precedence", () => {
 
     it("the VIP allowlist always wins over a drop, but tags and priority still apply", () => {
         const isVip = makeVipMatcher(["deals@mail.aliexpress.com"]);
-        const rules = [rule({ id: "d" }), rule({ id: "t", actions: [{ type: "tag", tag: "vip-seen" }, { type: "set_priority", priority: "urgent" }] })];
+        const rules = [
+            rule({ id: "d" }),
+            rule({
+                id: "t",
+                actions: [
+                    { type: "tag", tag: "vip-seen" },
+                    { type: "set_priority", priority: "urgent" },
+                ],
+            }),
+        ];
         const v = evaluateGuard(mail(), rules, isVip);
         expect(v.drop).toBe(false);
         expect(v.vipProtected).toBe(true);
@@ -114,8 +196,18 @@ describe("evaluateGuard — actions and precedence", () => {
     });
 
     it("returns a neutral verdict when nothing matches", () => {
-        const v = evaluateGuard(mail({ meta: { from: "friend@home.org", labels: [], headers: {} } }), [rule({})], noVip);
-        expect(v).toEqual({ drop: false, tags: [], matchedRuleIds: [], vipProtected: false, ruleId: undefined });
+        const v = evaluateGuard(
+            mail({ meta: { from: "friend@home.org", labels: [], headers: {} } }),
+            [rule({})],
+            noVip,
+        );
+        expect(v).toEqual({
+            drop: false,
+            tags: [],
+            matchedRuleIds: [],
+            vipProtected: false,
+            ruleId: undefined,
+        });
     });
 });
 

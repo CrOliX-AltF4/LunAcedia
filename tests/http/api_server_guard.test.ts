@@ -20,15 +20,36 @@ let PORT = 47_300 + Math.floor(Math.random() * 400);
 const nextPort = () => PORT++;
 
 function mail(id: string, from: string, extra: Partial<AcediaEvent> = {}): AcediaEvent {
-    return { type: "email.received", ts: 1, source: "email", title: `mail ${id}`, priority: "info", dedupeKey: `email-${id}`, meta: { from, labels: [], headers: {} }, ...extra };
+    return {
+        type: "email.received",
+        ts: 1,
+        source: "email",
+        title: `mail ${id}`,
+        priority: "info",
+        dedupeKey: `email-${id}`,
+        meta: { from, labels: [], headers: {} },
+        ...extra,
+    };
 }
 
-const dropShop = { name: "Shop", conditions: [{ field: "from", op: "domain", value: "shop.com" }], actions: [{ type: "drop" }] };
+const dropShop = {
+    name: "Shop",
+    conditions: [{ field: "from", op: "domain", value: "shop.com" }],
+    actions: [{ type: "drop" }],
+};
 
 // Decodes arbitrary JSON responses so each test can assert on the field it cares about.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function call(method: string, url: string, body?: unknown): Promise<{ status: number; body: any }> {
-    const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+async function call(
+    method: string,
+    url: string,
+    body?: unknown,
+): Promise<{ status: number; body: any }> {
+    const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
     return { status: res.status, body: await res.json() };
 }
 
@@ -50,7 +71,10 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         const rules = new GuardRulesStore(path.join(dir, "rules.json"));
         const journal = new GuardJournal(path.join(dir, "journal.jsonl"));
         const stats = new GuardStats(path.join(dir, "stats.json"));
-        flushers.push(() => journal.flush(), () => stats.flush());
+        flushers.push(
+            () => journal.flush(),
+            () => stats.flush(),
+        );
         const pipeline = new GuardPipeline({ rules, journal, stats, vipSenders: () => [] });
         const guards: GuardServices = { pipeline, rules, journal, stats };
         const store = new EventStore();
@@ -58,7 +82,20 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
         const port = nextPort();
-        server = new AcediaApiServer(store, [], hub, null, new NullAIProvider(), undefined, new ActionTierStore(path.join(dir, "tiers.json")), new PendingActionStore(), undefined, undefined, undefined, withGuards ? guards : undefined);
+        server = new AcediaApiServer(
+            store,
+            [],
+            hub,
+            null,
+            new NullAIProvider(),
+            undefined,
+            new ActionTierStore(path.join(dir, "tiers.json")),
+            new PendingActionStore(),
+            undefined,
+            undefined,
+            undefined,
+            withGuards ? guards : undefined,
+        );
         server.start(port);
         return { base: `http://localhost:${port}`, guards, store, received };
     }
@@ -88,7 +125,15 @@ describe("AcediaApiServer — ingestion guard routes", () => {
     it("refuses an invalid list with 400 and an explanation, leaving the rules untouched", async () => {
         const { base } = await start();
         await call("PUT", `${base}/api/guard/rules`, { rules: [dropShop] });
-        const bad = await call("PUT", `${base}/api/guard/rules`, { rules: [{ name: "regex!", conditions: [{ field: "from", op: "regex", value: ".*" }], actions: [{ type: "drop" }] }] });
+        const bad = await call("PUT", `${base}/api/guard/rules`, {
+            rules: [
+                {
+                    name: "regex!",
+                    conditions: [{ field: "from", op: "regex", value: ".*" }],
+                    actions: [{ type: "drop" }],
+                },
+            ],
+        });
         expect(bad.status).toBe(400);
         expect(bad.body.error).toContain("from.op");
         expect((await call("GET", `${base}/api/guard/rules`)).body.version).toBe(1);
@@ -103,7 +148,9 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         expect(list.body.total).toBe(1);
         expect(list.body.entries[0].event.dedupeKey).toBe("email-1");
 
-        const restore = await call("POST", `${base}/api/guard/journal/restore`, { dedupeKey: "email-1" });
+        const restore = await call("POST", `${base}/api/guard/journal/restore`, {
+            dedupeKey: "email-1",
+        });
         expect(restore).toMatchObject({ status: 200, body: { restored: "email-1" } });
         expect(received.map((e) => e.dedupeKey)).toEqual(["email-1"]);
         expect((await call("GET", `${base}/api/guard/journal`)).body.total).toBe(0);
@@ -111,7 +158,10 @@ describe("AcediaApiServer — ingestion guard routes", () => {
 
     it("answers 404 for an unknown journal key and 400 without a key", async () => {
         const { base } = await start();
-        expect((await call("POST", `${base}/api/guard/journal/restore`, { dedupeKey: "email-nope" })).status).toBe(404);
+        expect(
+            (await call("POST", `${base}/api/guard/journal/restore`, { dedupeKey: "email-nope" }))
+                .status,
+        ).toBe(404);
         expect((await call("POST", `${base}/api/guard/journal/restore`, {})).status).toBe(400);
     });
 
@@ -119,7 +169,13 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         const { base, guards, store } = await start();
         store.push(mail("a", "x@shop.com"));
         store.push(mail("b", "friend@home.org"));
-        await guards.rules.replaceAll([{ name: "keep", conditions: [{ field: "from", op: "domain", value: "home.org" }], actions: [{ type: "tag", tag: "ami" }] }]);
+        await guards.rules.replaceAll([
+            {
+                name: "keep",
+                conditions: [{ field: "from", op: "domain", value: "home.org" }],
+                actions: [{ type: "tag", tag: "ami" }],
+            },
+        ]);
         guards.pipeline.process(mail("c", "promo@other.com")); // not dropped: nothing in the journal
 
         const res = await call("POST", `${base}/api/guard/preview`, { rules: [dropShop] });
@@ -134,7 +190,9 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         store.push(mail("a", "x@shop.com"));
         await guards.rules.replaceAll([dropShop]);
         expect((await call("POST", `${base}/api/guard/preview`, {})).body.wouldDrop).toBe(1);
-        expect((await call("POST", `${base}/api/guard/preview`, { rules: [{ name: "x" }] })).status).toBe(400);
+        expect(
+            (await call("POST", `${base}/api/guard/preview`, { rules: [{ name: "x" }] })).status,
+        ).toBe(400);
     });
 
     it("filters /api/events by guard tag (case-insensitive)", async () => {

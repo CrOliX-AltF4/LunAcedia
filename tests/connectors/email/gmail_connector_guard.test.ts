@@ -16,21 +16,37 @@ function makeFetch(messages: FakeMessage[]) {
     return vi.fn().mockImplementation((url: string) => {
         const u = String(url);
         if (u.includes("oauth2.googleapis.com")) {
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }) });
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+            });
         }
         if (u.includes("/messages?q=")) {
-            return Promise.resolve({ ok: true, json: () => Promise.resolve({ messages: messages.map((m) => ({ id: m.id })) }) });
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ messages: messages.map((m) => ({ id: m.id })) }),
+            });
         }
         const msg = messages.find((m) => u.includes(`/messages/${m.id}`));
-        if (!msg) return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        if (!msg)
+            return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
         const headers = [
             { name: "From", value: msg.from },
             { name: "Subject", value: msg.subject },
-            ...(msg.listUnsubscribe ? [{ name: "List-Unsubscribe", value: msg.listUnsubscribe }] : []),
+            ...(msg.listUnsubscribe
+                ? [{ name: "List-Unsubscribe", value: msg.listUnsubscribe }]
+                : []),
         ];
         return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ id: msg.id, threadId: `t-${msg.id}`, internalDate: FRESH_TS, labelIds: msg.labelIds, payload: { headers } }),
+            json: () =>
+                Promise.resolve({
+                    id: msg.id,
+                    threadId: `t-${msg.id}`,
+                    internalDate: FRESH_TS,
+                    labelIds: msg.labelIds,
+                    payload: { headers },
+                }),
         });
     });
 }
@@ -49,14 +65,30 @@ beforeEach(() => {
 
 afterEach(() => {
     vi.unstubAllGlobals();
-    for (const k of ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN", "GMAIL_MAX_AGE_HOURS", "GMAIL_RULES"]) delete process.env[k];
+    for (const k of [
+        "GMAIL_CLIENT_ID",
+        "GMAIL_CLIENT_SECRET",
+        "GMAIL_REFRESH_TOKEN",
+        "GMAIL_MAX_AGE_HOURS",
+        "GMAIL_RULES",
+    ])
+        delete process.env[k];
 });
 
 describe("GmailConnector — data for the ingestion guards", () => {
     it("exposes Gmail's labels and the List-Unsubscribe header as neutral event meta", async () => {
-        vi.stubGlobal("fetch", makeFetch([
-            { id: "promo", from: "Deals <deals@mail.shop.com>", subject: "-50 %", labelIds: ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"], listUnsubscribe: "<mailto:unsub@shop.com>" },
-        ]));
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                {
+                    id: "promo",
+                    from: "Deals <deals@mail.shop.com>",
+                    subject: "-50 %",
+                    labelIds: ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"],
+                    listUnsubscribe: "<mailto:unsub@shop.com>",
+                },
+            ]),
+        );
         const [event] = await new GmailConnector().poll();
         expect(event!.meta).toMatchObject({
             from: "Deals <deals@mail.shop.com>",
@@ -82,9 +114,16 @@ describe("GmailConnector — data for the ingestion guards", () => {
     });
 
     it("truncates a very long List-Unsubscribe value", async () => {
-        vi.stubGlobal("fetch", makeFetch([{ id: "long", from: "a@b.c", subject: "Hi", listUnsubscribe: "x".repeat(500) }]));
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                { id: "long", from: "a@b.c", subject: "Hi", listUnsubscribe: "x".repeat(500) },
+            ]),
+        );
         const [event] = await new GmailConnector().poll();
-        expect((event!.meta!["headers"] as Record<string, string>)["list-unsubscribe"]).toHaveLength(200);
+        expect(
+            (event!.meta!["headers"] as Record<string, string>)["list-unsubscribe"],
+        ).toHaveLength(200);
     });
 });
 
@@ -106,7 +145,10 @@ describe("GmailConnector — settled filter (no re-fetch of what is already deci
     });
 
     it("behaves exactly as before when no filter was set", async () => {
-        const fetchMock = makeFetch([{ id: "a", from: "x@y.z", subject: "1" }, { id: "b", from: "x@y.z", subject: "2" }]);
+        const fetchMock = makeFetch([
+            { id: "a", from: "x@y.z", subject: "1" },
+            { id: "b", from: "x@y.z", subject: "2" },
+        ]);
         vi.stubGlobal("fetch", fetchMock);
         const events = await new GmailConnector().poll();
         expect(events).toHaveLength(2);

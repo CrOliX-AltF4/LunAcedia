@@ -38,7 +38,8 @@ export class EventStore {
             if (priority && e.priority !== priority) return false;
             if (since && e.ts < since) return false;
             if (unread && e.read) return false;
-            if (wantedTag && !(e.tags ?? []).some((t) => t.toLowerCase() === wantedTag)) return false;
+            if (wantedTag && !(e.tags ?? []).some((t) => t.toLowerCase() === wantedTag))
+                return false;
             return true;
         });
         // Most recent first

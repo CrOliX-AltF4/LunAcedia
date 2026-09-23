@@ -151,7 +151,11 @@ export class AcediaApiServer {
         res: http.ServerResponse,
         g: GuardServices,
     ): Promise<void> {
-        const rulesPayload = () => ({ version: g.rules.getVersion(), rules: g.rules.getRules(), stats: g.stats.getAll() });
+        const rulesPayload = () => ({
+            version: g.rules.getVersion(),
+            rules: g.rules.getRules(),
+            stats: g.stats.getAll(),
+        });
 
         if (method === "GET" && path === "/api/guard/rules") return json(res, 200, rulesPayload());
 
@@ -171,7 +175,10 @@ export class AcediaApiServer {
 
         if (method === "GET" && path === "/api/guard/journal") {
             const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
-            return json(res, 200, { total: g.journal.size, entries: g.journal.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)) });
+            return json(res, 200, {
+                total: g.journal.size,
+                entries: g.journal.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)),
+            });
         }
 
         if (method === "POST" && path === "/api/guard/journal/restore") {
@@ -182,7 +189,8 @@ export class AcediaApiServer {
                 return json(res, 400, { error: "Invalid JSON" });
             }
             const key = (body as { dedupeKey?: unknown } | null)?.dedupeKey;
-            if (typeof key !== "string" || !key) return json(res, 400, { error: "dedupeKey is required" });
+            if (typeof key !== "string" || !key)
+                return json(res, 400, { error: "dedupeKey is required" });
             const event = g.pipeline.restore(key);
             if (!event) return json(res, 404, { error: "Not in the journal" });
             this.hub.dispatchRestored(event);
@@ -740,9 +748,10 @@ export class AcediaApiServer {
                 console.warn(`[API] chat from ${callerId}`);
             }
             const context = (body as Record<string, unknown>)["context"];
-            const query = Array.isArray(context) && context.length > 0
-                ? `Context:\n${context.filter((c) => typeof c === "string").join("\n")}\n\n${text.trim()}`
-                : text.trim();
+            const query =
+                Array.isArray(context) && context.length > 0
+                    ? `Context:\n${context.filter((c) => typeof c === "string").join("\n")}\n\n${text.trim()}`
+                    : text.trim();
             try {
                 const response = await this.ai.chat(query);
                 return json(res, 200, { response });

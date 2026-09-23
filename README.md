@@ -183,9 +183,9 @@ A deterministic stage between a connector's poll and dispatch. You write **rules
 **conditions** (ANDed) and **actions**. There is no free-form regex and no LLM in this layer — mail content is
 untrusted data, so the guard only compares text and reads metadata.
 
-| Conditions | Actions |
-|---|---|
-| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, *not* the full body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** (adds a label to `AcediaEvent.tags`) · **set_priority** |
+| Conditions                                                                                                                                                                                                                                   | Actions                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, _not_ the full body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** (adds a label to `AcediaEvent.tags`) · **set_priority** |
 
 - **Nothing is dropped by default**: with no rule configured, behaviour is unchanged.
 - **Never silent**: every dropped event is written to a journal (`guard_filtered.jsonl`, 30 days by default,

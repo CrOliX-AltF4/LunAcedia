@@ -1363,11 +1363,19 @@ describe("AcediaApiServer — POST /api/chat", () => {
 
     it("should log the caller identity when provided", async () => {
         const port = nextPort();
-        const mockAI: IAIProvider = { mode: "openai", chat: vi.fn().mockResolvedValue("ok"), digest: vi.fn() };
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue("ok"),
+            digest: vi.fn(),
+        };
         const server = makeServer(new EventStore(), [], mockAI);
         server.start(port);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-        await post(`http://localhost:${port}/api/chat`, { text: "hello", callerId: "natsume-core" }, AUTH);
+        await post(
+            `http://localhost:${port}/api/chat`,
+            { text: "hello", callerId: "natsume-core" },
+            AUTH,
+        );
         server.stop();
         const logged = warnSpy.mock.calls.some((call) => String(call[0]).includes("natsume-core"));
         warnSpy.mockRestore();
@@ -1957,7 +1965,11 @@ describe("AcediaApiServer — POST /api/config/ai-provider (ADR-013 I1)", () => 
         const port = nextPort();
         const server = makeServer(new EventStore());
         server.start(port);
-        const res = await post(`http://localhost:${port}/api/config/ai-provider`, { provider: "openai" }, AUTH);
+        const res = await post(
+            `http://localhost:${port}/api/config/ai-provider`,
+            { provider: "openai" },
+            AUTH,
+        );
         server.stop();
         expect(res.status).toBe(400);
     });
@@ -1966,7 +1978,11 @@ describe("AcediaApiServer — POST /api/config/ai-provider (ADR-013 I1)", () => 
         const port = nextPort();
         const server = makeServer(new EventStore());
         server.start(port);
-        const res = await post(`http://localhost:${port}/api/config/ai-provider`, { provider: "openai", apiKey: "sk-x" }, {});
+        const res = await post(
+            `http://localhost:${port}/api/config/ai-provider`,
+            { provider: "openai", apiKey: "sk-x" },
+            {},
+        );
         server.stop();
         expect(res.status).toBe(401);
     });

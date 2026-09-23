@@ -15,9 +15,7 @@ export interface AiProviderPatch {
     ollamaUrl?: string;
 }
 
-export type ValidationResult =
-    | { ok: true; patch: AiProviderPatch }
-    | { ok: false; error: string };
+export type ValidationResult = { ok: true; patch: AiProviderPatch } | { ok: false; error: string };
 
 export function validateAiProviderPatch(input: unknown): ValidationResult {
     if (typeof input !== "object" || input === null) {
@@ -53,9 +51,7 @@ function envPath(): string {
 
 function patchLines(updates: Record<string, string>): void {
     const filePath = envPath();
-    const lines = fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, "utf8").split("\n")
-        : [];
+    const lines = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8").split("\n") : [];
 
     const patched = new Set<string>();
     const result = lines.map((line) => {
@@ -72,7 +68,11 @@ function patchLines(updates: Record<string, string>): void {
     }
 
     fs.writeFileSync(filePath, result.join("\n"), "utf8");
-    try { fs.chmodSync(filePath, 0o600); } catch { /* Windows has no POSIX bits — best-effort */ }
+    try {
+        fs.chmodSync(filePath, 0o600);
+    } catch {
+        /* Windows has no POSIX bits — best-effort */
+    }
 
     for (const [key, val] of Object.entries(updates)) {
         process.env[key] = val;

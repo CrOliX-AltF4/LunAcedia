@@ -11,11 +11,32 @@ import type { IConnector } from "../../source/connectors/connector_interface.js"
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 function mail(id: string, from: string, priority: AcediaEvent["priority"] = "info"): AcediaEvent {
-    return { type: "email.received", ts: 1, source: "email", title: `mail ${id}`, priority, dedupeKey: `email-${id}`, meta: { from, labels: [], headers: {} } };
+    return {
+        type: "email.received",
+        ts: 1,
+        source: "email",
+        title: `mail ${id}`,
+        priority,
+        dedupeKey: `email-${id}`,
+        meta: { from, labels: [], headers: {} },
+    };
 }
 
-const dropShop = { id: "drop-shop", name: "Shop", conditions: [{ field: "from", op: "domain", value: "shop.com" }], actions: [{ type: "drop" }] };
-const promoteBoss = { id: "promote", name: "Boss", conditions: [{ field: "from", op: "domain", value: "corp.com" }], actions: [{ type: "set_priority", priority: "urgent" }, { type: "tag", tag: "travail" }] };
+const dropShop = {
+    id: "drop-shop",
+    name: "Shop",
+    conditions: [{ field: "from", op: "domain", value: "shop.com" }],
+    actions: [{ type: "drop" }],
+};
+const promoteBoss = {
+    id: "promote",
+    name: "Boss",
+    conditions: [{ field: "from", op: "domain", value: "corp.com" }],
+    actions: [
+        { type: "set_priority", priority: "urgent" },
+        { type: "tag", tag: "travail" },
+    ],
+};
 
 describe("IngestionHub — guard stage", () => {
     let dir: string;
@@ -36,10 +57,23 @@ describe("IngestionHub — guard stage", () => {
         await rulesStore.replaceAll(rules);
         const journal = new GuardJournal(path.join(dir, "journal.jsonl"));
         const stats = new GuardStats(path.join(dir, "stats.json"));
-        pending.push(() => journal.flush(), () => stats.flush());
-        const pipeline = new GuardPipeline({ rules: rulesStore, journal, stats, vipSenders: () => vip });
+        pending.push(
+            () => journal.flush(),
+            () => stats.flush(),
+        );
+        const pipeline = new GuardPipeline({
+            rules: rulesStore,
+            journal,
+            stats,
+            vipSenders: () => vip,
+        });
         const settledFilter = vi.fn();
-        const connector: IConnector = { slug: "email", name: "Mock", poll: vi.fn().mockResolvedValue(events), setSettledFilter: settledFilter };
+        const connector: IConnector = {
+            slug: "email",
+            name: "Mock",
+            poll: vi.fn().mockResolvedValue(events),
+            setSettledFilter: settledFilter,
+        };
         hub = new IngestionHub([connector], path.join(dir, "seen.json"), pipeline);
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
@@ -47,7 +81,10 @@ describe("IngestionHub — guard stage", () => {
     }
 
     it("dispatches what passes, drops what a rule drops, and journals the drop", async () => {
-        const { hub, received, journal } = await setup([mail("1", "promo@shop.com"), mail("2", "friend@home.org")], [dropShop]);
+        const { hub, received, journal } = await setup(
+            [mail("1", "promo@shop.com"), mail("2", "friend@home.org")],
+            [dropShop],
+        );
         await hub.pollOne("email");
         expect(received.map((e) => e.dedupeKey)).toEqual(["email-2"]);
         expect(journal.isFiltered("email-1")).toBe(true);
@@ -56,33 +93,50 @@ describe("IngestionHub — guard stage", () => {
     it("delivers tags, ruleId and the rule's priority on the dispatched event", async () => {
         const { hub, received } = await setup([mail("3", "boss@corp.com")], [promoteBoss]);
         await hub.pollOne("email");
-        expect(received[0]).toMatchObject({ tags: ["travail"], ruleId: "promote", priority: "urgent" });
+        expect(received[0]).toMatchObject({
+            tags: ["travail"],
+            ruleId: "promote",
+            priority: "urgent",
+        });
     });
 
     it("lets a rule PROMOTE an event on the urgent path, which filters on priority", async () => {
-        const { hub, received } = await setup([mail("4", "boss@corp.com", "info"), mail("5", "friend@home.org", "info")], [promoteBoss]);
+        const { hub, received } = await setup(
+            [mail("4", "boss@corp.com", "info"), mail("5", "friend@home.org", "info")],
+            [promoteBoss],
+        );
         // pollUrgent is private (driven by a 60 s timer): exercised directly so the urgent path is covered.
         await (hub as unknown as { pollUrgent(): Promise<void> }).pollUrgent();
         expect(received.map((e) => e.dedupeKey)).toEqual(["email-4"]);
     });
 
     it("never drops a VIP sender", async () => {
-        const { hub, received } = await setup([mail("6", "promo@shop.com")], [dropShop], ["promo@shop.com"]);
+        const { hub, received } = await setup(
+            [mail("6", "promo@shop.com")],
+            [dropShop],
+            ["promo@shop.com"],
+        );
         await hub.pollOne("email");
         expect(received).toHaveLength(1);
     });
 
     it("hands each connector a predicate that is true for dispatched keys and for guard-dropped keys", async () => {
-        const { hub, settledFilter } = await setup([mail("7", "promo@shop.com"), mail("8", "friend@home.org")], [dropShop]);
+        const { hub, settledFilter } = await setup(
+            [mail("7", "promo@shop.com"), mail("8", "friend@home.org")],
+            [dropShop],
+        );
         await hub.pollOne("email");
         const isSettled = settledFilter.mock.calls[0]![0] as (key: string) => boolean;
-        expect(isSettled("email-7")).toBe(true);  // dropped under the current rules
-        expect(isSettled("email-8")).toBe(true);  // already dispatched
+        expect(isSettled("email-7")).toBe(true); // dropped under the current rules
+        expect(isSettled("email-8")).toBe(true); // already dispatched
         expect(isSettled("email-unknown")).toBe(false);
     });
 
     it("re-evaluates a dropped event after the rules change (the settled verdict is versioned)", async () => {
-        const { hub, received, rulesStore, settledFilter } = await setup([mail("9", "promo@shop.com")], [dropShop]);
+        const { hub, received, rulesStore, settledFilter } = await setup(
+            [mail("9", "promo@shop.com")],
+            [dropShop],
+        );
         await hub.pollOne("email");
         expect(received).toHaveLength(0);
         await rulesStore.replaceAll([]);
@@ -104,7 +158,11 @@ describe("IngestionHub — guard stage", () => {
 
     it("is inert without a guard: same behaviour as before the chantier", async () => {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "hub-noguard-"));
-        const plain: IConnector = { slug: "email", name: "Mock", poll: vi.fn().mockResolvedValue([mail("11", "promo@shop.com")]) };
+        const plain: IConnector = {
+            slug: "email",
+            name: "Mock",
+            poll: vi.fn().mockResolvedValue([mail("11", "promo@shop.com")]),
+        };
         hub = new IngestionHub([plain], path.join(dir, "seen.json"));
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));

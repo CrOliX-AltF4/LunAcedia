@@ -17,7 +17,9 @@ describe("validateRules", () => {
         if (!res.ok) return;
         expect(res.rules[0]!.id).toMatch(/[0-9a-f-]{36}/);
         expect(res.rules[0]!.enabled).toBe(true);
-        expect(res.rules[0]!.conditions).toEqual([{ field: "from", op: "domain", value: "aliexpress.com" }]);
+        expect(res.rules[0]!.conditions).toEqual([
+            { field: "from", op: "domain", value: "aliexpress.com" },
+        ]);
         expect(res.rules[0]!.actions).toEqual([{ type: "drop" }, { type: "tag", tag: "promo" }]);
     });
 
@@ -31,13 +33,44 @@ describe("validateRules", () => {
         ["a missing name", [{ ...goodRule, name: " " }], "name is required"],
         ["no conditions", [{ ...goodRule, conditions: [] }], "at least one condition"],
         ["no actions", [{ ...goodRule, actions: [] }], "at least one action"],
-        ["an unknown condition field", [{ ...goodRule, conditions: [{ field: "regex", op: "matches", value: ".*" }] }], "unknown condition field"],
-        ["a bad from op", [{ ...goodRule, conditions: [{ field: "from", op: "regex", value: "x" }] }], "from.op"],
-        ["an empty value", [{ ...goodRule, conditions: [{ field: "subject", op: "contains", value: "  " }] }], "subject.value"],
-        ["a header name with junk", [{ ...goodRule, conditions: [{ field: "header", op: "present", name: "X Y;" }] }], "header.name"],
-        ["an unknown action", [{ ...goodRule, actions: [{ type: "delete_everything" }] }], "unknown action type"],
-        ["an invalid priority", [{ ...goodRule, actions: [{ type: "set_priority", priority: "critical" }] }], "priority must be"],
-        ["a duplicate id", [{ ...goodRule, id: "a" }, { ...goodRule, id: "a" }], "duplicate id"],
+        [
+            "an unknown condition field",
+            [{ ...goodRule, conditions: [{ field: "regex", op: "matches", value: ".*" }] }],
+            "unknown condition field",
+        ],
+        [
+            "a bad from op",
+            [{ ...goodRule, conditions: [{ field: "from", op: "regex", value: "x" }] }],
+            "from.op",
+        ],
+        [
+            "an empty value",
+            [{ ...goodRule, conditions: [{ field: "subject", op: "contains", value: "  " }] }],
+            "subject.value",
+        ],
+        [
+            "a header name with junk",
+            [{ ...goodRule, conditions: [{ field: "header", op: "present", name: "X Y;" }] }],
+            "header.name",
+        ],
+        [
+            "an unknown action",
+            [{ ...goodRule, actions: [{ type: "delete_everything" }] }],
+            "unknown action type",
+        ],
+        [
+            "an invalid priority",
+            [{ ...goodRule, actions: [{ type: "set_priority", priority: "critical" }] }],
+            "priority must be",
+        ],
+        [
+            "a duplicate id",
+            [
+                { ...goodRule, id: "a" },
+                { ...goodRule, id: "a" },
+            ],
+            "duplicate id",
+        ],
     ])("refuses %s", (_label, input, message) => {
         const res = validateRules(input);
         expect(res.ok).toBe(false);
@@ -52,7 +85,9 @@ describe("validateRules", () => {
 
 describe("GuardRulesStore", () => {
     let dir: string;
-    afterEach(async () => { if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }); });
+    afterEach(async () => {
+        if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+    });
 
     async function freshPath(): Promise<string> {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "guard-rules-"));

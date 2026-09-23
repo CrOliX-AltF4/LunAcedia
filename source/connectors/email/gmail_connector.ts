@@ -172,7 +172,9 @@ export class GmailConnector implements IConnector {
                         // List-Unsubscribe header (the reliable mark of bulk mail). Both come from the response this
                         // call already returns — no extra API request.
                         labels: msg.labelIds ?? [],
-                        headers: header("List-Unsubscribe") ? { "list-unsubscribe": header("List-Unsubscribe").slice(0, 200) } : {},
+                        headers: header("List-Unsubscribe")
+                            ? { "list-unsubscribe": header("List-Unsubscribe").slice(0, 200) }
+                            : {},
                     },
                 });
             } catch {
