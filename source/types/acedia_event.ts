@@ -36,4 +36,9 @@ export interface AcediaEvent {
     dedupeKey: string;
     meta?: Record<string, unknown>;
     read?: boolean;
+    /** Labels set by the user's guard rules (ADR-006 D3, decision C-014). Facts about the classification the
+     *  user configured, not model output. Additive and optional: consumers that ignore it are unaffected. */
+    tags?: string[];
+    /** The guard rule that set `tags` / a priority on this event, so the user can trace it back. */
+    ruleId?: string;
 }

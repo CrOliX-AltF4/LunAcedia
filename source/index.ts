@@ -16,6 +16,10 @@ import { ActionTierStore } from "./actions/action_tier_store.js";
 import { PendingActionStore } from "./actions/pending_action_store.js";
 import { EmailClassificationStore } from "./connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "./auth/google_token_store.js";
+import { GuardRulesStore } from "./guards/guard_rules_store.js";
+import { GuardJournal } from "./guards/guard_journal.js";
+import { GuardStats } from "./guards/guard_stats.js";
+import { GuardPipeline } from "./guards/guard_pipeline.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -41,10 +45,24 @@ if (connectors.length === 0) {
     );
 }
 
+// Ingestion guards (chantier A, ADR-010): user rules + journal of dropped events + per-rule counters. With no
+// rule configured nothing is ever dropped or tagged — installing this changes no existing behaviour.
+const guardRules = new GuardRulesStore();
+const guardJournal = new GuardJournal();
+const guardStats = new GuardStats();
+await Promise.all([guardRules.load(), guardJournal.load(), guardStats.load()]);
+const guardPipeline = new GuardPipeline({
+    rules: guardRules,
+    journal: guardJournal,
+    stats: guardStats,
+    // The legacy VIP list stays the single source of truth for "never drop" (edited live from the dashboard).
+    vipSenders: () => emailClassificationStore.getAll().vipSenders,
+});
+
 const store = new EventStore();
 const fcm = FcmSender.fromEnv();
 const ai = createAIProvider();
-const hub = new IngestionHub(connectors);
+const hub = new IngestionHub(connectors, undefined, guardPipeline);
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
 const pendingStore = new PendingActionStore();
@@ -59,6 +77,8 @@ const api = new AcediaApiServer(
     pendingStore,
     emailClassificationStore,
     googleTokenStore,
+    undefined,
+    { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
 );
 
 if (fcm) await fcm.load();
@@ -81,15 +101,21 @@ console.warn(
 );
 if (fcm) console.warn("[LunAcedia] FCM push enabled");
 
+async function flushGuards(): Promise<void> {
+    await Promise.all([guardJournal.flush(), guardStats.flush()]);
+}
+
 process.on("SIGINT", () => {
     hub.stop();
     ws.stop();
     api.stop();
-    process.exit(0);
+    // Pending journal / counter writes must land before the process goes away.
+    void flushGuards().finally(() => process.exit(0));
 });
 process.on("SIGTERM", () => {
     hub.stop();
     ws.stop();
     api.stop();
-    process.exit(0);
+    // Pending journal / counter writes must land before the process goes away.
+    void flushGuards().finally(() => process.exit(0));
 });

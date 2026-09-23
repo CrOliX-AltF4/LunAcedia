@@ -21,6 +21,8 @@ interface GmailMessageMeta {
     threadId: string;
     internalDate: string;
     payload: { headers: MessageHeader[] };
+    /** Gmail's own labels (INBOX, UNREAD, CATEGORY_PROMOTIONS…) — present in a format=metadata response. */
+    labelIds?: string[];
     /** Short plain-text preview Gmail generates itself — present regardless of `format`,
      *  since it isn't part of `payload` (unlike headers, which `format=metadata` limits). */
     snippet?: string;
@@ -55,6 +57,8 @@ export class GmailConnector implements IConnector {
     private readonly staticRules: EmailRule[];
     private readonly classificationStore?: EmailClassificationStore;
     private readonly tokenStore?: GoogleTokenStore;
+    /** Set by the hub: keys already settled (dispatched, or dropped by a guard) are not fetched again. */
+    private isSettled?: (dedupeKey: string) => boolean;
 
     constructor(classificationStore?: EmailClassificationStore, tokenStore?: GoogleTokenStore) {
         this.classificationStore = classificationStore;
@@ -79,6 +83,10 @@ export class GmailConnector implements IConnector {
                 "[Gmail] GMAIL_ENABLED=true but client_id/client_secret/refresh_token are incomplete — poll() will return nothing until fixed (or connect via the dashboard).",
             );
         }
+    }
+
+    setSettledFilter(isSettled: (dedupeKey: string) => boolean): void {
+        this.isSettled = isSettled;
     }
 
     /** Read fresh, not cached — a token obtained through the OAuth flow after startup takes
@@ -122,10 +130,13 @@ export class GmailConnector implements IConnector {
 
         const events: AcediaEvent[] = [];
         for (const id of ids) {
+            // An unread mail stays in the inbox: without this, every poll (every 60 s) would re-fetch the metadata
+            // of every mail already dispatched or dropped by a guard.
+            if (this.isSettled?.(`email-${id}`)) continue;
             try {
                 const resp = await fetch(
                     `${GMAIL_API}/messages/${id}?format=metadata` +
-                        `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+                        `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=List-Unsubscribe`,
                     { headers: authHeaders },
                 );
                 if (!resp.ok) continue;
@@ -153,7 +164,18 @@ export class GmailConnector implements IConnector {
                     body: msg.snippet?.slice(0, 200).trim(),
                     priority,
                     dedupeKey: `email-${id}`,
-                    meta: { from, messageId: id, threadId: msg.threadId },
+                    meta: {
+                        from,
+                        messageId: id,
+                        threadId: msg.threadId,
+                        // Neutral inputs for the ingestion guards (chantier A): Gmail's labels and the presence of a
+                        // List-Unsubscribe header (the reliable mark of bulk mail). Both come from the response this
+                        // call already returns — no extra API request.
+                        labels: msg.labelIds ?? [],
+                        headers: header("List-Unsubscribe")
+                            ? { "list-unsubscribe": header("List-Unsubscribe").slice(0, 200) }
+                            : {},
+                    },
                 });
             } catch {
                 // skip individual message errors silently

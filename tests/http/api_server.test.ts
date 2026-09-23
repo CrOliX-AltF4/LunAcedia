@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "node:http";
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { AcediaApiServer } from "../../source/http/api_server.js";
@@ -1342,6 +1343,44 @@ describe("AcediaApiServer — POST /api/chat", () => {
         server.stop();
         expect(res.status).toBe(502);
     });
+
+    it("should prepend context facts to the query sent to the AI provider", async () => {
+        const port = nextPort();
+        const chatSpy = vi.fn().mockResolvedValue("Butler response");
+        const mockAI: IAIProvider = { mode: "openai", chat: chatSpy, digest: vi.fn() };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        await post(
+            `http://localhost:${port}/api/chat`,
+            { text: "Any urgent mail?", context: ["Boss is on leave until Friday"] },
+            AUTH,
+        );
+        server.stop();
+        const query = chatSpy.mock.calls[0]![0] as string;
+        expect(query).toContain("Boss is on leave until Friday");
+        expect(query).toContain("Any urgent mail?");
+    });
+
+    it("should log the caller identity when provided", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue("ok"),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await post(
+            `http://localhost:${port}/api/chat`,
+            { text: "hello", callerId: "natsume-core" },
+            AUTH,
+        );
+        server.stop();
+        const logged = warnSpy.mock.calls.some((call) => String(call[0]).includes("natsume-core"));
+        warnSpy.mockRestore();
+        expect(logged).toBe(true);
+    });
 });
 
 describe("AcediaApiServer — POST /api/intent", () => {
@@ -1506,6 +1545,27 @@ describe("AcediaApiServer — POST /api/intent", () => {
         );
         server.stop();
         expect(res.status).toBe(502);
+    });
+
+    it("should log the caller identity when provided", async () => {
+        const port = nextPort();
+        const mockAI: IAIProvider = {
+            mode: "openai",
+            chat: vi.fn().mockResolvedValue('{"matched": false}'),
+            digest: vi.fn(),
+        };
+        const server = makeServer(new EventStore(), [], mockAI);
+        server.start(port);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await post(
+            `http://localhost:${port}/api/intent`,
+            { text: "mark it read", callerId: "natsume-core" },
+            AUTH,
+        );
+        server.stop();
+        const logged = warnSpy.mock.calls.some((call) => String(call[0]).includes("natsume-core"));
+        warnSpy.mockRestore();
+        expect(logged).toBe(true);
     });
 });
 
@@ -1862,5 +1922,68 @@ describe("AcediaApiServer — GET /api/events?unread=true", () => {
         const body = res.body as { events: AcediaEvent[]; total: number };
         expect(body.events).toHaveLength(0);
         expect(body.total).toBe(0);
+    });
+});
+
+describe("AcediaApiServer — POST /api/config/ai-provider (ADR-013 I1)", () => {
+    let tmpDir: string;
+    let cwdSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lunacedia-ai-onboard-"));
+        cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
+        delete process.env["AI_PROVIDER"];
+        delete process.env["OPENAI_API_KEY"];
+    });
+
+    afterEach(() => {
+        cwdSpy.mockRestore();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        delete process.env["AI_PROVIDER"];
+        delete process.env["OPENAI_API_KEY"];
+    });
+
+    it("configures openai and the change is live immediately (no restart)", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/config/ai-provider`,
+            { provider: "openai", apiKey: "sk-test-key" },
+            AUTH,
+        );
+        expect(res.status).toBe(200);
+        expect((res.body as Record<string, unknown>)["provider"]).toBe("openai");
+        expect((res.body as Record<string, unknown>)["apiKey"]).toBeUndefined();
+
+        const health = await get(`http://localhost:${port}/api/health`, AUTH);
+        server.stop();
+        expect((health.body as Record<string, unknown>)["ai"]).toBe("openai");
+    });
+
+    it("returns 400 for openai without an apiKey", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/config/ai-provider`,
+            { provider: "openai" },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(400);
+    });
+
+    it("requires auth like every other route", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/config/ai-provider`,
+            { provider: "openai", apiKey: "sk-x" },
+            {},
+        );
+        server.stop();
+        expect(res.status).toBe(401);
     });
 });

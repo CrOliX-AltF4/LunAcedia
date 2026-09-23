@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
+import type { GuardPipeline } from "../guards/guard_pipeline.js";
 
 const DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const URGENT_POLL_MS = 60_000;
@@ -46,11 +47,42 @@ export class IngestionHub {
     constructor(
         private readonly connectors: IConnector[],
         seenPath?: string,
+        private readonly guard?: GuardPipeline,
     ) {
         this.seenPath = seenPath ?? resolveSeenPath();
         for (const c of connectors) {
             this.health.set(c.slug, { lastSuccessAt: null, lastError: null });
+            c.setSettledFilter?.((key) => this.isSettled(key));
         }
+    }
+
+    /** Already dispatched, or dropped by a guard under the current rules — nothing left to do for this key. */
+    private isSettled(key: string): boolean {
+        return this.seen.has(key) || (this.guard?.isSettled(key) ?? false);
+    }
+
+    /**
+     * The guard stage (chantier A): runs at COLLECTION, before the urgent filter and before dedup, so the
+     * two poll paths (urgent every 60 s, normal on the connector interval) share one behaviour and a rule's
+     * `set_priority` can promote an event even on the urgent path. Settled keys are skipped without being
+     * re-evaluated (or re-counted).
+     */
+    private applyGuard(events: AcediaEvent[]): AcediaEvent[] {
+        if (!this.guard) return events;
+        const out: AcediaEvent[] = [];
+        for (const event of events) {
+            if (this.isSettled(event.dedupeKey)) continue;
+            const outcome = this.guard.process(event);
+            if (!outcome.dropped) out.push(outcome.event);
+        }
+        return out;
+    }
+
+    /** Re-dispatches a user-restored event, bypassing both dedup and the guard (the user's decision wins). */
+    dispatchRestored(event: AcediaEvent): void {
+        this.seen.set(event.dedupeKey, event.ts);
+        void this.saveSeen();
+        this.notify(event);
     }
 
     /**
@@ -149,7 +181,7 @@ export class IngestionHub {
             try {
                 const events = await connector.poll();
                 this.recordSuccess(connector);
-                for (const e of events.filter((e) => e.priority === "urgent")) {
+                for (const e of this.applyGuard(events).filter((e) => e.priority === "urgent")) {
                     this.dispatch(e);
                 }
             } catch (err) {
@@ -163,7 +195,7 @@ export class IngestionHub {
         try {
             const events = await connector.poll();
             this.recordSuccess(connector);
-            for (const e of events) this.dispatch(e);
+            for (const e of this.applyGuard(events)) this.dispatch(e);
         } catch (err) {
             this.recordError(connector, (err as Error).message);
             console.error(`[Hub] ${connector.name} poll error:`, (err as Error).message);
@@ -184,6 +216,10 @@ export class IngestionHub {
 
         this.seen.set(event.dedupeKey, event.ts);
         void this.saveSeen();
+        this.notify(event);
+    }
+
+    private notify(event: AcediaEvent): void {
         for (const handler of this.handlers) {
             try {
                 handler(event);
