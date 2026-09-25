@@ -11,7 +11,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SYSTEM_PROMPT =
     "You are a precise, formal digital butler assistant. Summarize information concisely and factually. Prioritize urgent items. Address the user directly. Do not editorialize.";
 
-function loadSystemPrompt(): string {
+/** LunAcedia's own persona (characters/butler.json) — also the agent's (ADR-017). */
+export function loadSystemPrompt(): string {
     const characterPath = path.resolve(__dirname, "../../characters/butler.json");
     try {
         const raw = fs.readFileSync(characterPath, "utf-8");
