@@ -20,6 +20,7 @@ import { GuardRulesStore } from "./guards/guard_rules_store.js";
 import { GuardJournal } from "./guards/guard_journal.js";
 import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
+import { AgentService, defaultAgentSettingsPath } from "./agent/agent_service.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -66,6 +67,9 @@ const hub = new IngestionHub(connectors, undefined, guardPipeline);
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
 const pendingStore = new PendingActionStore();
+// The agent's switch (ADR-017 M5) — loaded before the API serves anything.
+const agent = new AgentService(defaultAgentSettingsPath());
+await agent.load();
 const api = new AcediaApiServer(
     store,
     connectors,
@@ -79,6 +83,7 @@ const api = new AcediaApiServer(
     googleTokenStore,
     undefined,
     { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
+    agent,
 );
 
 if (fcm) await fcm.load();
