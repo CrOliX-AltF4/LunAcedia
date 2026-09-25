@@ -56,10 +56,12 @@ export function formatThread(thread: GitHubThread): AcediaEvent | null {
         url: htmlUrl,
         priority,
         dedupeKey: `gh-${reason}-${thread.id}`,
+        // The notification thread this item lives in — its source object (ADR-018 R8).
+        meta: { threadId: String(thread.id) },
     };
 }
 
-export function formatFailedCheckRun(run: CheckRun, repo: string): AcediaEvent {
+export function formatFailedCheckRun(run: CheckRun, repo: string, threadId?: string): AcediaEvent {
     return {
         type: "github.ci.failed",
         ts: Date.now(),
@@ -69,6 +71,7 @@ export function formatFailedCheckRun(run: CheckRun, repo: string): AcediaEvent {
         url: run.html_url,
         priority: "urgent",
         dedupeKey: `gh-ci-run-${run.id}`,
-        meta: { repo, checkSuiteId: run.check_suite.id },
+        // threadId: the notification this failure was found through — it dies with it (ADR-018 R8).
+        meta: { repo, checkSuiteId: run.check_suite.id, ...(threadId && { threadId }) },
     };
 }
