@@ -1,9 +1,20 @@
 import type { AcediaEvent } from "../types/acedia_event.js";
+import type { AgentMessage, AgentTurn, ToolCallOptions } from "./agent_types.js";
+import type { ToolDefinition } from "../capabilities/capability_manifest.js";
 
 export interface IAIProvider {
     readonly mode: string;
     chat(query: string): Promise<string>;
     digest(events: AcediaEvent[]): Promise<string>;
+    /**
+     * One model turn with tools offered (ADR-017 M3). Absent = this provider cannot call tools, and
+     * the agent says so instead of pretending. The messages are sent as given (no persona added).
+     */
+    chatWithTools?(
+        messages: AgentMessage[],
+        tools: ToolDefinition[],
+        options?: ToolCallOptions,
+    ): Promise<AgentTurn>;
 }
 
 export function formatDigestPrompt(events: AcediaEvent[]): string {
