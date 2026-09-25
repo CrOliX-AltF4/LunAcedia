@@ -112,7 +112,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
- *   POST /api/agent                body: { text, context?: string[], callerId? }  → the agent
+ *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly? }  → the agent
  *                                  (ADR-017): reads the events, acts only through the tier gate;
  *                                  versioned { version, status, summary, items, actions, steps }
  *   GET  /api/agent/journal        the last 50 agent runs (who asked, steps, actions)
@@ -190,6 +190,7 @@ export class AcediaApiServer {
             text: text.trim(),
             ...(context && { context }),
             ...(callerId && { callerId }),
+            ...(b["readOnly"] === true && { readOnly: true }),
         };
     }
 
