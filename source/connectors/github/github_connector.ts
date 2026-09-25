@@ -1,4 +1,9 @@
-import type { IConnector, SourceState } from "../connector_interface.js";
+import type {
+    IConnector,
+    InboxGesture,
+    InboxGestureResult,
+    SourceState,
+} from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
@@ -222,6 +227,32 @@ export class GitHubConnector implements IConnector {
             }
         }
         return state;
+    }
+
+    /**
+     * Master's gestures on a notification (ADR-018 R1). v1 rule: the box holds unread notifications, so
+     * read and done both take the item out; open changes nothing (the link opens the thread).
+     */
+    async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
+        if (gesture === "open") return { change: null };
+        const threadId = event.meta?.["threadId"];
+        if (threadId === undefined) throw new Error("[GitHub] item has no notification thread");
+        if (gesture === "done") {
+            await this.markThreadDone(String(threadId));
+            return { change: "removed" };
+        }
+        if (gesture === "read") {
+            const resp = await fetch(
+                `${GITHUB_API}/notifications/threads/${encodeURIComponent(String(threadId))}`,
+                {
+                    method: "PATCH",
+                    headers: this.apiHeaders(),
+                },
+            );
+            await assertHttpOk(resp, "[GitHub] mark thread read");
+            return { change: "removed" };
+        }
+        throw new Error(`[GitHub] "${gesture}" does not apply to a notification`);
     }
 
     /** "Done" at GitHub: takes the thread out of the GitHub inbox (ADR-018 R1). */

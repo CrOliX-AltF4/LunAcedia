@@ -18,6 +18,11 @@ export interface ReadToolDeps {
     store: EventStore;
     busyIntervals: () => TimeSlot[];
     now: () => number;
+    /**
+     * Marks a mail read at its source once read in full (ADR-018 D3 — like opening it in Gmail). Runs in
+     * the background: a failure never keeps the agent from reading the mail.
+     */
+    markRead?: (event: AcediaEvent) => Promise<void>;
 }
 
 export type ReadToolResult =
@@ -161,6 +166,13 @@ function getEvent(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolRe
             ok: false,
             error: `no event with key '${key}' (it may have been read and dropped)`,
         };
+    if (e.source === "email" && !e.read && deps.markRead) {
+        void deps
+            .markRead(e)
+            .catch((err: unknown) =>
+                console.warn("[agent] could not mark the mail read:", (err as Error).message),
+            );
+    }
     const body = e.body ?? "";
     return {
         ok: true,

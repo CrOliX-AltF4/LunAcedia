@@ -219,3 +219,58 @@ describe("GmailConnector — opening and restoring a mail (ADR-018 R1/R4)", () =
         ).toBe(true);
     });
 });
+
+describe("GmailConnector.inboxGesture — Master's own gestures, applied in Gmail (ADR-018 R1)", () => {
+    const cases: [string, string, string | null][] = [
+        ["read", "/messages/a/modify", "read"],
+        ["unread", "/messages/a/modify", "unread"],
+        ["archive", "/messages/a/modify", "removed"],
+        ["trash", "/messages/a/trash", "removed"],
+    ];
+    for (const [gesture, path, change] of cases) {
+        it(`${gesture} acts in Gmail and reports the change "${change}"`, async () => {
+            const { fetchImpl, calls } = fakeGmail([{ id: "a", labels: ["INBOX", "UNREAD"] }]);
+            vi.stubGlobal("fetch", fetchImpl);
+            const r = await new GmailConnector().inboxGesture(gesture as "read", event("a"));
+            expect(r.change).toBe(change);
+            expect(calls.some((c) => c.method === "POST" && c.url.includes(path))).toBe(true);
+        });
+    }
+
+    it("open returns the whole body and reports the mail read", async () => {
+        const { fetchImpl } = fakeGmail([
+            { id: "a", labels: ["INBOX", "UNREAD"], body: "Texte intégral" },
+        ]);
+        vi.stubGlobal("fetch", fetchImpl);
+        const r = await new GmailConnector().inboxGesture("open", event("a"));
+        expect(r).toEqual({ change: "read", body: "Texte intégral" });
+    });
+
+    it("refuses a gesture that has no meaning for a mail", async () => {
+        await expect(new GmailConnector().inboxGesture("done", event("a"))).rejects.toThrow();
+    });
+
+    it("lists the trash, most recent first, and restores from it", async () => {
+        const { fetchImpl, calls } = fakeGmail([
+            { id: "t1", labels: ["TRASH"], subject: "Vieille pub" },
+            { id: "a", labels: ["INBOX"] },
+        ]);
+        fetchImpl.mockImplementation(
+            ((orig) => (url: string, init?: { method?: string }) =>
+                String(url).includes("/messages?q=") &&
+                decodeURIComponent(String(url)).includes("in:trash")
+                    ? Promise.resolve({
+                          ok: true,
+                          json: () => Promise.resolve({ messages: [{ id: "t1" }] }),
+                      })
+                    : orig(url, init))(fetchImpl.getMockImplementation()!),
+        );
+        vi.stubGlobal("fetch", fetchImpl);
+        const trash = await new GmailConnector().listTrash();
+        expect(trash).toEqual([
+            expect.objectContaining({ id: "t1", title: "Vieille pub", from: "paul@example.com" }),
+        ]);
+        await new GmailConnector().restoreMessage("t1");
+        expect(calls.some((c) => c.url.includes("/messages/t1/untrash"))).toBe(true);
+    });
+});

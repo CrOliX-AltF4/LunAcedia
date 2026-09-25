@@ -10,6 +10,8 @@ import type { IAIProvider } from "../ai/ai_provider.js";
 import { formatProposalsPrompt } from "../ai/ai_provider.js";
 import { createAIProvider, loadSystemPrompt } from "../ai/create_ai_provider.js";
 import { AgentService } from "../agent/agent_service.js";
+import type { InboxSync } from "../hub/inbox_sync.js";
+import { InboxRoutes } from "./inbox_routes.js";
 import { runAgent, type AgentRequest, type AgentResult } from "../agent/agent_loop.js";
 import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
 import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
@@ -149,7 +151,18 @@ export class AcediaApiServer {
         private readonly guards?: GuardServices,
         // The agent's switch and journal (ADR-017 M5). In memory unless index.ts gives it a file.
         private readonly agent: AgentService = new AgentService(),
-    ) {}
+        // The box and the sync rule (ADR-018) — absent in tests that do not exercise them.
+        inbox?: InboxSync,
+    ) {
+        this.inboxSync = inbox ?? null;
+        this.inboxRoutes = inbox
+            ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
+            : null;
+    }
+
+    private readonly inboxSync: InboxSync | null;
+
+    private readonly inboxRoutes: InboxRoutes | null;
 
     private agentSettings(): { enabled: boolean; writes: boolean } {
         return { enabled: this.agent.isEnabled(), writes: this.agent.writesEnabled() };
@@ -164,6 +177,19 @@ export class AcediaApiServer {
                     store: this.store,
                     busyIntervals: () => this.calendarBusyIntervals(),
                     now: () => Date.now(),
+                    // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
+                    markRead: async (event) => {
+                        const connector = this.connectors.find((c) => c.slug === event.source);
+                        if (!connector?.inboxGesture) return;
+                        const r = await connector.inboxGesture("read", event);
+                        if (r.change && this.inboxSync) {
+                            this.inboxSync.applyLocal({
+                                op: r.change,
+                                key: event.dedupeKey,
+                                source: event.source,
+                            });
+                        }
+                    },
                 },
                 dispatch: (connector, action, capToConfirm) =>
                     this.dispatchAction(connector, action, capToConfirm),
@@ -737,6 +763,9 @@ export class AcediaApiServer {
             await this.emailClassificationStore.patch(body as Partial<EmailClassificationConfig>);
             return json(res, 200, this.emailClassificationStore.getAll());
         }
+
+        // The box: Master's gestures at the source, trash, journal (ADR-018 R1/R3)
+        if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
 
         // Ingestion guards (chantier A): /api/guard/{rules,journal,journal/restore,preview}
         if (path.startsWith("/api/guard/")) {

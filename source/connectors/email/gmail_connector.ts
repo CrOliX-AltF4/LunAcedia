@@ -1,4 +1,9 @@
-﻿import type { IConnector, SourceState } from "../connector_interface.js";
+﻿import type {
+    IConnector,
+    InboxGesture,
+    InboxGestureResult,
+    SourceState,
+} from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
@@ -280,6 +285,59 @@ export class GmailConnector implements IConnector {
         const body = extractBody(msg.payload);
         await this.modifyMessage(token, "mark_email_read", id);
         return { body };
+    }
+
+    /** Master's gestures on a mail, applied in Gmail (ADR-018 R1). */
+    async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
+        const id = event.meta?.["messageId"];
+        if (typeof id !== "string") throw new Error("[Gmail] item has no message id");
+        if (gesture === "open") {
+            const opened = await this.openMessage(id);
+            if (!opened) throw new Error("[Gmail] mail no longer exists");
+            return { change: "read", body: opened.body };
+        }
+        const kinds = {
+            read: ["mark_email_read", "read"],
+            unread: ["mark_email_unread", "unread"],
+            archive: ["archive_email", "removed"],
+            trash: ["delete_email", "removed"],
+        } as const;
+        if (!(gesture in kinds)) throw new Error(`[Gmail] "${gesture}" does not apply to a mail`);
+        const [kind, change] = kinds[gesture as keyof typeof kinds];
+        const token = await this.accessToken();
+        if (!token) throw new Error("[Gmail] not configured");
+        await this.modifyMessage(token, kind, id);
+        return { change };
+    }
+
+    /** Gmail's trash, most recent first (Gmail keeps it 30 days) — nothing is stored on our side. */
+    async listTrash(): Promise<Array<{ id: string; title: string; from: string; ts: number }>> {
+        const token = await this.accessToken();
+        if (!token) return [];
+        const ids = await this.listIds(token, "in:trash");
+        const out: Array<{ id: string; title: string; from: string; ts: number }> = [];
+        for (const id of ids) {
+            try {
+                const resp = await fetch(
+                    `${GMAIL_API}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+                    { headers: { Authorization: `Bearer ${token}` } },
+                );
+                if (!resp.ok) continue;
+                const msg = (await resp.json()) as GmailMessageMeta;
+                const h = (n: string) =>
+                    msg.payload.headers.find((x) => x.name.toLowerCase() === n.toLowerCase())
+                        ?.value ?? "";
+                out.push({
+                    id,
+                    title: h("Subject") || "(no subject)",
+                    from: h("From"),
+                    ts: parseInt(msg.internalDate, 10),
+                });
+            } catch {
+                // skip one unreadable mail rather than failing the whole list
+            }
+        }
+        return out;
     }
 
     /** Takes a mail out of the trash (Gmail keeps trashed mail 30 days). */
