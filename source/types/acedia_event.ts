@@ -13,7 +13,9 @@ export type AcediaEventType =
     | "rss.item"
     | "ha.state_changed"
     | "tasks.due"
-    | "system.heartbeat";
+    | "system.heartbeat"
+    /** Sync message (ADR-018 R8): an item changed or died with its source object — meta { op, key }. */
+    | "inbox.changed";
 
 export type AcediaEventSource = "github" | "calendar" | "email" | "rss" | "ha" | "tasks" | "system";
 
