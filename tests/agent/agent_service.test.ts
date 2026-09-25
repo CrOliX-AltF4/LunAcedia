@@ -39,6 +39,18 @@ describe("AgentService — switch and journal (ADR-017 M5, law 3)", () => {
         expect(b.isEnabled()).toBe(false);
     });
 
+    it("keeps writes off by default and persists the choice", async () => {
+        const file = await tmpFile();
+        const a = new AgentService(file);
+        await a.load();
+        expect(a.writesEnabled()).toBe(false);
+        await a.setWrites(true);
+        const b = new AgentService(file);
+        await b.load();
+        expect(b.writesEnabled()).toBe(true);
+        expect(b.isEnabled()).toBe(true);
+    });
+
     it("keeps working in memory when there is no settings file", async () => {
         const s = new AgentService();
         await s.load();

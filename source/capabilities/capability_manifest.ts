@@ -23,6 +23,12 @@ export interface ActionCapability {
     risk: ActionRisk;
     /** False = never built from model output, whatever the model says (merge_pr). */
     agentAllowed: boolean;
+    /**
+     * triage = sorting the inbox (read/unread, archive, trash, GitHub notification read); write =
+     * everything that creates or sends something. Writes stay off for the agent until a later v1
+     * (CrOliX, 2026-09-25) — AgentService's `writes` setting turns them on.
+     */
+    category: "triage" | "write";
 }
 
 export interface CapabilityManifest {
@@ -63,6 +69,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "archive_email",
@@ -71,6 +78,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
+                category: "triage",
             },
             {
                 kind: "delete_email",
@@ -79,6 +87,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "manual",
                 risk: "high",
                 agentAllowed: true,
+                category: "triage",
             },
             {
                 kind: "mark_email_read",
@@ -87,6 +96,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
+                category: "triage",
             },
             {
                 kind: "mark_email_unread",
@@ -95,6 +105,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
+                category: "triage",
             },
         ],
     },
@@ -133,6 +144,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "update_event",
@@ -152,6 +164,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "delete_event",
@@ -160,6 +173,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "high",
                 agentAllowed: true,
+                category: "write",
             },
         ],
     },
@@ -188,6 +202,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "complete_task",
@@ -196,6 +211,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "delete_task",
@@ -204,6 +220,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "high",
                 agentAllowed: true,
+                category: "write",
             },
         ],
     },
@@ -224,6 +241,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "add_label",
@@ -239,6 +257,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "create_issue",
@@ -261,6 +280,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "close_issue",
@@ -269,6 +289,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "high",
                 agentAllowed: true,
+                category: "write",
             },
             {
                 kind: "open_pr",
@@ -293,6 +314,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "medium",
                 agentAllowed: true,
+                category: "write",
             },
             // "ouvrir une PR peut être auto ou confirmation, mais merger reste toujours humain" (CrOliX).
             {
@@ -302,6 +324,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "manual",
                 risk: "high",
                 agentAllowed: false,
+                category: "write",
             },
             {
                 kind: "mark_notification_read",
@@ -312,6 +335,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
+                category: "triage",
             },
         ],
     },
@@ -348,9 +372,10 @@ export interface ToolDefinition {
 }
 
 /** The actions offered to the model as tools (merge_pr and any other non-agent action left out). */
-export function actionToolDefinitions(): ToolDefinition[] {
+export function actionToolDefinitions(options: { includeWrites?: boolean } = {}): ToolDefinition[] {
+    const includeWrites = options.includeWrites ?? true;
     return actionCapabilities()
-        .filter((a) => a.agentAllowed)
+        .filter((a) => a.agentAllowed && (includeWrites || a.category === "triage"))
         .map((a) => ({
             name: a.kind,
             description: `${a.description} [${a.connector}]`,

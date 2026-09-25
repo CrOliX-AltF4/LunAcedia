@@ -116,7 +116,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  (ADR-017): reads the events, acts only through the tier gate;
  *                                  versioned { version, status, summary, items, actions, steps }
  *   GET  /api/agent/journal        the last 50 agent runs (who asked, steps, actions)
- *   GET|PUT /api/agent/settings    { enabled } — the agent's switch (off = no tool is ever called)
+ *   GET|PUT /api/agent/settings    { enabled, writes } — the agent's switch (off = no tool is ever
+ *                                  called) and whether it may write (off = triage only, default)
  *   POST /api/chat                 body: { text, context? } → { response, agent? } — the agent's
  *                                  answer; plain dialogue with no tool when the agent is off
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
@@ -150,6 +151,10 @@ export class AcediaApiServer {
         private readonly agent: AgentService = new AgentService(),
     ) {}
 
+    private agentSettings(): { enabled: boolean; writes: boolean } {
+        return { enabled: this.agent.isEnabled(), writes: this.agent.writesEnabled() };
+    }
+
     /** One agent run over this server's store, calendar and tier gate, journaled (ADR-017). */
     private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
         return this.agent.run(req, () =>
@@ -163,6 +168,7 @@ export class AcediaApiServer {
                 dispatch: (connector, action, capToConfirm) =>
                     this.dispatchAction(connector, action, capToConfirm),
                 persona: loadSystemPrompt(),
+                allowWrites: this.agent.writesEnabled(),
             }),
         );
     }
@@ -808,7 +814,7 @@ export class AcediaApiServer {
 
         // GET/PUT /api/agent/settings — the agent's switch (law 3: off = no tool is ever called)
         if (method === "GET" && path === "/api/agent/settings") {
-            return json(res, 200, { enabled: this.agent.isEnabled() });
+            return json(res, 200, this.agentSettings());
         }
         if (method === "PUT" && path === "/api/agent/settings") {
             let body: unknown;
@@ -817,12 +823,18 @@ export class AcediaApiServer {
             } catch {
                 return json(res, 400, { error: "Invalid JSON" });
             }
-            const enabled = (body as Record<string, unknown> | null)?.["enabled"];
-            if (typeof enabled !== "boolean") {
-                return json(res, 400, { error: "Body must be { enabled: boolean }" });
+            const b = (body ?? {}) as Record<string, unknown>;
+            const enabled = b["enabled"];
+            const writes = b["writes"];
+            const bad = (v: unknown) => v !== undefined && typeof v !== "boolean";
+            if (bad(enabled) || bad(writes) || (enabled === undefined && writes === undefined)) {
+                return json(res, 400, {
+                    error: "Body must be { enabled?: boolean, writes?: boolean }",
+                });
             }
-            await this.agent.setEnabled(enabled);
-            return json(res, 200, { enabled });
+            if (typeof enabled === "boolean") await this.agent.setEnabled(enabled);
+            if (typeof writes === "boolean") await this.agent.setWrites(writes);
+            return json(res, 200, this.agentSettings());
         }
 
         // POST /api/chat — kept for LunAvaritia (reads `response`): answered by the agent; with the

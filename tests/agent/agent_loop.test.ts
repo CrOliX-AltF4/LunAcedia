@@ -283,6 +283,31 @@ describe("runAgent — bounded tool loop (ADR-017 M4)", () => {
         expect(r.actions[0]).toMatchObject({ kind: "archive_email", status: "refused" });
     });
 
+    it("refuses a write action while writes are off, without dispatching it", async () => {
+        const { provider } = scripted([
+            { content: null, toolCalls: [call("c1", "create_task", { fields: { title: "x" } })] },
+            { content: "Pas encore.", toolCalls: [] },
+        ]);
+        const d = { ...deps(provider), allowWrites: false };
+        const r = await runAgent({ text: "crée une tâche" }, d);
+        expect(d.dispatch).not.toHaveBeenCalled();
+        expect(r.actions[0]).toMatchObject({ kind: "create_task", status: "refused" });
+    });
+
+    it("still sorts the inbox while writes are off", async () => {
+        const { provider } = scripted([
+            { content: null, toolCalls: [call("c1", "archive_email", { sourceId: "1" })] },
+            { content: "Archivé.", toolCalls: [] },
+        ]);
+        const d = { ...deps(provider), allowWrites: false };
+        await runAgent({ text: "archive-le" }, d);
+        expect(d.dispatch).toHaveBeenCalledWith(
+            "Gmail",
+            { kind: "archive_email", sourceId: "1" },
+            false,
+        );
+    });
+
     it("passes the caller's context to the model as context, not as the request", async () => {
         const { provider, seen } = scripted([{ content: "ok", toolCalls: [] }]);
         await runAgent(
