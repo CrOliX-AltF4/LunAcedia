@@ -1,4 +1,4 @@
-import type { IConnector } from "../connector_interface.js";
+import type { IConnector, SourceState } from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
@@ -122,8 +122,9 @@ export class GitHubConnector implements IConnector {
 
     private async fetchFailedCheckRuns(
         repo: string,
-        thread: { subject: { url?: string } },
+        thread: { id: string | number; subject: { url?: string } },
     ): Promise<AcediaEvent[]> {
+        const threadId = String(thread.id);
         const commitUrl = thread.subject.url;
         if (!commitUrl) return [];
 
@@ -156,10 +157,83 @@ export class GitHubConnector implements IConnector {
 
             return data.check_runs
                 .filter((r) => r.conclusion === "failure" || r.conclusion === "timed_out")
-                .map((r) => formatFailedCheckRun(r, repo));
+                .map((r) => formatFailedCheckRun(r, repo, threadId));
         } catch {
             return [];
         }
+    }
+
+    private apiHeaders(): Record<string, string> {
+        return {
+            Authorization: `Bearer ${this.token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        };
+    }
+
+    /**
+     * Where each held item stands at GitHub (ADR-018 R8). v1 rule: the box holds unread notifications —
+     * a thread read or done at GitHub leaves it. A thread missing from the unread listing is checked one
+     * by one; an item without its thread is not judged. null when GitHub cannot be asked.
+     */
+    async sourceState(events: AcediaEvent[]): Promise<Map<string, SourceState> | null> {
+        const held = events
+            .filter((e) => e.source === "github" && e.meta?.["threadId"] !== undefined)
+            .map((e) => ({ key: e.dedupeKey, threadId: String(e.meta!["threadId"]) }));
+        const state = new Map<string, SourceState>();
+        if (held.length === 0 || !this.token) return state;
+
+        let unread: Set<string>;
+        try {
+            // No If-Modified-Since here: this is a full picture, not the incremental poll.
+            const resp = await fetch(
+                `${GITHUB_API}/notifications?all=false&participating=false&per_page=50`,
+                { headers: this.apiHeaders() },
+            );
+            if (!resp.ok) throw new Error(`notifications returned ${resp.status}`);
+            const threads = (await resp.json()) as Array<{ id: string | number }>;
+            unread = new Set(threads.map((t) => String(t.id)));
+        } catch (e) {
+            console.warn("[GitHub] source state unavailable:", (e as Error).message);
+            return null;
+        }
+
+        for (const { key, threadId } of held) {
+            if (unread.has(threadId)) {
+                state.set(key, "unread");
+                continue;
+            }
+            try {
+                const resp = await fetch(
+                    `${GITHUB_API}/notifications/threads/${encodeURIComponent(threadId)}`,
+                    {
+                        headers: this.apiHeaders(),
+                    },
+                );
+                if (resp.status === 404) {
+                    state.set(key, "gone");
+                    continue;
+                }
+                if (!resp.ok) continue;
+                const thread = (await resp.json()) as { unread?: boolean };
+                state.set(key, thread.unread ? "unread" : "gone");
+            } catch {
+                // unknown this time — never removed on uncertainty
+            }
+        }
+        return state;
+    }
+
+    /** "Done" at GitHub: takes the thread out of the GitHub inbox (ADR-018 R1). */
+    async markThreadDone(threadId: string): Promise<void> {
+        const resp = await fetch(
+            `${GITHUB_API}/notifications/threads/${encodeURIComponent(threadId)}`,
+            {
+                method: "DELETE",
+                headers: this.apiHeaders(),
+            },
+        );
+        await assertHttpOk(resp, "[GitHub] mark thread done");
     }
 
     /**
