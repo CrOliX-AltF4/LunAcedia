@@ -262,6 +262,27 @@ describe("runAgent — bounded tool loop (ADR-017 M4)", () => {
         expect(r).toMatchObject({ status: "error", error: "OpenAI error: 500" });
     });
 
+    // Law 3: the Core's kill switch ("Pause autonomie") must stop every action, even a held one.
+    it("offers only the read tools and never dispatches in read-only mode", async () => {
+        const offered: string[][] = [];
+        const provider: IAIProvider = {
+            mode: "openai",
+            chat: async () => "",
+            digest: async () => "",
+            chatWithTools: async (_m, tools) => {
+                offered.push(tools.map((t) => t.name));
+                return offered.length === 1
+                    ? { content: null, toolCalls: [call("c1", "archive_email", { sourceId: "1" })] }
+                    : { content: "Je ne peux pas agir pour l'instant.", toolCalls: [] };
+            },
+        };
+        const d = deps(provider);
+        const r = await runAgent({ text: "archive-le", readOnly: true }, d);
+        expect(offered[0]).toEqual(["search_events", "get_event", "free_slots"]);
+        expect(d.dispatch).not.toHaveBeenCalled();
+        expect(r.actions[0]).toMatchObject({ kind: "archive_email", status: "refused" });
+    });
+
     it("passes the caller's context to the model as context, not as the request", async () => {
         const { provider, seen } = scripted([{ content: "ok", toolCalls: [] }]);
         await runAgent(

@@ -60,6 +60,11 @@ export interface AgentRequest {
     callerId?: string;
     /** Lower than the default for single-action callers (/api/intent). */
     maxActions?: number;
+    /**
+     * Read tools only: nothing is executed nor queued. Set by the Core while its kill switch
+     * ("Pause autonomie", law 3) is on — pausing autonomy must stop every action, even a held one.
+     */
+    readOnly?: boolean;
 }
 
 export type ActionStatus = "executed" | "pending" | "refused" | "invalid" | "error";
@@ -155,7 +160,9 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
         };
     }
 
-    const tools = [...readToolDefinitions(), ...actionToolDefinitions()];
+    const tools = req.readOnly
+        ? readToolDefinitions()
+        : [...readToolDefinitions(), ...actionToolDefinitions()];
     const actionKinds = new Set<string>(actionCapabilities().map((a) => a.kind));
     const messages: AgentMessage[] = [
         { role: "system", content: systemPrompt(deps.persona, now()) },
@@ -251,6 +258,17 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                             reason: built.error,
                         });
                         content = JSON.stringify({ error: built.error });
+                    } else if (req.readOnly) {
+                        const reason = "actions are paused (read-only request)";
+                        step.error = reason;
+                        result.actions.push({
+                            kind: built.action.kind,
+                            connector: built.connector,
+                            action: built.action,
+                            status: "refused",
+                            reason,
+                        });
+                        content = JSON.stringify({ status: "refused", reason });
                     } else if (actionAttempts >= maxActions) {
                         const reason = `action limit reached (${maxActions} per request)`;
                         step.error = reason;

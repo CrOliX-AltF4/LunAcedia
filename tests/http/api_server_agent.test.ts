@@ -219,6 +219,26 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             expect(executed).toEqual([]);
         });
 
+        it("passes read-only mode through: no action is executed nor queued", async () => {
+            const executed: ConnectorAction[] = [];
+            const ai = scripted([
+                { content: null, toolCalls: [toolCall("mark_email_read", { sourceId: "1" })] },
+                { content: "Pause.", toolCalls: [] },
+            ]);
+            const base = await start({
+                ai,
+                connectors: [connector("Gmail", executed)],
+                tiers: { mark_email_read: "auto" },
+            });
+            const r = await call("POST", `${base}/api/agent`, {
+                text: "marque-le lu",
+                readOnly: true,
+            });
+            expect(r.body.actions[0]).toMatchObject({ status: "refused" });
+            expect(executed).toEqual([]);
+            expect((await call("GET", `${base}/api/actions/pending`)).body).toEqual([]);
+        });
+
         it("answers 502 with the error when the provider fails", async () => {
             const ai = scripted([]);
             ai.chatWithTools = vi.fn().mockRejectedValue(new Error("OpenAI error: 500"));
