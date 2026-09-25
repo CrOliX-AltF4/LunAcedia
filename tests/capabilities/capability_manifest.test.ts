@@ -137,3 +137,32 @@ describe("actionToolDefinitions — what the model is offered", () => {
         }
     });
 });
+
+// CrOliX 2026-09-25: the agent sorts the inbox now; everything that writes waits for a later v1.
+describe("triage vs write actions", () => {
+    const TRIAGE = [
+        "archive_email",
+        "delete_email",
+        "mark_email_read",
+        "mark_email_unread",
+        "mark_notification_read",
+    ];
+
+    it("classes exactly the inbox-sorting gestures as triage", () => {
+        const triage = actionCapabilities()
+            .filter((a) => a.category === "triage")
+            .map((a) => a.kind);
+        expect(triage.sort()).toEqual([...TRIAGE].sort());
+    });
+
+    it("offers only triage actions when writes are off", () => {
+        const names = actionToolDefinitions({ includeWrites: false }).map((t) => t.name);
+        expect(names.sort()).toEqual([...TRIAGE].sort());
+    });
+
+    it("offers writes too when they are on (merge_pr still never)", () => {
+        const names = actionToolDefinitions({ includeWrites: true }).map((t) => t.name);
+        expect(names).toContain("create_task");
+        expect(names).not.toContain("merge_pr");
+    });
+});

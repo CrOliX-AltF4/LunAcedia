@@ -86,6 +86,7 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
         events?: AcediaEvent[];
         tiers?: Record<string, string>;
         agentEnabled?: boolean;
+        writes?: boolean;
     }) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-agent-"));
         const store = new EventStore();
@@ -98,6 +99,7 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
         const agent = new AgentService(path.join(dir, "agent_settings.json"));
         await agent.load();
         if (opts.agentEnabled === false) await agent.setEnabled(false);
+        if (opts.writes) await agent.setWrites(true);
         const connectors = opts.connectors ?? [];
         server = new AcediaApiServer(
             store,
@@ -176,7 +178,11 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
                 },
                 { content: "Je te propose la tâche.", toolCalls: [] },
             ]);
-            const base = await start({ ai, connectors: [connector("Tasks", executed)] });
+            const base = await start({
+                ai,
+                connectors: [connector("Tasks", executed)],
+                writes: true,
+            });
             const r = await call("POST", `${base}/api/agent`, { text: "rappelle-moi Paul" });
             expect(r.body.actions[0]).toMatchObject({ kind: "create_task", status: "pending" });
             expect(executed).toEqual([]);
@@ -267,10 +273,24 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             const base = await start({ ai: scripted([]) });
             expect((await call("GET", `${base}/api/agent/settings`)).body).toEqual({
                 enabled: true,
+                writes: false,
             });
             const put = await call("PUT", `${base}/api/agent/settings`, { enabled: false });
-            expect(put.body).toEqual({ enabled: false });
+            expect(put.body).toEqual({ enabled: false, writes: false });
             expect((await call("POST", `${base}/api/agent`, { text: "x" })).status).toBe(503);
+        });
+
+        it("turns writes on and off (off by default until v1)", async () => {
+            const base = await start({ ai: scripted([]) });
+            expect(
+                (await call("PUT", `${base}/api/agent/settings`, { writes: true })).body,
+            ).toEqual({
+                enabled: true,
+                writes: true,
+            });
+            expect(
+                (await call("PUT", `${base}/api/agent/settings`, { writes: "yes" })).status,
+            ).toBe(400);
         });
 
         it("refuses a malformed switch value", async () => {

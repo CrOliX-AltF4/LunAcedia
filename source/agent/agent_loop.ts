@@ -49,6 +49,8 @@ export interface AgentDeps {
     ) => Promise<DispatchOutcome>;
     /** LunAcedia's own persona (characters/butler.json). */
     persona: string;
+    /** False = only the triage actions are offered and allowed (writes wait for a later v1). */
+    allowWrites?: boolean;
     now?: () => number;
     limits?: AgentLimits;
 }
@@ -160,9 +162,15 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
         };
     }
 
+    const allowWrites = deps.allowWrites ?? true;
     const tools = req.readOnly
         ? readToolDefinitions()
-        : [...readToolDefinitions(), ...actionToolDefinitions()];
+        : [...readToolDefinitions(), ...actionToolDefinitions({ includeWrites: allowWrites })];
+    const writeKinds = new Set<string>(
+        actionCapabilities()
+            .filter((a) => a.category === "write")
+            .map((a) => a.kind),
+    );
     const actionKinds = new Set<string>(actionCapabilities().map((a) => a.kind));
     const messages: AgentMessage[] = [
         { role: "system", content: systemPrompt(deps.persona, now()) },
@@ -258,6 +266,17 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                             reason: built.error,
                         });
                         content = JSON.stringify({ error: built.error });
+                    } else if (!allowWrites && writeKinds.has(built.action.kind)) {
+                        const reason = "write actions are off for now (triage only)";
+                        step.error = reason;
+                        result.actions.push({
+                            kind: built.action.kind,
+                            connector: built.connector,
+                            action: built.action,
+                            status: "refused",
+                            reason,
+                        });
+                        content = JSON.stringify({ status: "refused", reason });
                     } else if (req.readOnly) {
                         const reason = "actions are paused (read-only request)";
                         step.error = reason;

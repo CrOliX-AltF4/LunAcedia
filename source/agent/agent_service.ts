@@ -34,6 +34,8 @@ export interface AgentJournalEntry {
 
 export class AgentService {
     private enabled = true;
+    // Writes (reply, create, update, delete an event…) wait for a later v1 (CrOliX, 2026-09-25).
+    private writes = false;
     private readonly entries: AgentJournalEntry[] = [];
 
     /** No settings path = in memory only (tests, or a deployment without STORAGE_DIR). */
@@ -47,8 +49,10 @@ export class AgentService {
         try {
             const parsed = JSON.parse(await fs.readFile(this.settingsPath, "utf-8")) as {
                 enabled?: unknown;
+                writes?: unknown;
             };
             if (typeof parsed.enabled === "boolean") this.enabled = parsed.enabled;
+            if (typeof parsed.writes === "boolean") this.writes = parsed.writes;
         } catch {
             // Missing or unreadable: keep the default (on) — the switch is always visible to fix it.
         }
@@ -58,11 +62,28 @@ export class AgentService {
         return this.enabled;
     }
 
+    writesEnabled(): boolean {
+        return this.writes;
+    }
+
     async setEnabled(enabled: boolean): Promise<void> {
         this.enabled = enabled;
+        await this.save();
+    }
+
+    async setWrites(writes: boolean): Promise<void> {
+        this.writes = writes;
+        await this.save();
+    }
+
+    private async save(): Promise<void> {
         if (!this.settingsPath) return;
         await fs.mkdir(path.dirname(this.settingsPath), { recursive: true });
-        await fs.writeFile(this.settingsPath, JSON.stringify({ enabled }, null, 2), "utf-8");
+        await fs.writeFile(
+            this.settingsPath,
+            JSON.stringify({ enabled: this.enabled, writes: this.writes }, null, 2),
+            "utf-8",
+        );
     }
 
     /** Runs one agent request and journals it, whatever happens. */
