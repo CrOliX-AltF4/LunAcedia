@@ -38,6 +38,11 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 .card-body{font-size:13px;color:var(--muted);margin-top:6px;display:none;line-height:1.6}
 .card.open .card-body{display:block}
 .card-time{font-size:11px;color:var(--muted);margin-top:4px}
+.card-actions{display:none;gap:6px;margin-top:8px}
+.card.open .card-actions{display:flex}
+.card-actions button{padding:3px 10px;font-size:12px}
+.trash-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)}
+.trash-row span{flex:1;font-size:13px}
 #empty{color:var(--muted);text-align:center;padding:60px 20px;display:none}
 /* auth overlay */
 #auth{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100}
@@ -161,7 +166,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openFreeSlots()">Créneaux libres</button>
   <button onclick="openDigest()">Digest</button>
   <button onclick="openSettings()">⚙ Réglages</button>
-  <button onclick="markAll()">Mark all read</button>
+  <button onclick="openTrash()">Corbeille</button>
 </header>
 
 <div id="ai-banner">
@@ -223,9 +228,10 @@ document.getElementById('tok').addEventListener('keydown',e=>{if(e.key==='Enter'
 
 async function load(){
   try{
-    const r=await req('/api/events?limit=100');
+    // The box (ADR-018): what is in the inbox at the source, read and unread.
+    const r=await req('/api/inbox');
     if(!r.ok)return;
-    events=(await r.json()).events||[];
+    events=(await r.json()).items||[];
     render();
   }catch(e){if(e.message!=='401')console.error(e);}
 }
@@ -252,27 +258,66 @@ function render(){
     <span class="pri pri-\${esc(e.priority)}">\${esc(e.priority)}</span>
   </div>
   <div class="card-title">\${esc(e.title)}</div>
-  \${e.body?'<div class="card-body">'+esc(e.body)+'</div>':''}
+  <div class="card-body">\${e.body?esc(e.body):''}</div>
   <div class="card-time">\${ago(e.ts)}</div>
+  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}</div>
 </div>\`).join('');
 }
 
 async function toggle(el){
   const key=el.dataset.key;
   el.classList.toggle('open');
-  if(el.classList.contains('unread')){
-    el.classList.remove('unread');
-    const ev=events.find(e=>e.dedupeKey===key);
-    if(ev)ev.read=true;
-    render();
-    await req('/api/events/'+encodeURIComponent(key)+'/read',{method:'POST'}).catch(()=>{});
-  }
+  if(!el.classList.contains('open')||el.dataset.loaded)return;
+  // Opening = reading it: the whole text, and it is read at the source (ADR-018 R1).
+  try{
+    const r=await req('/api/inbox/'+encodeURIComponent(key)+'/open',{method:'POST'});
+    if(!r.ok)return;
+    const data=await r.json();
+    if(data.body!==undefined){
+      el.querySelector('.card-body').innerHTML=esc(data.body).replace(/\\n/g,'<br>');
+      el.dataset.loaded='1';
+    }
+    if(data.change==='read'){
+      const ev=events.find(e=>e.dedupeKey===key);
+      if(ev)ev.read=true;
+      el.classList.remove('unread');
+    }
+  }catch(e){}
 }
 
-async function markAll(){
-  events.forEach(e=>e.read=true);
-  render();
-  await req('/api/events/read-all',{method:'POST'}).catch(()=>{});
+// Master's gesture on an item — applied at the source; the key comes from the card, never a JS argument.
+async function gesture(btn,ev){
+  ev.stopPropagation();
+  const key=btn.closest('.card').dataset.key;
+  const g=btn.dataset.g;
+  btn.disabled=true;
+  try{
+    const r=await req('/api/inbox/'+encodeURIComponent(key)+'/'+g,{method:'POST'});
+    if(!r.ok){btn.disabled=false;return;}
+  }catch(e){btn.disabled=false;return;}
+  load();
+}
+
+// Gmail's trash (kept 30 days by Gmail) — ids read from the row, never interpolated into onclick.
+async function openTrash(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Corbeille (Gmail, 30 jours)';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/inbox/trash');
+    const items=(await r.json()).items||[];
+    box.innerHTML=items.length?items.map(t=>\`<div class="trash-row" data-id="\${esc(t.id)}"><span>\${esc(t.title)} — \${esc(t.from)}</span><button onclick="restoreTrash(this)">Restaurer</button></div>\`).join(''):'La corbeille est vide.';
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function restoreTrash(btn){
+  const row=btn.closest('.trash-row');
+  const id=btn.closest('.trash-row').dataset.id;
+  btn.disabled=true;
+  await req('/api/inbox/trash/'+encodeURIComponent(id)+'/restore',{method:'POST'}).catch(()=>{});
+  row.remove();
+  setTimeout(load,1500);
 }
 
 async function openDigestLike(path,title){
