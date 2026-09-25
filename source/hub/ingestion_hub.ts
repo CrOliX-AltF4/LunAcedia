@@ -78,6 +78,14 @@ export class IngestionHub {
         return out;
     }
 
+    /**
+     * Drops a key from dedup (ADR-018 R8): an item removed because its source object is gone comes back if
+     * the object does — a mail restored from the trash, a GitHub thread with new activity.
+     */
+    forget(key: string): void {
+        if (this.seen.delete(key)) void this.saveSeen();
+    }
+
     /** Re-dispatches a user-restored event, bypassing both dedup and the guard (the user's decision wins). */
     dispatchRestored(event: AcediaEvent): void {
         this.seen.set(event.dedupeKey, event.ts);

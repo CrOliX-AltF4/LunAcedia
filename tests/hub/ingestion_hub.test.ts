@@ -287,3 +287,34 @@ describe("IngestionHub", () => {
         });
     });
 });
+
+// ADR-018 R8 — an item removed because its source object is gone must come back if the object does
+// (a mail restored from the trash, a GitHub thread with new activity).
+describe("IngestionHub.forget", () => {
+    it("lets a forgotten key be dispatched again", async () => {
+        const e = {
+            type: "email.received" as const,
+            ts: Date.now(),
+            source: "email" as const,
+            title: "t",
+            priority: "normal" as const,
+            dedupeKey: "email-a",
+        };
+        const polls = [[e], [e]];
+        const connector = {
+            slug: "email" as const,
+            name: "Gmail",
+            poll: async () => polls.shift() ?? [],
+        };
+        const hub = new IngestionHub(
+            [connector],
+            path.join(os.tmpdir(), `seen-${Date.now()}-${Math.random()}.json`),
+        );
+        const seen: string[] = [];
+        hub.onEvent((ev) => seen.push(ev.dedupeKey));
+        await hub.pollOne("email");
+        hub.forget("email-a");
+        await hub.pollOne("email");
+        expect(seen).toEqual(["email-a", "email-a"]);
+    });
+});
