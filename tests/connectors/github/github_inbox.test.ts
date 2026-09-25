@@ -145,3 +145,42 @@ describe("GitHubConnector.markThreadDone", () => {
         });
     });
 });
+
+describe("GitHubConnector.inboxGesture (ADR-018 R1)", () => {
+    it("done takes the thread out of GitHub's inbox and the item dies", async () => {
+        process.env["GITHUB_TOKEN"] = "t";
+        const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: true }]);
+        vi.stubGlobal("fetch", fetchImpl);
+        const r = await new GitHubConnector().inboxGesture("done", ghEvent("gh-mention-8", "8"));
+        expect(r.change).toBe("removed");
+        expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    });
+
+    it("read marks the thread read at GitHub — v1 rule: it leaves the box", async () => {
+        process.env["GITHUB_TOKEN"] = "t";
+        const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: true }]);
+        vi.stubGlobal("fetch", fetchImpl);
+        const r = await new GitHubConnector().inboxGesture("read", ghEvent("gh-mention-8", "8"));
+        expect(r.change).toBe("removed");
+        expect(calls.some((c) => c.method === "PATCH")).toBe(true);
+    });
+
+    it("open changes nothing at GitHub (the link opens the thread)", async () => {
+        process.env["GITHUB_TOKEN"] = "t";
+        const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: true }]);
+        vi.stubGlobal("fetch", fetchImpl);
+        const r = await new GitHubConnector().inboxGesture("open", ghEvent("gh-mention-8", "8"));
+        expect(r.change).toBeNull();
+        expect(calls).toEqual([]);
+    });
+
+    it("refuses a gesture it cannot do, or an item without its thread", async () => {
+        process.env["GITHUB_TOKEN"] = "t";
+        await expect(
+            new GitHubConnector().inboxGesture("trash", ghEvent("gh-mention-8", "8")),
+        ).rejects.toThrow();
+        await expect(
+            new GitHubConnector().inboxGesture("done", ghEvent("gh-ci-run-1")),
+        ).rejects.toThrow();
+    });
+});

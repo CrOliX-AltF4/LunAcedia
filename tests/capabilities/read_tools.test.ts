@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { EventStore } from "../../source/store/event_store.js";
 import {
     readToolDefinitions,
@@ -148,5 +148,38 @@ describe("free_slots", () => {
 describe("runReadTool", () => {
     it("refuses an unknown tool name", () => {
         expect(runReadTool("delete_everything", {}, deps([])).ok).toBe(false);
+    });
+});
+
+// ADR-018 D3 — when Natsume reads a mail in full, it is read, like opening it in Gmail.
+describe("get_event marks an unread mail read", () => {
+    it("asks for the mail to be marked read at the source", async () => {
+        const markRead = vi.fn(async () => {});
+        const d = { ...deps([mail("1")]), markRead };
+        const r = await runReadTool("get_event", { key: "email-1" }, d);
+        expect(r.ok).toBe(true);
+        expect(markRead).toHaveBeenCalledWith(expect.objectContaining({ dedupeKey: "email-1" }));
+    });
+
+    it("leaves an already read mail alone", async () => {
+        const markRead = vi.fn(async () => {});
+        await runReadTool(
+            "get_event",
+            { key: "email-1" },
+            { ...deps([mail("1", { read: true })]), markRead },
+        );
+        expect(markRead).not.toHaveBeenCalled();
+    });
+
+    it("still returns the mail when marking it read fails", async () => {
+        const markRead = vi.fn(async () => {
+            throw new Error("Gmail down");
+        });
+        const r = await runReadTool(
+            "get_event",
+            { key: "email-1" },
+            { ...deps([mail("1")]), markRead },
+        );
+        expect(r.ok).toBe(true);
     });
 });

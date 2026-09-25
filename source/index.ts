@@ -71,6 +71,14 @@ const pendingStore = new PendingActionStore();
 // The agent's switch (ADR-017 M5) — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
+// The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
+const inboxSync = new InboxSync({
+    connectors,
+    store,
+    emit: (change) => ws.broadcast(InboxSync.toWire(change)),
+    forget: (key) => hub.forget(key),
+});
+const INBOX_SYNC_MS = 60_000;
 const api = new AcediaApiServer(
     store,
     connectors,
@@ -85,6 +93,7 @@ const api = new AcediaApiServer(
     undefined,
     { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
     agent,
+    inboxSync,
 );
 
 if (fcm) await fcm.load();
@@ -103,14 +112,6 @@ hub.onEvent((event) => {
 
 hub.start();
 
-// The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
-const inboxSync = new InboxSync({
-    connectors,
-    store,
-    emit: (change) => ws.broadcast(InboxSync.toWire(change)),
-    forget: (key) => hub.forget(key),
-});
-const INBOX_SYNC_MS = 60_000;
 const inboxSyncTimer = setInterval(() => void inboxSync.reconcile(), INBOX_SYNC_MS);
 
 console.warn(
