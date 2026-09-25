@@ -163,25 +163,37 @@ describe("dashboard box (ADR-018 R5)", () => {
     const script = DASHBOARD_HTML;
 
     it("loads the box from /api/inbox, not the raw event stream", () => {
-        const block = script.slice(script.indexOf("async function load()"), script.indexOf("function render()"));
+        const block = script.slice(
+            script.indexOf("async function load()"),
+            script.indexOf("function render()"),
+        );
         expect(block).toContain("req('/api/inbox')");
         expect(block).not.toContain("/api/events");
     });
 
     it("opens an item through the open gesture and shows its whole text, escaped", () => {
-        const block = script.slice(script.indexOf("async function toggle"), script.indexOf("async function gesture"));
+        const block = script.slice(
+            script.indexOf("async function toggle"),
+            script.indexOf("async function gesture"),
+        );
         expect(block).toContain("'/api/inbox/'+encodeURIComponent(key)+'/open'");
         expect(block).toContain("esc(data.body)");
     });
 
     it("offers archive, trash, unread and done as buttons that read the key from the card, never a JS argument", () => {
-        const cardBlock = script.slice(script.indexOf("list.innerHTML=shown.map"), script.indexOf("`).join('');") + 1);
+        const cardBlock = script.slice(
+            script.indexOf("list.innerHTML=shown.map"),
+            script.indexOf("`).join('');") + 1,
+        );
         expect(cardBlock).toContain('data-g="archive"');
         expect(cardBlock).toContain('data-g="trash"');
         expect(cardBlock).toContain('data-g="unread"');
         expect(cardBlock).toContain('data-g="done"');
         expect(cardBlock).toContain('onclick="gesture(this,event)"');
-        const g = script.slice(script.indexOf("async function gesture"), script.indexOf("async function gesture") + 400);
+        const g = script.slice(
+            script.indexOf("async function gesture"),
+            script.indexOf("async function gesture") + 400,
+        );
         expect(g).toContain("btn.closest('.card').dataset.key");
         expect(g).toContain("btn.dataset.g");
         expect(g).toContain("'/api/inbox/'+encodeURIComponent(key)+'/'+g");
@@ -193,7 +205,10 @@ describe("dashboard box (ADR-018 R5)", () => {
 
     it("shows Gmail's trash with a restore per row, ids read from the row", () => {
         expect(script).toContain('onclick="openTrash()"');
-        const block = script.slice(script.indexOf("async function openTrash"), script.indexOf("async function restoreTrash") + 400);
+        const block = script.slice(
+            script.indexOf("async function openTrash"),
+            script.indexOf("async function restoreTrash") + 400,
+        );
         expect(block).toContain("req('/api/inbox/trash')");
         expect(block).toContain('data-id="${esc(t.id)}"');
         expect(block).toContain("esc(t.title)");
