@@ -384,3 +384,51 @@ describe("IngestionHub.recoverMissing — what the box lost comes back, quietly"
         expect(received).toEqual(["email-lost"]);
     });
 });
+
+// Live NAS check 2026-09-28: STORAGE_DIR was never set in the image, so dedup lived in the container and
+// died with it; moving it to the volume means one start with no dedup file. That first sweep — like a
+// fresh install's — is the backlog, not news: it fills the box without ringing the phone or the Core.
+describe("IngestionHub — the first sweep without a dedup file is quiet", () => {
+    let hub: IngestionHub;
+    let seenPath: string;
+
+    afterEach(async () => {
+        hub.stop();
+        await fs.rm(seenPath, { force: true });
+    });
+
+    it("flags the first sweep's events as recovered, and later ones as new", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        const poll = vi
+            .fn()
+            .mockResolvedValueOnce([{ ...baseEvent, dedupeKey: "backlog-1" }])
+            .mockResolvedValue([{ ...baseEvent, dedupeKey: "fresh-1" }]);
+        hub = new IngestionHub([{ slug: "github", name: "Mock", poll }], seenPath);
+        await hub.load();
+
+        const received: Array<{ key: string; recovered: boolean }> = [];
+        hub.onEvent((e, meta) =>
+            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
+        );
+        hub.start();
+        await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000, interval: 20 });
+        await hub.pollOne("github");
+
+        expect(received).toEqual([
+            { key: "backlog-1", recovered: true },
+            { key: "fresh-1", recovered: false },
+        ]);
+    });
+
+    it("is not quiet when a dedup file exists", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        await fs.writeFile(seenPath, "{}", "utf-8");
+        hub = new IngestionHub([makeConnector([baseEvent])], seenPath);
+        await hub.load();
+
+        const received: boolean[] = [];
+        hub.onEvent((_e, meta) => received.push(meta?.recovered === true));
+        hub.start();
+        await vi.waitFor(() => expect(received).toEqual([false]), { timeout: 2000, interval: 20 });
+    });
+});

@@ -44,6 +44,8 @@ export class IngestionHub {
     private readonly handlers = new Set<EventHandler>();
     private readonly seen = new Map<string, number>(); // dedupeKey → ts
     private readonly recovering = new Set<string>(); // forgotten by recoverMissing(), not yet re-collected
+    /** No dedup file at load: the first sweep is the backlog (fresh install, storage moved), not news. */
+    private quietFirstSweep = false;
     private readonly health = new Map<string, HealthState>(); // connector slug → poll health
     private readonly seenPath: string;
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
@@ -131,7 +133,9 @@ export class IngestionHub {
             const parsed = JSON.parse(raw) as Record<string, number>;
             for (const [key, ts] of Object.entries(parsed)) this.seen.set(key, ts);
         } catch {
-            // File absent or unreadable — start empty, that's fine
+            // File absent or unreadable — start empty, and keep the first sweep quiet: what it collects
+            // was already there, announcing it would ring the phone for the whole backlog.
+            this.quietFirstSweep = true;
         }
     }
 
@@ -180,7 +184,9 @@ export class IngestionHub {
         this.purgeSeen();
 
         // Initial sweep
-        void this.pollAll();
+        void this.pollAll().finally(() => {
+            this.quietFirstSweep = false;
+        });
 
         this.urgentTimer = setInterval(() => void this.pollUrgent(), URGENT_POLL_MS);
 
@@ -249,7 +255,7 @@ export class IngestionHub {
 
         this.seen.set(event.dedupeKey, event.ts);
         void this.saveSeen();
-        const recovered = this.recovering.delete(event.dedupeKey);
+        const recovered = this.recovering.delete(event.dedupeKey) || this.quietFirstSweep;
         this.notify(event, { recovered });
     }
 
