@@ -239,10 +239,14 @@ describe("IngestionHub", () => {
             hub = new IngestionHub([connector], seenPath);
             hub.start();
 
-            await new Promise((r) => setTimeout(r, 50));
-
-            const raw = await fs.readFile(seenPath, "utf-8");
-            expect(JSON.parse(raw)).toEqual({ [baseEvent.dedupeKey]: baseEvent.ts });
+            // saveSeen() is fire-and-forget: wait for the write itself, not a fixed delay (slow CI runners).
+            await vi.waitFor(
+                async () => {
+                    const raw = await fs.readFile(seenPath, "utf-8");
+                    expect(JSON.parse(raw)).toEqual({ [baseEvent.dedupeKey]: baseEvent.ts });
+                },
+                { timeout: 2000, interval: 20 },
+            );
         });
 
         it("load() restores dedup state so a previously-seen event isn't redispatched after restart", async () => {
