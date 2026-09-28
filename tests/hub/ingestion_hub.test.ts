@@ -322,3 +322,65 @@ describe("IngestionHub.forget", () => {
         expect(seen).toEqual(["email-a", "email-a"]);
     });
 });
+
+// Live NAS check 2026-09-28: after a restart the box was empty while dedup still said "seen", so the
+// mail already in the inbox never came back. recoverMissing() re-collects what the box lost — quietly:
+// it is not new, the Core already holds it and the phone must not ring for it.
+describe("IngestionHub.recoverMissing — what the box lost comes back, quietly", () => {
+    let hub: IngestionHub;
+    let seenPath: string;
+
+    afterEach(async () => {
+        hub.stop();
+        await fs.rm(seenPath, { force: true });
+    });
+
+    const mail = (id: string): AcediaEvent => ({
+        ...baseEvent,
+        source: "email",
+        dedupeKey: `email-${id}`,
+    });
+
+    it("forgets only the seen keys the box no longer holds, and marks their return as recovered", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        const now = Date.now();
+        await fs.writeFile(
+            seenPath,
+            JSON.stringify({ "email-kept": now, "email-lost": now }),
+            "utf-8",
+        );
+
+        const connector = makeConnector([mail("kept"), mail("lost"), mail("new")]);
+        hub = new IngestionHub([connector], seenPath);
+        await hub.load();
+        expect(hub.recoverMissing((key) => key === "email-kept")).toBe(1);
+
+        const received: Array<{ key: string; recovered: boolean }> = [];
+        hub.onEvent((e, meta) =>
+            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
+        );
+        hub.start();
+
+        await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 2000, interval: 20 });
+        expect(received).toEqual([
+            { key: "email-lost", recovered: true },
+            { key: "email-new", recovered: false },
+        ]);
+    });
+
+    it("recovers a key once: its next sighting is ordinary dedup again", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        await fs.writeFile(seenPath, JSON.stringify({ "email-lost": Date.now() }), "utf-8");
+
+        const connector = makeConnector([mail("lost")]);
+        hub = new IngestionHub([connector], seenPath);
+        await hub.load();
+        hub.recoverMissing(() => false);
+
+        const received: string[] = [];
+        hub.onEvent((e) => received.push(e.dedupeKey));
+        await hub.pollOne("github");
+        await hub.pollOne("github");
+        expect(received).toEqual(["email-lost"]);
+    });
+});
