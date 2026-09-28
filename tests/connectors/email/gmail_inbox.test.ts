@@ -274,3 +274,35 @@ describe("GmailConnector.inboxGesture — Master's own gestures, applied in Gmai
         expect(calls.some((c) => c.url.includes("/messages/t1/untrash"))).toBe(true);
     });
 });
+
+// Live NAS check 2026-09-28: listTrash read each trashed mail one after the other — 18.7 s for a real
+// trash, past the Core's proxy timeout, so the panel's Corbeille answered 502.
+describe("GmailConnector.listTrash — reads the trash in parallel, in Gmail's order", () => {
+    it("fetches several trashed mails at once and keeps their order", async () => {
+        const ids = ["t1", "t2", "t3", "t4", "t5", "t6"];
+        const { fetchImpl } = fakeGmail(ids.map((id) => ({ id, labels: ["TRASH"], subject: id })));
+        const base = fetchImpl.getMockImplementation()!;
+        let inFlight = 0;
+        let maxInFlight = 0;
+        fetchImpl.mockImplementation(async (url: string, init?: { method?: string }) => {
+            const u = decodeURIComponent(String(url));
+            if (u.includes("/messages?q=") && u.includes("in:trash"))
+                return {
+                    ok: true,
+                    json: () => Promise.resolve({ messages: ids.map((id) => ({ id })) }),
+                };
+            if (!u.includes("/messages/")) return base(url, init);
+            inFlight++;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            await new Promise((r) => setTimeout(r, 10));
+            inFlight--;
+            return base(url, init);
+        });
+        vi.stubGlobal("fetch", fetchImpl);
+
+        const trash = await new GmailConnector().listTrash();
+
+        expect(trash.map((t) => t.id)).toEqual(ids);
+        expect(maxInFlight).toBeGreaterThan(1);
+    });
+});

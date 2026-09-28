@@ -13,7 +13,12 @@ function resolveSeenPath(): string {
     return path.join(storageDir, "dedup_seen.json");
 }
 
-type EventHandler = (event: AcediaEvent) => void;
+/** `recovered`: the box lost this item and it came back (recoverMissing) — not new to anyone downstream. */
+export interface DispatchMeta {
+    recovered: boolean;
+}
+
+type EventHandler = (event: AcediaEvent, meta?: DispatchMeta) => void;
 
 export interface ConnectorHealth {
     slug: string;
@@ -38,6 +43,9 @@ interface HealthState {
 export class IngestionHub {
     private readonly handlers = new Set<EventHandler>();
     private readonly seen = new Map<string, number>(); // dedupeKey → ts
+    private readonly recovering = new Set<string>(); // forgotten by recoverMissing(), not yet re-collected
+    /** No dedup file at load: the first sweep is the backlog (fresh install, storage moved), not news. */
+    private quietFirstSweep = false;
     private readonly health = new Map<string, HealthState>(); // connector slug → poll health
     private readonly seenPath: string;
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
@@ -86,6 +94,25 @@ export class IngestionHub {
         if (this.seen.delete(key)) void this.saveSeen();
     }
 
+    /**
+     * Forgets every seen key the box no longer holds so the next collection takes it again, and flags its
+     * return as recovered (live check 2026-09-28): the box used to be memory-only while this dedup was on
+     * disk, so a restart left the inbox's mail "seen" and never shown. A recovered item is not news — the
+     * caller stores it without re-broadcasting or pushing it. Call after load(), before start(). Returns
+     * the number of keys forgotten; one that the source no longer has simply never comes back (R8).
+     */
+    recoverMissing(isHeld: (key: string) => boolean): number {
+        let forgotten = 0;
+        for (const key of [...this.seen.keys()]) {
+            if (isHeld(key)) continue;
+            this.seen.delete(key);
+            this.recovering.add(key);
+            forgotten++;
+        }
+        if (forgotten > 0) void this.saveSeen();
+        return forgotten;
+    }
+
     /** Re-dispatches a user-restored event, bypassing both dedup and the guard (the user's decision wins). */
     dispatchRestored(event: AcediaEvent): void {
         this.seen.set(event.dedupeKey, event.ts);
@@ -106,7 +133,9 @@ export class IngestionHub {
             const parsed = JSON.parse(raw) as Record<string, number>;
             for (const [key, ts] of Object.entries(parsed)) this.seen.set(key, ts);
         } catch {
-            // File absent or unreadable — start empty, that's fine
+            // File absent or unreadable — start empty, and keep the first sweep quiet: what it collects
+            // was already there, announcing it would ring the phone for the whole backlog.
+            this.quietFirstSweep = true;
         }
     }
 
@@ -155,7 +184,9 @@ export class IngestionHub {
         this.purgeSeen();
 
         // Initial sweep
-        void this.pollAll();
+        void this.pollAll().finally(() => {
+            this.quietFirstSweep = false;
+        });
 
         this.urgentTimer = setInterval(() => void this.pollUrgent(), URGENT_POLL_MS);
 
@@ -224,13 +255,14 @@ export class IngestionHub {
 
         this.seen.set(event.dedupeKey, event.ts);
         void this.saveSeen();
-        this.notify(event);
+        const recovered = this.recovering.delete(event.dedupeKey) || this.quietFirstSweep;
+        this.notify(event, { recovered });
     }
 
-    private notify(event: AcediaEvent): void {
+    private notify(event: AcediaEvent, meta: DispatchMeta = { recovered: false }): void {
         for (const handler of this.handlers) {
             try {
-                handler(event);
+                handler(event, meta);
             } catch {
                 /* never throw from dispatch */
             }

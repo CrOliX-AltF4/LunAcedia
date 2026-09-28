@@ -16,6 +16,8 @@ import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
+/** Trashed mails read at once by listTrash() — fast enough, gentle on the Gmail API quota. */
+const TRASH_READ_CONCURRENCY = 8;
 
 interface MessageHeader {
     name: string;
@@ -314,30 +316,41 @@ export class GmailConnector implements IConnector {
     async listTrash(): Promise<Array<{ id: string; title: string; from: string; ts: number }>> {
         const token = await this.accessToken();
         if (!token) return [];
-        const ids = await this.listIds(token, "in:trash");
-        const out: Array<{ id: string; title: string; from: string; ts: number }> = [];
-        for (const id of ids) {
-            try {
-                const resp = await fetch(
-                    `${GMAIL_API}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
-                    { headers: { Authorization: `Bearer ${token}` } },
-                );
-                if (!resp.ok) continue;
-                const msg = (await resp.json()) as GmailMessageMeta;
-                const h = (n: string) =>
-                    msg.payload.headers.find((x) => x.name.toLowerCase() === n.toLowerCase())
-                        ?.value ?? "";
-                out.push({
-                    id,
-                    title: h("Subject") || "(no subject)",
-                    from: h("From"),
-                    ts: parseInt(msg.internalDate, 10),
-                });
-            } catch {
-                // skip one unreadable mail rather than failing the whole list
+        const ids = [...(await this.listIds(token, "in:trash"))];
+        // In parallel, a few at a time (live check 2026-09-28: one by one took 18.7 s, past the Core's
+        // proxy timeout). Gmail's order is kept; an unreadable mail is skipped, not fatal.
+        type TrashItem = { id: string; title: string; from: string; ts: number };
+        const results: Array<TrashItem | null> = new Array<TrashItem | null>(ids.length).fill(null);
+        let next = 0;
+        const worker = async (): Promise<void> => {
+            while (next < ids.length) {
+                const index = next++;
+                const id = ids[index]!;
+                try {
+                    const resp = await fetch(
+                        `${GMAIL_API}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+                        { headers: { Authorization: `Bearer ${token}` } },
+                    );
+                    if (!resp.ok) continue;
+                    const msg = (await resp.json()) as GmailMessageMeta;
+                    const h = (n: string) =>
+                        msg.payload.headers.find((x) => x.name.toLowerCase() === n.toLowerCase())
+                            ?.value ?? "";
+                    results[index] = {
+                        id,
+                        title: h("Subject") || "(no subject)",
+                        from: h("From"),
+                        ts: parseInt(msg.internalDate, 10),
+                    };
+                } catch {
+                    // skip one unreadable mail rather than failing the whole list
+                }
             }
-        }
-        return out;
+        };
+        await Promise.all(
+            Array.from({ length: Math.min(TRASH_READ_CONCURRENCY, ids.length) }, worker),
+        );
+        return results.filter((r): r is TrashItem => r !== null);
     }
 
     /** Takes a mail out of the trash (Gmail keeps trashed mail 30 days). */

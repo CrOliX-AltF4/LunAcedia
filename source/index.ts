@@ -9,7 +9,7 @@ import type { IConnector } from "./connectors/connector_interface.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
-import { EventStore } from "./store/event_store.js";
+import { EventStore, defaultEventStorePath } from "./store/event_store.js";
 import { FcmSender } from "./push/fcm_sender.js";
 import { createAIProvider } from "./ai/create_ai_provider.js";
 import { ActionTierStore } from "./actions/action_tier_store.js";
@@ -61,7 +61,8 @@ const guardPipeline = new GuardPipeline({
     vipSenders: () => emailClassificationStore.getAll().vipSenders,
 });
 
-const store = new EventStore();
+// The box (ADR-018) is persisted next to dedup — both must survive a restart together.
+const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
 const ai = createAIProvider();
 const hub = new IngestionHub(connectors, undefined, guardPipeline);
@@ -99,12 +100,20 @@ const api = new AcediaApiServer(
 if (fcm) await fcm.load();
 await tierStore.load();
 await hub.load();
+await store.load();
+// Whatever dedup still calls "seen" but the box lost (first run with a persisted box, an unreadable
+// file) is collected again, quietly — see the onEvent handler below.
+const recovered = hub.recoverMissing((key) => store.has(key));
+if (recovered > 0)
+    console.warn(`[LunAcedia] Box: ${recovered} seen item(s) missing, re-collecting`);
 
 ws.start(wsPort);
 api.start(httpPort);
 
-hub.onEvent((event) => {
+hub.onEvent((event, meta) => {
     store.push(event);
+    // A recovered item is back in the box only: the Core already holds it and the phone must not ring.
+    if (meta?.recovered) return;
     ws.broadcast(event);
     // The inbox now holds read mail too (ADR-018 D2): only something new and unread is pushed.
     if (!event.read) void fcm?.send(event);
@@ -120,7 +129,7 @@ console.warn(
 if (fcm) console.warn("[LunAcedia] FCM push enabled");
 
 async function flushGuards(): Promise<void> {
-    await Promise.all([guardJournal.flush(), guardStats.flush()]);
+    await Promise.all([guardJournal.flush(), guardStats.flush(), store.flush()]);
 }
 
 process.on("SIGINT", () => {
