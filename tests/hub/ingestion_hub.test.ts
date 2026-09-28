@@ -239,10 +239,14 @@ describe("IngestionHub", () => {
             hub = new IngestionHub([connector], seenPath);
             hub.start();
 
-            await new Promise((r) => setTimeout(r, 50));
-
-            const raw = await fs.readFile(seenPath, "utf-8");
-            expect(JSON.parse(raw)).toEqual({ [baseEvent.dedupeKey]: baseEvent.ts });
+            // saveSeen() is fire-and-forget: wait for the write itself, not a fixed delay (slow CI runners).
+            await vi.waitFor(
+                async () => {
+                    const raw = await fs.readFile(seenPath, "utf-8");
+                    expect(JSON.parse(raw)).toEqual({ [baseEvent.dedupeKey]: baseEvent.ts });
+                },
+                { timeout: 2000, interval: 20 },
+            );
         });
 
         it("load() restores dedup state so a previously-seen event isn't redispatched after restart", async () => {
@@ -285,5 +289,36 @@ describe("IngestionHub", () => {
             await new Promise((r) => setTimeout(r, 50));
             expect(received).toHaveLength(1);
         });
+    });
+});
+
+// ADR-018 R8 — an item removed because its source object is gone must come back if the object does
+// (a mail restored from the trash, a GitHub thread with new activity).
+describe("IngestionHub.forget", () => {
+    it("lets a forgotten key be dispatched again", async () => {
+        const e = {
+            type: "email.received" as const,
+            ts: Date.now(),
+            source: "email" as const,
+            title: "t",
+            priority: "normal" as const,
+            dedupeKey: "email-a",
+        };
+        const polls = [[e], [e]];
+        const connector = {
+            slug: "email" as const,
+            name: "Gmail",
+            poll: async () => polls.shift() ?? [],
+        };
+        const hub = new IngestionHub(
+            [connector],
+            path.join(os.tmpdir(), `seen-${Date.now()}-${Math.random()}.json`),
+        );
+        const seen: string[] = [];
+        hub.onEvent((ev) => seen.push(ev.dedupeKey));
+        await hub.pollOne("email");
+        hub.forget("email-a");
+        await hub.pollOne("email");
+        expect(seen).toEqual(["email-a", "email-a"]);
     });
 });

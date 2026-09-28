@@ -8,8 +8,11 @@ import type { EventStore } from "../store/event_store.js";
 import type { FcmSender } from "../push/fcm_sender.js";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import { formatProposalsPrompt } from "../ai/ai_provider.js";
-import { formatIntentPrompt, parseIntentResponse } from "../ai/intent_parser.js";
-import { createAIProvider } from "../ai/create_ai_provider.js";
+import { createAIProvider, loadSystemPrompt } from "../ai/create_ai_provider.js";
+import { AgentService } from "../agent/agent_service.js";
+import type { InboxSync } from "../hub/inbox_sync.js";
+import { InboxRoutes } from "./inbox_routes.js";
+import { runAgent, type AgentRequest, type AgentResult } from "../agent/agent_loop.js";
 import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
 import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
 import type { TimeSlot } from "../connectors/calendar/free_slots.js";
@@ -111,10 +114,16 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
- *   POST /api/chat                 body: { text: string }  (requires AI_PROVIDER != none)
- *   POST /api/intent               body: { text: string }  → parses free text into a
- *                                  structured action and dispatches it via the same tier
- *                                  gate as POST /api/actions (requires AI_PROVIDER != none)
+ *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly? }  → the agent
+ *                                  (ADR-017): reads the events, acts only through the tier gate;
+ *                                  versioned { version, status, summary, items, actions, steps }
+ *   GET  /api/agent/journal        the last 50 agent runs (who asked, steps, actions)
+ *   GET|PUT /api/agent/settings    { enabled, writes } — the agent's switch (off = no tool is ever
+ *                                  called) and whether it may write (off = triage only, default)
+ *   POST /api/chat                 body: { text, context? } → { response, agent? } — the agent's
+ *                                  answer; plain dialogue with no tool when the agent is off
+ *   POST /api/intent               body: { text } → the agent limited to one action, answered as
+ *                                  { matched, connector, action, status, id?/reason? }
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
  *   GET  /api/proposals            suggest next actions for unread urgent/conflict items (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
@@ -140,7 +149,82 @@ export class AcediaApiServer {
         private readonly googleTokenStore?: GoogleTokenStore,
         private readonly cooldown: ActionCooldownTracker = new ActionCooldownTracker(),
         private readonly guards?: GuardServices,
-    ) {}
+        // The agent's switch and journal (ADR-017 M5). In memory unless index.ts gives it a file.
+        private readonly agent: AgentService = new AgentService(),
+        // The box and the sync rule (ADR-018) — absent in tests that do not exercise them.
+        inbox?: InboxSync,
+    ) {
+        this.inboxSync = inbox ?? null;
+        this.inboxRoutes = inbox
+            ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
+            : null;
+    }
+
+    private readonly inboxSync: InboxSync | null;
+
+    private readonly inboxRoutes: InboxRoutes | null;
+
+    private agentSettings(): { enabled: boolean; writes: boolean } {
+        return { enabled: this.agent.isEnabled(), writes: this.agent.writesEnabled() };
+    }
+
+    /** One agent run over this server's store, calendar and tier gate, journaled (ADR-017). */
+    private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
+        return this.agent.run(req, () =>
+            runAgent(req, {
+                provider: this.ai,
+                read: {
+                    store: this.store,
+                    busyIntervals: () => this.calendarBusyIntervals(),
+                    now: () => Date.now(),
+                    // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
+                    markRead: async (event) => {
+                        const connector = this.connectors.find((c) => c.slug === event.source);
+                        if (!connector?.inboxGesture) return;
+                        const r = await connector.inboxGesture("read", event);
+                        if (r.change && this.inboxSync) {
+                            this.inboxSync.applyLocal({
+                                op: r.change,
+                                key: event.dedupeKey,
+                                source: event.source,
+                            });
+                        }
+                    },
+                },
+                dispatch: (connector, action, capToConfirm) =>
+                    this.dispatchAction(connector, action, capToConfirm),
+                persona: loadSystemPrompt(),
+                allowWrites: this.agent.writesEnabled(),
+            }),
+        );
+    }
+
+    /** Reads { text, context?, callerId? } — null when the body is not usable. */
+    private async readAgentRequest(
+        req: http.IncomingMessage,
+    ): Promise<AgentRequest | "invalid_json" | null> {
+        let body: unknown;
+        try {
+            body = await readBody(req);
+        } catch {
+            return "invalid_json";
+        }
+        const b = (body ?? {}) as Record<string, unknown>;
+        const text = b["text"];
+        if (typeof text !== "string" || text.trim().length === 0) return null;
+        const context = Array.isArray(b["context"])
+            ? b["context"].filter((c): c is string => typeof c === "string")
+            : undefined;
+        const callerId =
+            typeof b["callerId"] === "string" && b["callerId"].trim() ? b["callerId"] : undefined;
+        if (callerId) console.warn(`[API] agent request from ${callerId}`);
+        return {
+            text: text.trim(),
+            ...(context && { context }),
+            ...(callerId && { callerId }),
+            ...(b["readOnly"] === true && { readOnly: true }),
+        };
+    }
 
     /** GET/PUT /api/guard/rules · GET /api/guard/journal · POST /api/guard/journal/restore · POST /api/guard/preview */
     private async handleGuard(
@@ -287,13 +371,18 @@ export class AcediaApiServer {
     }
 
     /**
-     * Connector lookup + tier check, shared by POST /api/actions and POST /api/intent — the
+     * Connector lookup + tier check, shared by POST /api/actions and the agent — the
      * one place that decides auto/pending/refused, so an intent-parsed action is gated by
      * exactly the same rule a directly-submitted one is, not a parallel copy of it.
+     */
+    /**
+     * The tier gate. `capToConfirm` holds an auto-tier action for the user instead of executing it —
+     * the agent sets it once it has read third-party content (ADR-017 D2).
      */
     private async dispatchAction(
         connectorName: string,
         action: ConnectorAction,
+        capToConfirm = false,
     ): Promise<
         | { status: "not_found" }
         | { status: "unsupported" }
@@ -316,7 +405,7 @@ export class AcediaApiServer {
                 reason: `'${action.kind}' is set to manual — not executable via this endpoint`,
             };
         }
-        if (tier === "confirm") {
+        if (tier === "confirm" || (capToConfirm && tier === "auto")) {
             const pending = this.pendingStore.create(connectorName, action);
             return { status: "pending", id: pending.id };
         }
@@ -675,6 +764,9 @@ export class AcediaApiServer {
             return json(res, 200, this.emailClassificationStore.getAll());
         }
 
+        // The box: Master's gestures at the source, trash, journal (ADR-018 R1/R3)
+        if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
+
         // Ingestion guards (chantier A): /api/guard/{rules,journal,journal/restore,preview}
         if (path.startsWith("/api/guard/")) {
             if (!this.guards) return json(res, 503, { error: "Guards not configured" });
@@ -728,30 +820,74 @@ export class AcediaApiServer {
             return json(res, 200, { ok: true, provider: this.ai.mode });
         }
 
-        // POST /api/chat
-        if (method === "POST" && path === "/api/chat") {
+        // POST /api/agent — the agent (ADR-017): reads what LunAcedia holds, acts through the tier
+        // gate, bounded in steps/time/actions. Versioned result: summary, items, actions, steps.
+        if (method === "POST" && path === "/api/agent") {
             if (this.ai.mode === "none") {
                 return json(res, 503, { error: "AI_PROVIDER not configured" });
             }
+            if (!this.agent.isEnabled()) return json(res, 503, { error: "Agent disabled" });
+            const agentReq = await this.readAgentRequest(req);
+            if (agentReq === "invalid_json") return json(res, 400, { error: "Invalid JSON" });
+            if (!agentReq) return json(res, 400, { error: "Body must be { text: string }" });
+            const result = await this.runAgentRequest(agentReq);
+            const status =
+                result.status === "error" ? 502 : result.status === "unavailable" ? 503 : 200;
+            return json(res, status, result);
+        }
+
+        // GET /api/agent/journal — the last 50 runs (law 3: what the agent did, and why)
+        if (method === "GET" && path === "/api/agent/journal") {
+            return json(res, 200, this.agent.journal());
+        }
+
+        // GET/PUT /api/agent/settings — the agent's switch (law 3: off = no tool is ever called)
+        if (method === "GET" && path === "/api/agent/settings") {
+            return json(res, 200, this.agentSettings());
+        }
+        if (method === "PUT" && path === "/api/agent/settings") {
             let body: unknown;
             try {
                 body = await readBody(req);
             } catch {
                 return json(res, 400, { error: "Invalid JSON" });
             }
-            const text = (body as Record<string, unknown>)["text"];
-            if (typeof text !== "string" || text.trim().length === 0) {
-                return json(res, 400, { error: "Body must be { text: string }" });
+            const b = (body ?? {}) as Record<string, unknown>;
+            const enabled = b["enabled"];
+            const writes = b["writes"];
+            const bad = (v: unknown) => v !== undefined && typeof v !== "boolean";
+            if (bad(enabled) || bad(writes) || (enabled === undefined && writes === undefined)) {
+                return json(res, 400, {
+                    error: "Body must be { enabled?: boolean, writes?: boolean }",
+                });
             }
-            const callerId = (body as Record<string, unknown>)["callerId"];
-            if (typeof callerId === "string" && callerId.trim()) {
-                console.warn(`[API] chat from ${callerId}`);
+            if (typeof enabled === "boolean") await this.agent.setEnabled(enabled);
+            if (typeof writes === "boolean") await this.agent.setWrites(writes);
+            return json(res, 200, this.agentSettings());
+        }
+
+        // POST /api/chat — kept for LunAvaritia (reads `response`): answered by the agent; with the
+        // agent off (or a provider without tool calling), plain dialogue with no tool at all.
+        if (method === "POST" && path === "/api/chat") {
+            if (this.ai.mode === "none") {
+                return json(res, 503, { error: "AI_PROVIDER not configured" });
             }
-            const context = (body as Record<string, unknown>)["context"];
-            const query =
-                Array.isArray(context) && context.length > 0
-                    ? `Context:\n${context.filter((c) => typeof c === "string").join("\n")}\n\n${text.trim()}`
-                    : text.trim();
+            const agentReq = await this.readAgentRequest(req);
+            if (agentReq === "invalid_json") return json(res, 400, { error: "Invalid JSON" });
+            if (!agentReq) return json(res, 400, { error: "Body must be { text: string }" });
+
+            if (this.agent.isEnabled() && this.ai.chatWithTools) {
+                const result = await this.runAgentRequest(agentReq);
+                if (result.status === "error") {
+                    console.error("[API] chat (agent) error:", result.error);
+                    return json(res, 502, { error: "AI provider error" });
+                }
+                return json(res, 200, { response: result.summary, agent: result });
+            }
+
+            const query = agentReq.context?.length
+                ? `Context:\n${agentReq.context.join("\n")}\n\n${agentReq.text}`
+                : agentReq.text;
             try {
                 const response = await this.ai.chat(query);
                 return json(res, 200, { response });
@@ -761,60 +897,36 @@ export class AcediaApiServer {
             }
         }
 
-        // POST /api/intent — translates free text (a voice command relayed as text, "crée
-        // une tâche pour rappeler le rendez-vous") into a structured action and dispatches it
-        // through the exact same tier gate as POST /api/actions. Never trusts the AI's JSON
-        // directly — parseIntentResponse() re-validates every field before dispatchAction()
-        // ever sees it, and merge_pr is refused unconditionally regardless of what the model
-        // outputs (see intent_parser.ts).
+        // POST /api/intent — the agent limited to one action, answered in the historical shape
+        // ({ matched, connector, action, status, id?/reason? }). Every action still goes through
+        // the tier gate; merge_pr is never built from model output (capability manifest).
         if (method === "POST" && path === "/api/intent") {
             if (this.ai.mode === "none") {
                 return json(res, 503, { error: "AI_PROVIDER not configured" });
             }
-            let body: unknown;
-            try {
-                body = await readBody(req);
-            } catch {
-                return json(res, 400, { error: "Invalid JSON" });
+            if (!this.agent.isEnabled()) return json(res, 503, { error: "Agent disabled" });
+            const agentReq = await this.readAgentRequest(req);
+            if (agentReq === "invalid_json") return json(res, 400, { error: "Invalid JSON" });
+            if (!agentReq) return json(res, 400, { error: "Body must be { text: string }" });
+
+            const result = await this.runAgentRequest({ ...agentReq, maxActions: 1 });
+            if (result.status === "unavailable") {
+                return json(res, 503, { error: result.error ?? "Agent unavailable" });
             }
-            const text = (body as Record<string, unknown>)["text"];
-            if (typeof text !== "string" || text.trim().length === 0) {
-                return json(res, 400, { error: "Body must be { text: string }" });
-            }
-            const intentCallerId = (body as Record<string, unknown>)["callerId"];
-            if (typeof intentCallerId === "string" && intentCallerId.trim()) {
-                console.warn(`[API] intent from ${intentCallerId}`);
-            }
-            let raw: string;
-            try {
-                raw = await this.ai.chat(formatIntentPrompt(text.trim()));
-            } catch (e) {
-                console.error("[API] intent error:", (e as Error).message);
+            if (result.status === "error") {
+                console.error("[API] intent error:", result.error);
                 return json(res, 502, { error: "AI provider error" });
             }
-            const intent = parseIntentResponse(raw);
-            if (!intent) return json(res, 200, { matched: false });
-
-            const result = await this.dispatchAction(intent.connector, intent.action);
-            if (result.status === "not_found") return json(res, 200, { matched: false });
-            if (result.status === "unsupported") return json(res, 200, { matched: false });
-            if (result.status === "refused")
-                return json(res, 200, {
-                    matched: true,
-                    ...intent,
-                    status: "refused",
-                    reason: result.reason,
-                });
-            if (result.status === "pending")
-                return json(res, 200, {
-                    matched: true,
-                    ...intent,
-                    status: "pending",
-                    id: result.id,
-                });
-            if (result.status === "error")
-                return json(res, 200, { matched: true, ...intent, status: "error" });
-            return json(res, 200, { matched: true, ...intent, status: "executed" });
+            const taken = result.actions.find((a) => a.status !== "invalid");
+            if (!taken || !taken.action) return json(res, 200, { matched: false });
+            return json(res, 200, {
+                matched: true,
+                connector: taken.connector,
+                action: taken.action,
+                status: taken.status,
+                ...(taken.id && { id: taken.id }),
+                ...(taken.reason && { reason: taken.reason }),
+            });
         }
 
         // GET /api/digest

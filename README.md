@@ -52,7 +52,7 @@ HA     ──┘
 
               Actions back: 17 kinds across Gmail/Calendar/Tasks/GitHub, gated by autonomy tier
               AI butler: openai / ollama (standalone) or delegate to Natsume
-              Voice/chat commands: free text -> structured action via /api/intent
+              Agent: reads your events, acts through the tier gate (/api/agent)
 ```
 
 **Headless by design** — LunAcedia exposes a REST API and a WebSocket stream. Clients are independent: the Android app, the Natsume bridge, and the built-in dashboard all talk to the same API. No client is required for LunAcedia to run.
@@ -69,11 +69,11 @@ HA     ──┘
 
 `merge_pr` is hardcoded to `manual` and cannot be relaxed — merging is always a human action.
 
-**Voice/chat commands** — `POST /api/intent` turns free text ("crée-moi une tâche pour rappeler le rendez-vous") into a structured action and dispatches it through the same tier gate as `POST /api/actions`. Requires `AI_PROVIDER != none`; the model's JSON reply is re-validated field by field before anything executes.
+**Agent** — `POST /api/agent` answers a request in natural language ("quels mails urgents je n'ai pas lus ?", "archive le premier") with native tool calling: it searches the events LunAcedia holds (unread mail and everything received since it started), reads one in full, finds free slots, and acts **only** through the same tier gate as `POST /api/actions`. Every tool argument is re-validated against the capability manifest (`source/capabilities/`); `merge_pr` is never built from model output; once the agent has read third-party text (a mail body…), every action it proposes is held for confirmation even if its tier is `auto`. Bounded to 6 steps, 20 s and 3 actions per request. The switch is `GET|PUT /api/agent/settings` (off = no tool is ever called) and `GET /api/agent/journal` lists the last 50 runs. `POST /api/chat` (LunAvaritia) and `POST /api/intent` (one action) are answered by the same agent. Requires `AI_PROVIDER != none` and a model with tool calling (OpenAI; Ollama with a tool-capable model).
 
 **Calendar conflict detection & rescheduling** — overlapping timed events emit a `calendar.conflict` entry automatically; `GET /api/calendar/free-slots` computes open gaps deterministically (no LLM); `GET /api/proposals` names an actual free slot when proposing a fix for a conflict.
 
-**AI butler** — Optional synthesis layer: `openai` or `ollama` for standalone use, `natsume` to delegate to Natsume Core with shared LTM and personality. Also powers `GET /api/proposals` (suggests next actions for urgent/conflict items) and `POST /api/intent`.
+**AI butler** — LunAcedia's own LLM (`openai` or `ollama`), configured from the dashboard's onboarding screen. It powers the agent above, `GET /api/digest` and `GET /api/proposals` (suggests next actions for urgent/conflict items). Natsume's Core never acts as LunAcedia's LLM: it delegates requests to the agent instead (ADR-008 D2).
 
 **Push notifications** — FCM: register Android tokens, filter by priority, deliver via Firebase
 
@@ -95,7 +95,7 @@ GITHUB_WATCHED_REPOS=*
 RSS_ENABLED=true
 RSS_FEEDS='["https://hnrss.org/frontpage"]'
 
-AI_PROVIDER=none   # events and actions work — /api/chat and /api/digest return 503
+AI_PROVIDER=none   # events and actions work — /api/agent, /api/chat and /api/digest return 503
 ```
 
 ```bash
@@ -105,7 +105,7 @@ npm start
 # → Dashboard   :4001   — open in browser for visual event feed
 ```
 
-`AI_PROVIDER=none` (default) means all connectors, REST, WebSocket, actions, and the dashboard work normally — only the `/api/chat` and `/api/digest` endpoints return `503 AI not configured`. Set `AI_PROVIDER=openai` or `AI_PROVIDER=ollama` to enable those without Natsume.
+`AI_PROVIDER=none` (default) means all connectors, REST, WebSocket, actions, and the dashboard work normally — only the `/api/agent`, `/api/chat`, `/api/intent` and `/api/digest` endpoints return `503 AI not configured`. Set `AI_PROVIDER=openai` or `AI_PROVIDER=ollama` to enable those without Natsume.
 
 ### Clients
 

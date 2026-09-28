@@ -20,6 +20,8 @@ import { GuardRulesStore } from "./guards/guard_rules_store.js";
 import { GuardJournal } from "./guards/guard_journal.js";
 import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
+import { AgentService, defaultAgentSettingsPath } from "./agent/agent_service.js";
+import { InboxSync } from "./hub/inbox_sync.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -66,6 +68,17 @@ const hub = new IngestionHub(connectors, undefined, guardPipeline);
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
 const pendingStore = new PendingActionStore();
+// The agent's switch (ADR-017 M5) — loaded before the API serves anything.
+const agent = new AgentService(defaultAgentSettingsPath());
+await agent.load();
+// The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
+const inboxSync = new InboxSync({
+    connectors,
+    store,
+    emit: (change) => ws.broadcast(InboxSync.toWire(change)),
+    forget: (key) => hub.forget(key),
+});
+const INBOX_SYNC_MS = 60_000;
 const api = new AcediaApiServer(
     store,
     connectors,
@@ -79,6 +92,8 @@ const api = new AcediaApiServer(
     googleTokenStore,
     undefined,
     { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
+    agent,
+    inboxSync,
 );
 
 if (fcm) await fcm.load();
@@ -91,10 +106,13 @@ api.start(httpPort);
 hub.onEvent((event) => {
     store.push(event);
     ws.broadcast(event);
-    void fcm?.send(event);
+    // The inbox now holds read mail too (ADR-018 D2): only something new and unread is pushed.
+    if (!event.read) void fcm?.send(event);
 });
 
 hub.start();
+
+const inboxSyncTimer = setInterval(() => void inboxSync.reconcile(), INBOX_SYNC_MS);
 
 console.warn(
     `[LunAcedia] Running — ${connectors.map((c) => c.name).join(", ") || "no connectors"} — AI: ${ai.mode}`,
@@ -107,6 +125,7 @@ async function flushGuards(): Promise<void> {
 
 process.on("SIGINT", () => {
     hub.stop();
+    clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();
     // Pending journal / counter writes must land before the process goes away.
@@ -114,6 +133,7 @@ process.on("SIGINT", () => {
 });
 process.on("SIGTERM", () => {
     hub.stop();
+    clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();
     // Pending journal / counter writes must land before the process goes away.

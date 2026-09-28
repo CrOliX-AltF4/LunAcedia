@@ -1,4 +1,5 @@
 import type { ConnectorAction } from "./connector_action.js";
+import { actionCapabilities } from "../capabilities/capability_manifest.js";
 
 export type ActionKind = ConnectorAction["kind"];
 
@@ -28,28 +29,12 @@ export const IMMUTABLE_TIERS: Partial<ActionTierConfig> = {
  * Fail-safe defaults. Trivial/reversible/no-external-effect actions default to "confirm" too
  * (not "auto") on first install — "auto" is something CrOliX opts into per action kind via
  * PATCH /api/config/tiers or the dashboard, never assumed. merge_pr is fixed at "manual"
- * regardless (see IMMUTABLE_TIERS).
+ * regardless (see IMMUTABLE_TIERS). Declared per action in the capability manifest
+ * (capabilities/capability_manifest.ts) — derived here, never listed twice.
  */
-export const DEFAULT_ACTION_TIERS: ActionTierConfig = {
-    reply: "confirm",
-    archive_email: "confirm",
-    delete_email: "manual",
-    mark_email_read: "confirm",
-    mark_email_unread: "confirm",
-    create_event: "confirm",
-    update_event: "confirm",
-    delete_event: "confirm",
-    create_task: "confirm",
-    complete_task: "confirm",
-    delete_task: "confirm",
-    comment_issue: "confirm",
-    add_label: "confirm",
-    create_issue: "confirm",
-    close_issue: "confirm",
-    open_pr: "confirm",
-    merge_pr: "manual",
-    mark_notification_read: "confirm",
-};
+export const DEFAULT_ACTION_TIERS: ActionTierConfig = Object.fromEntries(
+    actionCapabilities().map((a) => [a.kind, a.defaultTier]),
+) as ActionTierConfig;
 
 /**
  * How bad it is if this action fires wrongly — orthogonal to ActionTier (who must approve).
@@ -68,25 +53,7 @@ export const DEFAULT_ACTION_TIERS: ActionTierConfig = {
  */
 export type ActionRisk = "low" | "medium" | "high";
 
-export const ACTION_RISK: Record<ActionKind, ActionRisk> = {
-    mark_email_read: "low",
-    mark_email_unread: "low",
-    archive_email: "low",
-    complete_task: "low",
-    mark_notification_read: "low",
-
-    reply: "medium",
-    comment_issue: "medium",
-    add_label: "medium",
-    create_event: "medium",
-    create_task: "medium",
-    create_issue: "medium",
-    open_pr: "medium",
-    update_event: "medium",
-
-    delete_email: "high",
-    delete_event: "high",
-    delete_task: "high",
-    close_issue: "high",
-    merge_pr: "high",
-};
+/** Declared per action in the capability manifest — derived here, never listed twice. */
+export const ACTION_RISK: Record<ActionKind, ActionRisk> = Object.fromEntries(
+    actionCapabilities().map((a) => [a.kind, a.risk]),
+) as Record<ActionKind, ActionRisk>;
