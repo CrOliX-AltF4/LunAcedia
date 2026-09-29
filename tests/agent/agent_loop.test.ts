@@ -326,3 +326,28 @@ export type _DispatchSignature = (
     a: ConnectorAction,
     capToConfirm: boolean,
 ) => Promise<DispatchOutcome>;
+
+describe("runAgent — actions it cannot take are declared (C17)", () => {
+    it("tells the model which actions are off while writes are switched off", async () => {
+        const { provider, seen } = scripted([{ content: "Pas encore possible.", toolCalls: [] }]);
+        await runAgent({ text: "crée une tâche" }, { ...deps(provider), allowWrites: false });
+        const system = seen[0]![0]!.content ?? "";
+        expect(system).toContain("create_task");
+        expect(system).toContain("not possible yet");
+        expect(system).not.toMatch(/Not available[^.]*archive_email/);
+    });
+
+    it("declares every action on a read-only request", async () => {
+        const { provider, seen } = scripted([{ content: "ok", toolCalls: [] }]);
+        await runAgent({ text: "archive tout", readOnly: true }, deps(provider));
+        expect(seen[0]![0]!.content).toContain("archive_email");
+    });
+
+    it("still declares what the agent is never allowed, even with writes on", async () => {
+        const { provider, seen } = scripted([{ content: "ok", toolCalls: [] }]);
+        await runAgent({ text: "salut" }, deps(provider));
+        const system = seen[0]![0]!.content ?? "";
+        expect(system).not.toContain("create_task (");
+        expect(system).toContain("merge_pr");
+    });
+});
