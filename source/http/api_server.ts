@@ -83,6 +83,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
+ *   POST /api/events/held          body: { keys: string[] } (≤ 2000) → { held: { [key]: { read } }, ready } — which of
+ *                                  these keys the box still holds; a key absent from `held` is gone
+ *                                  (ADR-019 L10: the Core reconciles its copies against the box; ready=false
+ *                                  while the initial sweep runs — nothing may be removed on that answer)
  *   POST /api/events/clear-read    → 200 { removed: number } — drops every already-read event
  *   POST /api/events/:dedupeKey/read → 204
  *   GET  /api/stats
@@ -105,7 +109,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
  *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards, chantier A)
- *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error } if invalid
+ *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
+ *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
  *   GET  /api/guard/journal        ?limit=  events a rule dropped, newest first (never silent, restorable)
  *   POST /api/guard/journal/restore body: { dedupeKey }  re-dispatches a dropped event, bypassing dedup + guard
  *   POST /api/guard/preview        body: { rules? }  what-if against the store + journal, changes nothing
@@ -129,6 +134,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
  */
+/** Keys one /api/events/held call may ask about — the box itself holds at most 1000 items. */
+const HELD_KEYS_MAX = 2000;
+
 export class AcediaApiServer {
     private server: http.Server | null = null;
     private readonly startedAt = Date.now();
@@ -252,7 +260,7 @@ export class AcediaApiServer {
             }
             const rules = (body as { rules?: unknown } | null)?.rules;
             const result = await g.rules.replaceAll(rules);
-            if (!result.ok) return json(res, 400, { error: result.error });
+            if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
             return json(res, 200, rulesPayload());
         }
@@ -292,7 +300,8 @@ export class AcediaApiServer {
             let candidate = g.rules.getRules();
             if (candidateInput !== undefined) {
                 const parsed = validateRules(candidateInput);
-                if (!parsed.ok) return json(res, 400, { error: parsed.error });
+                if (!parsed.ok)
+                    return json(res, 400, { error: parsed.error, problem: parsed.problem });
                 candidate = parsed.rules;
             }
             // What a rule could be tested against: what already passed (the store) and what was dropped (the journal).
@@ -583,6 +592,33 @@ export class AcediaApiServer {
         if (method === "POST" && path === "/api/events/read-all") {
             this.store.markAllRead();
             return json(res, 204, null);
+        }
+
+        // POST /api/events/held — which of these keys the box still holds (ADR-019 L10)
+        if (method === "POST" && path === "/api/events/held") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const keys = (body as { keys?: unknown } | null)?.keys;
+            if (
+                !Array.isArray(keys) ||
+                keys.length > HELD_KEYS_MAX ||
+                !keys.every((k) => typeof k === "string")
+            ) {
+                return json(res, 400, {
+                    error: `Body must be { keys: string[] } with at most ${HELD_KEYS_MAX} keys`,
+                });
+            }
+            const held: Record<string, { read: boolean }> = {};
+            for (const key of keys as string[]) {
+                const e = this.store.get(key);
+                if (e) held[key] = { read: e.read === true };
+            }
+            // `ready`: false until the hub's initial sweep finished — the box may still be filling.
+            return json(res, 200, { held, ready: this.hub.isReady() });
         }
 
         // POST /api/events/clear-read

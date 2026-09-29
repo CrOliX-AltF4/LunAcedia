@@ -1,4 +1,4 @@
-﻿import type { IConnector } from "../connector_interface.js";
+﻿import type { IConnector, SourceState } from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
@@ -20,7 +20,11 @@ interface Task {
 
 interface TaskListResponse {
     items?: Task[];
+    nextPageToken?: string;
 }
+
+/** Pages read at most — 10 × 100 due tasks is far beyond any real list. */
+const MAX_PAGES = 10;
 
 /**
  * Polls Google Tasks for due and overdue incomplete tasks.
@@ -72,15 +76,37 @@ export class TasksConnector implements IConnector {
     }
 
     async poll(): Promise<AcediaEvent[]> {
+        return (await this.dueTasks()) ?? [];
+    }
+
+    /**
+     * Where each held task stands (ADR-019 L5). The due listing (incomplete tasks due by tonight) IS the truth
+     * for this source: a task it no longer lists was completed, deleted or pushed past today — gone (a
+     * postponed task comes back when it is due: forgetting its key lets it be collected again). What the
+     * listing still has is not judged. null when the list cannot be read.
+     */
+    async sourceState(events: AcediaEvent[]): Promise<Map<string, SourceState> | null> {
+        const held = events.filter((e) => e.source === "tasks");
+        const state = new Map<string, SourceState>();
+        if (held.length === 0) return state;
+        const current = await this.dueTasks();
+        if (!current) return null;
+        const present = new Set(current.map((e) => e.dedupeKey));
+        for (const e of held) if (!present.has(e.dedupeKey)) state.set(e.dedupeKey, "gone");
+        return state;
+    }
+
+    /** Every incomplete task due by tonight, page after page. null when the list cannot be read. */
+    private async dueTasks(): Promise<AcediaEvent[] | null> {
         const refreshToken = this.refreshToken();
-        if (!this.clientId || !this.clientSecret || !refreshToken) return [];
+        if (!this.clientId || !this.clientSecret || !refreshToken) return null;
 
         let token: string;
         try {
             token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gtasks");
         } catch (e) {
             console.error("[Tasks] token refresh error:", (e as Error).message);
-            return [];
+            return null;
         }
 
         const headers = { Authorization: `Bearer ${token}` };
@@ -92,44 +118,54 @@ export class TasksConnector implements IConnector {
         const listPath = this.listId.startsWith("@")
             ? this.listId
             : encodeURIComponent(this.listId);
-        const url =
+        const base =
             `${TASKS_API}/lists/${listPath}/tasks` +
             `?showCompleted=false&showHidden=false` +
-            `&dueMax=${encodeURIComponent(dueMax.toISOString())}&maxResults=50`;
+            `&dueMax=${encodeURIComponent(dueMax.toISOString())}&maxResults=100`;
 
-        let resp: Response;
-        try {
-            resp = await fetch(url, { headers });
-        } catch (e) {
-            console.error("[Tasks] fetch error:", (e as Error).message);
-            return [];
+        // Paginated (ADR-019 L5): the listing used to stop at 50 tasks.
+        const tasks: Task[] = [];
+        let pageToken: string | undefined;
+        for (let page = 0; page < MAX_PAGES; page++) {
+            const url = pageToken ? `${base}&pageToken=${encodeURIComponent(pageToken)}` : base;
+            let resp: Response;
+            try {
+                resp = await fetch(url, { headers });
+            } catch (e) {
+                console.error("[Tasks] fetch error:", (e as Error).message);
+                return null;
+            }
+
+            if (!resp.ok) {
+                if (resp.status === 401) clearGoogleTokenCache("gtasks");
+                console.warn(`[Tasks] list returned ${resp.status}`);
+                return null;
+            }
+
+            const data = (await resp.json()) as TaskListResponse;
+            tasks.push(...(data.items ?? []));
+            pageToken = data.nextPageToken;
+            if (!pageToken) break;
         }
 
-        if (!resp.ok) {
-            if (resp.status === 401) clearGoogleTokenCache("gtasks");
-            console.warn(`[Tasks] list returned ${resp.status}`);
-            return [];
-        }
-
-        const data = (await resp.json()) as TaskListResponse;
-        const tasks = (data.items ?? []).filter((t) => t.due);
         const now = Date.now();
+        return tasks
+            .filter((t) => t.due)
+            .map((task): AcediaEvent => {
+                const dueTs = new Date(task.due!).getTime();
+                const overdue = dueTs < now;
 
-        return tasks.map((task): AcediaEvent => {
-            const dueTs = new Date(task.due!).getTime();
-            const overdue = dueTs < now;
-
-            return {
-                type: "tasks.due",
-                ts: dueTs,
-                source: "tasks",
-                title: task.title ?? "(no title)",
-                body: task.notes?.slice(0, 200).trim(),
-                priority: overdue ? "urgent" : "normal",
-                dedupeKey: `task-${task.id}`,
-                meta: { taskId: task.id, due: task.due, overdue, listId: this.listId },
-            };
-        });
+                return {
+                    type: "tasks.due",
+                    ts: dueTs,
+                    source: "tasks",
+                    title: task.title ?? "(no title)",
+                    body: task.notes?.slice(0, 200).trim(),
+                    priority: overdue ? "urgent" : "normal",
+                    dedupeKey: `task-${task.id}`,
+                    meta: { taskId: task.id, due: task.due, overdue, listId: this.listId },
+                };
+            });
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {

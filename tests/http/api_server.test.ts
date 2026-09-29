@@ -1696,6 +1696,53 @@ describe("AcediaApiServer — POST /api/events/clear-read", () => {
     });
 });
 
+describe("AcediaApiServer — POST /api/events/held (ADR-019 L10)", () => {
+    it("reports which keys the box still holds, with their read state", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        const server = makeServer(store);
+        server.start(port);
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        store.push(makeEvent({ dedupeKey: "e2" }));
+        store.markRead("e2");
+        const res = await post(
+            `http://localhost:${port}/api/events/held`,
+            { keys: ["e1", "e2", "gone"] },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({
+            held: { e1: { read: false }, e2: { read: true } },
+            ready: false, // the hub was never started: its initial sweep has not run
+        });
+    });
+
+    it("refuses a body that is not a bounded list of keys", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const bad = await post(`http://localhost:${port}/api/events/held`, { keys: [1] }, AUTH);
+        const big = await post(
+            `http://localhost:${port}/api/events/held`,
+            { keys: Array.from({ length: 2001 }, (_, i) => `k${i}`) },
+            AUTH,
+        );
+        server.stop();
+        expect(bad.status).toBe(400);
+        expect(big.status).toBe(400);
+    });
+
+    it("should return 401 without auth", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await post(`http://localhost:${port}/api/events/held`, { keys: [] }, {});
+        server.stop();
+        expect(res.status).toBe(401);
+    });
+});
+
 describe("AcediaApiServer — GET /api/events?unread=true", () => {
     let port: number;
     let store: EventStore;

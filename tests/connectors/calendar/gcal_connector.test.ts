@@ -597,3 +597,68 @@ describe("GcalConnector.executeAction — update_event / create_event / delete_e
         ).rejects.toThrow("network down");
     });
 });
+
+describe("GcalConnector — lifecycle at the source (ADR-019 L4)", () => {
+    const held = (key: string) => ({
+        type: "calendar.upcoming" as const,
+        ts: 1,
+        source: "calendar" as const,
+        title: key,
+        priority: "normal" as const,
+        dedupeKey: key,
+    });
+
+    it("reports gone an event the window no longer lists, and a conflict that no longer exists", async () => {
+        vi.stubGlobal("fetch", makeFetch([calEvent("ev1", "Still there")]));
+        const state = await new GcalConnector().sourceState([
+            held("cal-ev1"),
+            held("cal-deleted"),
+            held("cal-conflict-ev1-deleted"),
+        ]);
+        expect(state?.get("cal-ev1")).toBeUndefined();
+        expect(state?.get("cal-deleted")).toBe("gone");
+        expect(state?.get("cal-conflict-ev1-deleted")).toBe("gone");
+    });
+
+    it("never judges when a calendar cannot be read", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) =>
+                String(url).includes("oauth2")
+                    ? Promise.resolve({
+                          ok: true,
+                          json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                      })
+                    : Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+            ),
+        );
+        expect(await new GcalConnector().sourceState([held("cal-x")])).toBeNull();
+    });
+
+    it("reads the window page after page", async () => {
+        const fetchImpl = vi.fn().mockImplementation((url: string) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            const second = u.includes("pageToken=p2");
+            return Promise.resolve({
+                ok: true,
+                json: () =>
+                    Promise.resolve(
+                        second
+                            ? { items: [calEvent("b", "B")] }
+                            : { items: [calEvent("a", "A")], nextPageToken: "p2" },
+                    ),
+            });
+        });
+        vi.stubGlobal("fetch", fetchImpl);
+        const events = await new GcalConnector().poll();
+        expect(events.filter((e) => e.type === "calendar.upcoming").map((e) => e.title)).toEqual([
+            "A",
+            "B",
+        ]);
+    });
+});

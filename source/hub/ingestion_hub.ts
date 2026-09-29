@@ -13,12 +13,18 @@ function resolveSeenPath(): string {
     return path.join(storageDir, "dedup_seen.json");
 }
 
-/** `recovered`: the box lost this item and it came back (recoverMissing) — not new to anyone downstream. */
+/**
+ * `recovered`: not news to anyone downstream — the box lost this item and it came back (recoverMissing), it
+ * was collected by the first sweep of a fresh install, or its connector flagged it as backlog (`meta.backlog`:
+ * an old mail collected because the box is the whole inbox, C7). Stored in the box, never announced.
+ */
 export interface DispatchMeta {
     recovered: boolean;
 }
 
 type EventHandler = (event: AcediaEvent, meta?: DispatchMeta) => void;
+/** An already-dispatched item collected again — its content may have changed at the source. */
+type RefreshHandler = (event: AcediaEvent) => void;
 
 export interface ConnectorHealth {
     slug: string;
@@ -42,6 +48,7 @@ interface HealthState {
  */
 export class IngestionHub {
     private readonly handlers = new Set<EventHandler>();
+    private readonly refreshHandlers = new Set<RefreshHandler>();
     private readonly seen = new Map<string, number>(); // dedupeKey → ts
     private readonly recovering = new Set<string>(); // forgotten by recoverMissing(), not yet re-collected
     /** No dedup file at load: the first sweep is the backlog (fresh install, storage moved), not news. */
@@ -51,11 +58,19 @@ export class IngestionHub {
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
     private normalTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
+    /** The initial sweep finished: the box reflects the sources (see isReady). */
+    private initialSweepDone = false;
 
     constructor(
         private readonly connectors: IConnector[],
         seenPath?: string,
         private readonly guard?: GuardPipeline,
+        /**
+         * Whether the box still holds a key. A held key is never forgotten by the dedup TTL: an item still in
+         * the box (an old unread mail, a task overdue for weeks) would otherwise come back as news after the
+         * next restart.
+         */
+        private readonly isHeld: (key: string) => boolean = () => false,
     ) {
         this.seenPath = seenPath ?? resolveSeenPath();
         for (const c of connectors) {
@@ -139,9 +154,27 @@ export class IngestionHub {
         }
     }
 
+    /**
+     * Whether the box reflects the sources yet: false until the initial sweep after start() finished. A
+     * client reconciling its copies against the box (the Core, ADR-019 L10) must not remove anything before.
+     */
+    isReady(): boolean {
+        return this.initialSweepDone;
+    }
+
     onEvent(handler: EventHandler): () => void {
         this.handlers.add(handler);
         return () => this.handlers.delete(handler);
+    }
+
+    /**
+     * Called for every already-dispatched item a normal poll collects again (ADR-019 L3): a calendar event
+     * moved, a task whose due date changed keep their key, so dedup alone would keep the stale version
+     * forever. The handler decides whether anything changed.
+     */
+    onRefresh(handler: RefreshHandler): () => void {
+        this.refreshHandlers.add(handler);
+        return () => this.refreshHandlers.delete(handler);
     }
 
     /**
@@ -186,6 +219,7 @@ export class IngestionHub {
         // Initial sweep
         void this.pollAll().finally(() => {
             this.quietFirstSweep = false;
+            this.initialSweepDone = true;
         });
 
         this.urgentTimer = setInterval(() => void this.pollUrgent(), URGENT_POLL_MS);
@@ -234,6 +268,7 @@ export class IngestionHub {
         try {
             const events = await connector.poll();
             this.recordSuccess(connector);
+            for (const e of events) if (this.seen.has(e.dedupeKey)) this.refresh(e);
             for (const e of this.applyGuard(events)) this.dispatch(e);
         } catch (err) {
             this.recordError(connector, (err as Error).message);
@@ -255,8 +290,21 @@ export class IngestionHub {
 
         this.seen.set(event.dedupeKey, event.ts);
         void this.saveSeen();
-        const recovered = this.recovering.delete(event.dedupeKey) || this.quietFirstSweep;
+        const recovered =
+            this.recovering.delete(event.dedupeKey) ||
+            this.quietFirstSweep ||
+            event.meta?.["backlog"] === true;
         this.notify(event, { recovered });
+    }
+
+    private refresh(event: AcediaEvent): void {
+        for (const handler of this.refreshHandlers) {
+            try {
+                handler(event);
+            } catch {
+                /* never throw from a poll */
+            }
+        }
     }
 
     private notify(event: AcediaEvent, meta: DispatchMeta = { recovered: false }): void {
@@ -273,7 +321,7 @@ export class IngestionHub {
         const cutoff = Date.now() - DEDUP_TTL_MS;
         let purged = false;
         for (const [key, ts] of this.seen) {
-            if (ts < cutoff) {
+            if (ts < cutoff && !this.isHeld(key)) {
                 this.seen.delete(key);
                 purged = true;
             }

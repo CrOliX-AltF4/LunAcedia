@@ -233,3 +233,47 @@ describe("EventStore.markAllRead", () => {
         expect(() => store.markAllRead()).not.toThrow();
     });
 });
+
+describe("EventStore.refresh — a known item whose content changed at the source (ADR-019 L3)", () => {
+    it("replaces the content and keeps what the box decided: read state, guard tags and rule", () => {
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "cal-1",
+                title: "Meeting",
+                read: true,
+                tags: ["work"],
+                ruleId: "r1",
+                meta: { start: "10:00" },
+            }),
+        );
+        const updated = store.refresh(
+            makeEvent({ dedupeKey: "cal-1", title: "Meeting (moved)", meta: { start: "14:00" } }),
+        );
+        expect(updated?.title).toBe("Meeting (moved)");
+        expect(store.get("cal-1")).toMatchObject({
+            title: "Meeting (moved)",
+            read: true,
+            tags: ["work"],
+            ruleId: "r1",
+            meta: { start: "14:00" },
+        });
+    });
+
+    it("returns null and changes nothing when the content is the same", () => {
+        const store = new EventStore();
+        const e = makeEvent({ dedupeKey: "task-1", ts: 5, meta: { due: "d" } });
+        store.push(e);
+        expect(store.refresh({ ...e, meta: { due: "d" } })).toBeNull();
+    });
+
+    it("keeps a priority a guard rule set — the rule wins over the source", () => {
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "k", ts: 5, priority: "urgent", ruleId: "vip" }));
+        expect(store.refresh(makeEvent({ dedupeKey: "k", ts: 5, priority: "info" }))).toBeNull();
+    });
+
+    it("returns null for a key the box does not hold", () => {
+        expect(new EventStore().refresh(makeEvent({ dedupeKey: "nope" }))).toBeNull();
+    });
+});

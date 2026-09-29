@@ -20,6 +20,19 @@ export interface EventQuery {
     tag?: string;
 }
 
+/** What the source says about an item — not what the box decided (read state, guard tags). */
+function sameContent(a: AcediaEvent, b: AcediaEvent): boolean {
+    return (
+        a.type === b.type &&
+        a.ts === b.ts &&
+        a.title === b.title &&
+        a.body === b.body &&
+        a.url === b.url &&
+        a.priority === b.priority &&
+        JSON.stringify(a.meta ?? {}) === JSON.stringify(b.meta ?? {})
+    );
+}
+
 /**
  * Ring buffer for AcediaEvents — since ADR-018 it IS the box.
  * Oldest event is evicted when capacity is reached.
@@ -76,6 +89,30 @@ export class EventStore {
         this.buf.push(event);
         if (this.buf.length > this.maxSize) this.buf.shift();
         this.persist();
+    }
+
+    /**
+     * Replaces a held item with a fresh collection of it when its content changed at the source (ADR-019 L3:
+     * a moved event, a new due date). What the box decided locally survives: the read state (unless the
+     * source reports one), and the guard's tags/ruleId/priority (a refresh does not go through the guard again).
+     * Returns the stored item when it changed, null when nothing changed or the key is not held.
+     */
+    refresh(fresh: AcediaEvent): AcediaEvent | null {
+        const idx = this.buf.findIndex((e) => e.dedupeKey === fresh.dedupeKey);
+        if (idx === -1) return null;
+        const held = this.buf[idx]!;
+        // A guard rule may have set the priority: the rule's choice stands over the source's.
+        const incoming = held.ruleId ? { ...fresh, priority: held.priority } : fresh;
+        if (sameContent(held, incoming)) return null;
+        const merged: AcediaEvent = {
+            ...incoming,
+            read: fresh.read ?? held.read,
+            ...(held.tags && { tags: held.tags }),
+            ...(held.ruleId && { ruleId: held.ruleId }),
+        };
+        this.buf[idx] = merged;
+        this.persist();
+        return merged;
     }
 
     has(dedupeKey: string): boolean {

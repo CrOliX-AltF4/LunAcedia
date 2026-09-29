@@ -12,6 +12,8 @@ import { formatThread, formatFailedCheckRun } from "./github_formatter.js";
 import { assertHttpOk } from "../connector_http.js";
 
 const GITHUB_API = "https://api.github.com";
+/** Notification pages read at most — 10 × 50 threads. */
+const MAX_PAGES = 10;
 
 /** "{owner}/{repo}#{number}" → { repo: "owner/repo", number: 123 }, or null if malformed. */
 function parseIssueRef(sourceId: string): { repo: string; number: number } | null {
@@ -79,8 +81,10 @@ export class GitHubConnector implements IConnector {
         let resp: Response;
         try {
             resp = await fetch(
-                "https://api.github.com/notifications?all=false&participating=false",
-                { headers },
+                `${GITHUB_API}/notifications?all=false&participating=false&per_page=50`,
+                {
+                    headers,
+                },
             );
         } catch (e) {
             console.error("[GitHub] fetch error:", (e as Error).message);
@@ -96,7 +100,13 @@ export class GitHubConnector implements IConnector {
         const lm = resp.headers.get("Last-Modified");
         if (lm) this.lastModified = lm;
 
-        const threads = (await resp.json()) as GitHubThread[];
+        // Paginated (ADR-019 L6): the listing used to stop at the first 50 threads.
+        let threads = (await resp.json()) as GitHubThread[];
+        try {
+            threads = threads.concat(await this.nextPages<GitHubThread>(resp));
+        } catch (e) {
+            console.warn("[GitHub] next pages unavailable:", (e as Error).message);
+        }
         const results: AcediaEvent[] = [];
 
         for (const thread of threads) {
@@ -168,6 +178,24 @@ export class GitHubConnector implements IConnector {
         }
     }
 
+    /**
+     * The pages after `first`, following GitHub's `Link: <…>; rel="next"` header (never with
+     * If-Modified-Since: the first page already said something changed). Throws when a page cannot be read.
+     */
+    private async nextPages<T>(first: Response): Promise<T[]> {
+        const out: T[] = [];
+        let link = first.headers.get("Link");
+        for (let page = 1; page < MAX_PAGES && link; page++) {
+            const next = /<([^>]+)>;\s*rel="next"/.exec(link)?.[1];
+            if (!next) break;
+            const resp = await fetch(next, { headers: this.apiHeaders() });
+            if (!resp.ok) throw new Error(`notifications page returned ${resp.status}`);
+            out.push(...((await resp.json()) as T[]));
+            link = resp.headers.get("Link");
+        }
+        return out;
+    }
+
     private apiHeaders(): Record<string, string> {
         return {
             Authorization: `Bearer ${this.token}`,
@@ -196,7 +224,9 @@ export class GitHubConnector implements IConnector {
                 { headers: this.apiHeaders() },
             );
             if (!resp.ok) throw new Error(`notifications returned ${resp.status}`);
-            const threads = (await resp.json()) as Array<{ id: string | number }>;
+            const threads = ((await resp.json()) as Array<{ id: string | number }>).concat(
+                await this.nextPages<{ id: string | number }>(resp),
+            );
             unread = new Set(threads.map((t) => String(t.id)));
         } catch (e) {
             console.warn("[GitHub] source state unavailable:", (e as Error).message);

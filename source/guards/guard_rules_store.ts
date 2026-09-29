@@ -14,7 +14,37 @@ const MAX_TAG = 40;
 const PRIORITIES: readonly AcediaEventPriority[] = ["urgent", "normal", "info"];
 const HEADER_NAME = /^[A-Za-z0-9-]{1,80}$/;
 
-export type RulesValidation = { ok: true; rules: GuardRule[] } | { ok: false; error: string };
+/**
+ * Where a rule list is wrong, in a form a client can translate and point at (live check C21: the panel showed the
+ * English sentence verbatim). `rule` and `index` are 0-based; `part` is the rule's field at fault.
+ */
+export interface RuleProblem {
+    code:
+        | "not_a_list"
+        | "too_many_rules"
+        | "invalid_rule"
+        | "name_required"
+        | "conditions_required"
+        | "too_many_conditions"
+        | "actions_required"
+        | "too_many_actions"
+        | "invalid_condition"
+        | "value_required"
+        | "header_name_invalid"
+        | "invalid_action"
+        | "tag_required"
+        | "duplicate_id";
+    rule?: number;
+    part?: "name" | "conditions" | "actions";
+    index?: number;
+}
+
+/** `error` stays the English sentence (logs, older clients); `problem` is the structured form. */
+export type RulesValidation =
+    { ok: true; rules: GuardRule[] } | { ok: false; error: string; problem: RuleProblem };
+
+type Fail = { message: string; code: RuleProblem["code"] };
+const fail = (message: string, code: RuleProblem["code"]): Fail => ({ message, code });
 
 function isRecord(v: unknown): v is Record<string, unknown> {
     return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -26,15 +56,22 @@ function str(v: unknown, max: number): string | null {
     return t.length > 0 && t.length <= max ? t : null;
 }
 
-function parseCondition(raw: unknown, where: string): GuardCondition | string {
-    if (!isRecord(raw)) return `${where}: condition must be an object`;
+function parseCondition(raw: unknown, where: string): GuardCondition | Fail {
+    if (!isRecord(raw)) return fail(`${where}: condition must be an object`, "invalid_condition");
     const field = raw["field"];
     const op = raw["op"];
     if (field === "from") {
         const value = str(raw["value"], MAX_VALUE);
         if (op !== "equals" && op !== "contains" && op !== "domain")
-            return `${where}: from.op must be equals, contains or domain`;
-        if (!value) return `${where}: from.value is required (max ${MAX_VALUE} characters)`;
+            return fail(
+                `${where}: from.op must be equals, contains or domain`,
+                "invalid_condition",
+            );
+        if (!value)
+            return fail(
+                `${where}: from.value is required (max ${MAX_VALUE} characters)`,
+                "value_required",
+            );
         return {
             field,
             op,
@@ -43,40 +80,57 @@ function parseCondition(raw: unknown, where: string): GuardCondition | string {
     }
     if (field === "subject" || field === "snippet") {
         const value = str(raw["value"], MAX_VALUE);
-        if (op !== "contains") return `${where}: ${field}.op must be contains`;
-        if (!value) return `${where}: ${field}.value is required (max ${MAX_VALUE} characters)`;
+        if (op !== "contains")
+            return fail(`${where}: ${field}.op must be contains`, "invalid_condition");
+        if (!value)
+            return fail(
+                `${where}: ${field}.value is required (max ${MAX_VALUE} characters)`,
+                "value_required",
+            );
         return { field, op, value };
     }
     if (field === "label") {
         const value = str(raw["value"], MAX_VALUE);
-        if (op !== "equals") return `${where}: label.op must be equals`;
-        if (!value) return `${where}: label.value is required`;
+        if (op !== "equals") return fail(`${where}: label.op must be equals`, "invalid_condition");
+        if (!value) return fail(`${where}: label.value is required`, "value_required");
         return { field, op, value };
     }
     if (field === "header") {
         const name = typeof raw["name"] === "string" ? raw["name"].trim() : "";
-        if (op !== "present") return `${where}: header.op must be present`;
+        if (op !== "present")
+            return fail(`${where}: header.op must be present`, "invalid_condition");
         if (!HEADER_NAME.test(name))
-            return `${where}: header.name must be a plain header name (letters, digits, dashes)`;
+            return fail(
+                `${where}: header.name must be a plain header name (letters, digits, dashes)`,
+                "header_name_invalid",
+            );
         return { field, op, name };
     }
-    return `${where}: unknown condition field (allowed: from, subject, snippet, label, header)`;
+    return fail(
+        `${where}: unknown condition field (allowed: from, subject, snippet, label, header)`,
+        "invalid_condition",
+    );
 }
 
-function parseAction(raw: unknown, where: string): GuardAction | string {
-    if (!isRecord(raw)) return `${where}: action must be an object`;
+function parseAction(raw: unknown, where: string): GuardAction | Fail {
+    if (!isRecord(raw)) return fail(`${where}: action must be an object`, "invalid_action");
     if (raw["type"] === "drop") return { type: "drop" };
     if (raw["type"] === "tag") {
         const tag = str(raw["tag"], MAX_TAG);
-        return tag ? { type: "tag", tag } : `${where}: tag is required (max ${MAX_TAG} characters)`;
+        return tag
+            ? { type: "tag", tag }
+            : fail(`${where}: tag is required (max ${MAX_TAG} characters)`, "tag_required");
     }
     if (raw["type"] === "set_priority") {
         const priority = raw["priority"];
         return PRIORITIES.includes(priority as AcediaEventPriority)
             ? { type: "set_priority", priority: priority as AcediaEventPriority }
-            : `${where}: priority must be urgent, normal or info`;
+            : fail(`${where}: priority must be urgent, normal or info`, "invalid_action");
     }
-    return `${where}: unknown action type (allowed: drop, tag, set_priority)`;
+    return fail(
+        `${where}: unknown action type (allowed: drop, tag, set_priority)`,
+        "invalid_action",
+    );
 }
 
 /**
@@ -85,43 +139,83 @@ function parseAction(raw: unknown, where: string): GuardAction | string {
  * Rules missing an id get a fresh one; duplicate ids are refused.
  */
 export function validateRules(input: unknown): RulesValidation {
-    if (!Array.isArray(input)) return { ok: false, error: "rules must be an array" };
-    if (input.length > MAX_RULES) return { ok: false, error: `too many rules (max ${MAX_RULES})` };
+    const refuse = (error: string, problem: RuleProblem): RulesValidation => ({
+        ok: false,
+        error,
+        problem,
+    });
+    if (!Array.isArray(input)) return refuse("rules must be an array", { code: "not_a_list" });
+    if (input.length > MAX_RULES)
+        return refuse(`too many rules (max ${MAX_RULES})`, { code: "too_many_rules" });
     const rules: GuardRule[] = [];
     const ids = new Set<string>();
     for (let i = 0; i < input.length; i++) {
         const where = `rule ${i + 1}`;
         const raw = input[i];
-        if (!isRecord(raw)) return { ok: false, error: `${where}: must be an object` };
+        if (!isRecord(raw))
+            return refuse(`${where}: must be an object`, { code: "invalid_rule", rule: i });
         const name = str(raw["name"], MAX_NAME);
         if (!name)
-            return { ok: false, error: `${where}: name is required (max ${MAX_NAME} characters)` };
+            return refuse(`${where}: name is required (max ${MAX_NAME} characters)`, {
+                code: "name_required",
+                rule: i,
+                part: "name",
+            });
         const rawConditions = raw["conditions"];
         if (!Array.isArray(rawConditions) || rawConditions.length === 0)
-            return { ok: false, error: `${where}: at least one condition is required` };
+            return refuse(`${where}: at least one condition is required`, {
+                code: "conditions_required",
+                rule: i,
+                part: "conditions",
+            });
         if (rawConditions.length > MAX_CONDITIONS)
-            return { ok: false, error: `${where}: too many conditions (max ${MAX_CONDITIONS})` };
+            return refuse(`${where}: too many conditions (max ${MAX_CONDITIONS})`, {
+                code: "too_many_conditions",
+                rule: i,
+                part: "conditions",
+            });
         const rawActions = raw["actions"];
         if (!Array.isArray(rawActions) || rawActions.length === 0)
-            return { ok: false, error: `${where}: at least one action is required` };
+            return refuse(`${where}: at least one action is required`, {
+                code: "actions_required",
+                rule: i,
+                part: "actions",
+            });
         if (rawActions.length > MAX_ACTIONS)
-            return { ok: false, error: `${where}: too many actions (max ${MAX_ACTIONS})` };
+            return refuse(`${where}: too many actions (max ${MAX_ACTIONS})`, {
+                code: "too_many_actions",
+                rule: i,
+                part: "actions",
+            });
 
         const conditions: GuardCondition[] = [];
-        for (const c of rawConditions) {
-            const parsed = parseCondition(c, where);
-            if (typeof parsed === "string") return { ok: false, error: parsed };
+        for (let j = 0; j < rawConditions.length; j++) {
+            const parsed = parseCondition(rawConditions[j], where);
+            if ("message" in parsed)
+                return refuse(parsed.message, {
+                    code: parsed.code,
+                    rule: i,
+                    part: "conditions",
+                    index: j,
+                });
             conditions.push(parsed);
         }
         const actions: GuardAction[] = [];
-        for (const a of rawActions) {
-            const parsed = parseAction(a, where);
-            if (typeof parsed === "string") return { ok: false, error: parsed };
+        for (let j = 0; j < rawActions.length; j++) {
+            const parsed = parseAction(rawActions[j], where);
+            if ("message" in parsed)
+                return refuse(parsed.message, {
+                    code: parsed.code,
+                    rule: i,
+                    part: "actions",
+                    index: j,
+                });
             actions.push(parsed);
         }
         const id =
             typeof raw["id"] === "string" && raw["id"].trim() ? raw["id"].trim() : randomUUID();
-        if (ids.has(id)) return { ok: false, error: `${where}: duplicate id "${id}"` };
+        if (ids.has(id))
+            return refuse(`${where}: duplicate id "${id}"`, { code: "duplicate_id", rule: i });
         ids.add(id);
         rules.push({ id, name, enabled: raw["enabled"] !== false, conditions, actions });
     }
@@ -190,7 +284,7 @@ export class GuardRulesStore {
     /** Replaces the whole list. Returns the validation error instead of persisting anything invalid. */
     async replaceAll(
         input: unknown,
-    ): Promise<{ ok: true; version: number } | { ok: false; error: string }> {
+    ): Promise<{ ok: true; version: number } | { ok: false; error: string; problem: RuleProblem }> {
         const parsed = validateRules(input);
         if (!parsed.ok) return parsed;
         if (JSON.stringify(parsed.rules) !== JSON.stringify(this.rules)) {

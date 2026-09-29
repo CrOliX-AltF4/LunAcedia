@@ -420,6 +420,32 @@ describe("IngestionHub — the first sweep without a dedup file is quiet", () =>
         ]);
     });
 
+    it("stores a backlog event without announcing it (C7)", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        await fs.writeFile(seenPath, "{}", "utf-8");
+        hub = new IngestionHub(
+            [
+                makeConnector([
+                    { ...baseEvent, dedupeKey: "old", meta: { backlog: true } },
+                    { ...baseEvent, dedupeKey: "new" },
+                ]),
+            ],
+            seenPath,
+        );
+        await hub.load();
+
+        const received: Array<{ key: string; recovered: boolean }> = [];
+        hub.onEvent((e, meta) =>
+            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
+        );
+        hub.start();
+        await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 2000, interval: 20 });
+        expect(received).toEqual([
+            { key: "old", recovered: true },
+            { key: "new", recovered: false },
+        ]);
+    });
+
     it("is not quiet when a dedup file exists", async () => {
         seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
         await fs.writeFile(seenPath, "{}", "utf-8");
@@ -430,5 +456,83 @@ describe("IngestionHub — the first sweep without a dedup file is quiet", () =>
         hub.onEvent((_e, meta) => received.push(meta?.recovered === true));
         hub.start();
         await vi.waitFor(() => expect(received).toEqual([false]), { timeout: 2000, interval: 20 });
+    });
+});
+
+describe("IngestionHub — refresh and held keys (ADR-019 L2/L3)", () => {
+    let hub: IngestionHub;
+    let seenPath: string;
+
+    afterEach(async () => {
+        hub.stop();
+        await fs.rm(seenPath, { force: true });
+    });
+
+    it("hands an already-dispatched item collected again to the refresh handlers, never as news", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        await fs.writeFile(seenPath, "{}", "utf-8");
+        const poll = vi
+            .fn()
+            .mockResolvedValueOnce([{ ...baseEvent, dedupeKey: "cal-1", title: "v1" }])
+            .mockResolvedValue([
+                { ...baseEvent, dedupeKey: "cal-1", title: "v2" },
+                { ...baseEvent, dedupeKey: "cal-2" },
+            ]);
+        hub = new IngestionHub([{ slug: "calendar", name: "Mock", poll }], seenPath);
+        await hub.load();
+        const news: string[] = [];
+        const refreshed: string[] = [];
+        hub.onEvent((e) => news.push(e.dedupeKey));
+        hub.onRefresh((e) => refreshed.push(`${e.dedupeKey}:${e.title}`));
+
+        await hub.pollOne("calendar");
+        await hub.pollOne("calendar");
+
+        expect(news).toEqual(["cal-1", "cal-2"]);
+        expect(refreshed).toEqual(["cal-1:v2"]);
+    });
+
+    it("never forgets, past the TTL, a key the box still holds", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        const old = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        await fs.writeFile(seenPath, JSON.stringify({ held: old, gone: old }), "utf-8");
+        const poll = vi.fn().mockResolvedValue([
+            { ...baseEvent, dedupeKey: "held" },
+            { ...baseEvent, dedupeKey: "gone" },
+        ]);
+        hub = new IngestionHub(
+            [{ slug: "tasks", name: "Mock", poll }],
+            seenPath,
+            undefined,
+            (key) => key === "held",
+        );
+        await hub.load();
+        const news: string[] = [];
+        hub.onEvent((e) => news.push(e.dedupeKey));
+        hub.start();
+        await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(news).toEqual(["gone"]);
+    });
+});
+
+describe("IngestionHub.isReady (ADR-019 L10)", () => {
+    let hub: IngestionHub;
+    afterEach(() => hub.stop());
+
+    it("is false until the initial sweep after start() has finished", async () => {
+        let release!: (events: AcediaEvent[]) => void;
+        const poll = vi.fn().mockReturnValueOnce(
+            new Promise<AcediaEvent[]>((r) => {
+                release = r;
+            }),
+        );
+        hub = new IngestionHub([{ slug: "email", name: "Mock", poll }]);
+        expect(hub.isReady()).toBe(false);
+        hub.start();
+        expect(hub.isReady()).toBe(false);
+        release([]);
+        await vi.waitFor(() => expect(hub.isReady()).toBe(true), { timeout: 2000, interval: 10 });
     });
 });

@@ -65,7 +65,7 @@ const guardPipeline = new GuardPipeline({
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
 const ai = createAIProvider();
-const hub = new IngestionHub(connectors, undefined, guardPipeline);
+const hub = new IngestionHub(connectors, undefined, guardPipeline, (key) => store.has(key));
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
 const pendingStore = new PendingActionStore();
@@ -117,6 +117,21 @@ hub.onEvent((event, meta) => {
     ws.broadcast(event);
     // The inbox now holds read mail too (ADR-018 D2): only something new and unread is pushed.
     if (!event.read) void fcm?.send(event);
+});
+
+// A known item whose content changed at the source (moved event, new due date — ADR-019 L3): the box is
+// updated and the Core refreshes its copy by key through an "updated" sync message — never the event itself,
+// which the Core would announce as news. A backlog item was never sent to the Core, so its refresh is not either.
+hub.onRefresh((event) => {
+    const updated = store.refresh(event);
+    if (!updated || updated.meta?.["backlog"] === true) return;
+    const { title, body, priority, ts } = updated;
+    inboxSync.applyLocal({
+        op: "updated",
+        key: updated.dedupeKey,
+        source: updated.source,
+        item: { title, body, priority, ts },
+    });
 });
 
 hub.start();

@@ -144,3 +144,42 @@ describe("GuardRulesStore", () => {
         expect(store.getRules()).toEqual([]);
     });
 });
+
+describe("validateRules — structured problem for a client to translate (C21)", () => {
+    it("points at the rule and the field at fault", () => {
+        const res = validateRules([goodRule, { ...goodRule, name: "  " }]);
+        expect(res.ok).toBe(false);
+        if (!res.ok) {
+            expect(res.problem).toEqual({ code: "name_required", rule: 1, part: "name" });
+            expect(res.error).toContain("name is required"); // the English sentence stays, for logs
+        }
+    });
+
+    it("points at the condition with an empty value", () => {
+        const res = validateRules([
+            {
+                ...goodRule,
+                conditions: [
+                    goodRule.conditions[0],
+                    { field: "subject", op: "contains", value: "" },
+                ],
+            },
+        ]);
+        expect(!res.ok && res.problem).toEqual({
+            code: "value_required",
+            rule: 0,
+            part: "conditions",
+            index: 1,
+        });
+    });
+
+    it("points at the action with a missing tag", () => {
+        const res = validateRules([{ ...goodRule, actions: [{ type: "tag", tag: "" }] }]);
+        expect(!res.ok && res.problem).toEqual({
+            code: "tag_required",
+            rule: 0,
+            part: "actions",
+            index: 0,
+        });
+    });
+});

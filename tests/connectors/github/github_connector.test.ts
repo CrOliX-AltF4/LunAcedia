@@ -444,3 +444,32 @@ describe("GitHubConnector.executeAction", () => {
         ).rejects.toThrow("returned 404");
     });
 });
+
+describe("GitHubConnector — pagination (ADR-019 L6)", () => {
+    it("follows the Link header to read every page of notifications", async () => {
+        const next = "https://api.github.com/notifications?page=2";
+        const fetchImpl = vi.fn().mockImplementation((url: string) => {
+            const second = String(url) === next;
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                headers: {
+                    get: (h: string) => (h === "Link" && !second ? `<${next}>; rel="next"` : null),
+                },
+                json: () =>
+                    Promise.resolve([
+                        makeThread({ id: second ? "t2" : "t1", title: second ? "Two" : "One" }),
+                    ]),
+            });
+        });
+        vi.stubGlobal("fetch", fetchImpl);
+        const events = await new GitHubConnector().poll();
+        expect(events.map((e) => e.title)).toEqual(
+            expect.arrayContaining([
+                expect.stringContaining("One"),
+                expect.stringContaining("Two"),
+            ]),
+        );
+        expect(fetchImpl).toHaveBeenCalledWith(next, expect.anything());
+    });
+});
