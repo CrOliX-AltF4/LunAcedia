@@ -397,3 +397,61 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
         ).rejects.toThrow("network down");
     });
 });
+
+describe("TasksConnector — lifecycle at the source (ADR-019 L5)", () => {
+    const held = (key: string) => ({
+        type: "tasks.due" as const,
+        ts: 1,
+        source: "tasks" as const,
+        title: key,
+        priority: "normal" as const,
+        dedupeKey: key,
+    });
+
+    it("reports gone a task the due listing no longer has (completed, deleted, postponed)", async () => {
+        vi.stubGlobal("fetch", makeFetch([task("t1", "Open", DUE_TODAY)]));
+        const state = await new TasksConnector().sourceState([held("task-t1"), held("task-done")]);
+        expect(state?.get("task-t1")).toBeUndefined();
+        expect(state?.get("task-done")).toBe("gone");
+    });
+
+    it("never judges when the list cannot be read", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) =>
+                String(url).includes("oauth2")
+                    ? Promise.resolve({
+                          ok: true,
+                          json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                      })
+                    : Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) }),
+            ),
+        );
+        expect(await new TasksConnector().sourceState([held("task-x")])).toBeNull();
+    });
+
+    it("reads the list page after page", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                const u = String(url);
+                if (u.includes("oauth2"))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                const second = u.includes("pageToken=p2");
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve(
+                            second
+                                ? { items: [task("b", "B", DUE_PAST)] }
+                                : { items: [task("a", "A", DUE_TODAY)], nextPageToken: "p2" },
+                        ),
+                });
+            }),
+        );
+        expect((await new TasksConnector().poll()).map((e) => e.title)).toEqual(["A", "B"]);
+    });
+});

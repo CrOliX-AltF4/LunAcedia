@@ -186,3 +186,29 @@ describe("InboxSync — updated (ADR-019 L3)", () => {
         expect(wire.meta).toMatchObject({ op: "updated", key: "cal-1", item: { title: "moved" } });
     });
 });
+
+describe("InboxSync — informational items expire (ADR-019 L7)", () => {
+    it("removes RSS and Home Assistant items past their lifetime, keeps them in dedup, tells the Core", async () => {
+        const store = new EventStore();
+        const old = { ...item("rss-old", "rss"), ts: 1_000 };
+        const recent = { ...item("ha-recent", "ha"), ts: 9_000 };
+        const mail = { ...item("email-old", "email"), ts: 1_000 };
+        for (const e of [old, recent, mail]) store.push(e);
+        const emitted: InboxChange[] = [];
+        const forgotten: string[] = [];
+        const sync = new InboxSync({
+            connectors: [],
+            store,
+            emit: (c) => emitted.push(c),
+            forget: (k) => forgotten.push(k),
+            infoTtlMs: 5_000,
+            now: () => 10_000,
+        });
+        await sync.reconcile();
+        expect(store.has("rss-old")).toBe(false);
+        expect(store.has("ha-recent")).toBe(true);
+        expect(store.has("email-old")).toBe(true);
+        expect(emitted).toEqual([{ op: "removed", key: "rss-old", source: "rss" }]);
+        expect(forgotten).toEqual([]);
+    });
+});

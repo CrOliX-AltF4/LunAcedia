@@ -1,4 +1,4 @@
-﻿import type { IConnector } from "../connector_interface.js";
+﻿import type { IConnector, SourceState } from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
@@ -21,7 +21,11 @@ interface CalEvent {
 
 interface CalListResponse {
     items?: CalEvent[];
+    nextPageToken?: string;
 }
+
+/** Pages read at most per calendar and window — 10 × 250 events is far beyond any real lookahead. */
+const MAX_PAGES = 10;
 
 function parseCalendars(raw: string): string[] {
     try {
@@ -105,15 +109,41 @@ export class GcalConnector implements IConnector {
     }
 
     async poll(): Promise<AcediaEvent[]> {
+        return (await this.window(false)) ?? [];
+    }
+
+    /**
+     * Where each held item stands (ADR-019 L4). The lookahead window IS the truth for this source: an event
+     * the window no longer lists was deleted, cancelled, has ended or moved out of it — gone (a moved event
+     * comes back when it re-enters the window: forgetting its key lets it be collected again). A conflict
+     * the window no longer produces is resolved — gone too. What the window still lists is not judged (a
+     * calendar event has no read state at the source). null when any calendar cannot be read.
+     */
+    async sourceState(events: AcediaEvent[]): Promise<Map<string, SourceState> | null> {
+        const held = events.filter((e) => e.source === "calendar");
+        const state = new Map<string, SourceState>();
+        if (held.length === 0) return state;
+        const current = await this.window(true);
+        if (!current) return null;
+        const present = new Set(current.map((e) => e.dedupeKey));
+        for (const e of held) if (!present.has(e.dedupeKey)) state.set(e.dedupeKey, "gone");
+        return state;
+    }
+
+    /**
+     * Every event of the lookahead window, plus the conflicts between them. `strict`: null as soon as one
+     * calendar cannot be read (never judge on a partial picture); otherwise a failed calendar is skipped.
+     */
+    private async window(strict: boolean): Promise<AcediaEvent[] | null> {
         const refreshToken = this.refreshToken();
-        if (!this.clientId || !this.clientSecret || !refreshToken) return [];
+        if (!this.clientId || !this.clientSecret || !refreshToken) return strict ? null : [];
 
         let token: string;
         try {
             token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gcal");
         } catch (e) {
             console.error("[GCal] token refresh error:", (e as Error).message);
-            return [];
+            return strict ? null : [];
         }
 
         const headers = { Authorization: `Bearer ${token}` };
@@ -123,8 +153,9 @@ export class GcalConnector implements IConnector {
         const results = await Promise.allSettled(
             this.calendars.map((calId) => this.pollCalendar(calId, timeMin, timeMax, headers)),
         );
+        if (strict && results.some((r) => r.status === "rejected" || r.value === null)) return null;
 
-        const events = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+        const events = results.flatMap((r) => (r.status === "fulfilled" ? (r.value ?? []) : []));
         return [...events, ...this.detectConflicts(events)];
     }
 
@@ -277,29 +308,37 @@ export class GcalConnector implements IConnector {
         timeMin: string,
         timeMax: string,
         headers: Record<string, string>,
-    ): Promise<AcediaEvent[]> {
-        const url =
+    ): Promise<AcediaEvent[] | null> {
+        const base =
             `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events` +
             `?timeMin=${encodeURIComponent(timeMin)}` +
             `&timeMax=${encodeURIComponent(timeMax)}` +
-            `&singleEvents=true&orderBy=startTime&maxResults=50`;
+            `&singleEvents=true&orderBy=startTime&maxResults=250`;
 
-        let resp: Response;
-        try {
-            resp = await fetch(url, { headers });
-        } catch (e) {
-            console.error(`[GCal] fetch error for ${calId}:`, (e as Error).message);
-            return [];
+        // Paginated (ADR-019 L4): the window used to stop at 50 events. null = this calendar could not be read.
+        const events: CalEvent[] = [];
+        let pageToken: string | undefined;
+        for (let page = 0; page < MAX_PAGES; page++) {
+            const url = pageToken ? `${base}&pageToken=${encodeURIComponent(pageToken)}` : base;
+            let resp: Response;
+            try {
+                resp = await fetch(url, { headers });
+            } catch (e) {
+                console.error(`[GCal] fetch error for ${calId}:`, (e as Error).message);
+                return null;
+            }
+
+            if (!resp.ok) {
+                if (resp.status === 401) clearGoogleTokenCache("gcal");
+                console.warn(`[GCal] ${calId} returned ${resp.status}`);
+                return null;
+            }
+
+            const data = (await resp.json()) as CalListResponse;
+            events.push(...(data.items ?? []));
+            pageToken = data.nextPageToken;
+            if (!pageToken) break;
         }
-
-        if (!resp.ok) {
-            if (resp.status === 401) clearGoogleTokenCache("gcal");
-            console.warn(`[GCal] ${calId} returned ${resp.status}`);
-            return [];
-        }
-
-        const data = (await resp.json()) as CalListResponse;
-        const events = data.items ?? [];
 
         return events.map((ev): AcediaEvent => {
             const startRaw = ev.start.dateTime ?? ev.start.date ?? "";
