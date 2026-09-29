@@ -80,6 +80,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *
  * Routes (all require Bearer auth if ACEDIA_SECRET is set, except /api/health):
  *   GET  /api/health
+ *   GET  /api/identity             → { name, kind: "lunacedia", version } — who the mobile app is talking to
+ *                                  (ADR-020 D2: the app shows the server's name, never a hardcoded one).
+ *                                  Authenticated: it doubles as the app's connection test.
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
@@ -592,6 +595,13 @@ export class AcediaApiServer {
         if (method === "POST" && path === "/api/events/read-all") {
             this.store.markAllRead();
             return json(res, 204, null);
+        }
+
+        // GET /api/identity — the assistant's name the mobile app shows (ADR-020 D2): ASSISTANT_NAME, else
+        // "LunAcedia". Standalone is a product of its own — never "Natsume" here.
+        if (method === "GET" && path === "/api/identity") {
+            const name = process.env["ASSISTANT_NAME"]?.trim() || "LunAcedia";
+            return json(res, 200, { name, kind: "lunacedia", version: PACKAGE_VERSION });
         }
 
         // POST /api/events/held — which of these keys the box still holds (ADR-019 L10)
