@@ -16,9 +16,11 @@ import type { AcediaEvent } from "../types/acedia_event.js";
 export const INBOX_CHANGED = "inbox.changed" as const;
 
 export interface InboxChange {
-    op: "removed" | "read" | "unread";
+    /** `updated` (ADR-019 L3): the item is still there but its content changed at the source — `item` carries it. */
+    op: "removed" | "read" | "unread" | "updated";
     key: string;
     source: AcediaEvent["source"];
+    item?: Pick<AcediaEvent, "title" | "body" | "priority" | "ts">;
 }
 
 export interface InboxSyncDeps {
@@ -46,7 +48,7 @@ export class InboxSync {
             title: "",
             priority: "info",
             dedupeKey: `sync-${change.op}-${change.key}-${ts}`,
-            meta: { op: change.op, key: change.key },
+            meta: { op: change.op, key: change.key, ...(change.item && { item: change.item }) },
         };
     }
 
@@ -93,9 +95,10 @@ export class InboxSync {
             this.deps.forget(change.key);
         } else if (change.op === "read") {
             this.deps.store.markRead(change.key);
-        } else {
+        } else if (change.op === "unread") {
             this.deps.store.markUnread(change.key);
         }
+        // "updated": the store already holds the fresh content (EventStore.refresh) — only the wire is left.
         this.deps.emit(change);
     }
 }
