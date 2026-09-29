@@ -109,7 +109,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
  *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards, chantier A)
- *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error } if invalid
+ *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
+ *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
  *   GET  /api/guard/journal        ?limit=  events a rule dropped, newest first (never silent, restorable)
  *   POST /api/guard/journal/restore body: { dedupeKey }  re-dispatches a dropped event, bypassing dedup + guard
  *   POST /api/guard/preview        body: { rules? }  what-if against the store + journal, changes nothing
@@ -259,7 +260,7 @@ export class AcediaApiServer {
             }
             const rules = (body as { rules?: unknown } | null)?.rules;
             const result = await g.rules.replaceAll(rules);
-            if (!result.ok) return json(res, 400, { error: result.error });
+            if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
             return json(res, 200, rulesPayload());
         }
@@ -299,7 +300,8 @@ export class AcediaApiServer {
             let candidate = g.rules.getRules();
             if (candidateInput !== undefined) {
                 const parsed = validateRules(candidateInput);
-                if (!parsed.ok) return json(res, 400, { error: parsed.error });
+                if (!parsed.ok)
+                    return json(res, 400, { error: parsed.error, problem: parsed.problem });
                 candidate = parsed.rules;
             }
             // What a rule could be tested against: what already passed (the store) and what was dropped (the journal).
