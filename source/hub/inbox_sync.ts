@@ -30,6 +30,20 @@ export interface InboxSyncDeps {
     emit: (change: InboxChange) => void;
     /** Drops the key from dedup so the item comes back if its object does (restored mail, new activity). */
     forget: (key: string) => void;
+    /**
+     * How long a purely informational item (RSS, Home Assistant) stays in the box (ADR-019 L7): there is no
+     * source object whose life it could follow, so it expires by age. Default INBOX_INFO_TTL_HOURS (72 h).
+     */
+    infoTtlMs?: number;
+    now?: () => number;
+}
+
+/** Sources with no object to follow at the source: their items expire by age. */
+const INFORMATIONAL: ReadonlySet<AcediaEvent["source"]> = new Set(["rss", "ha"]);
+
+function defaultInfoTtlMs(): number {
+    const hours = parseInt(process.env["INBOX_INFO_TTL_HOURS"] ?? "72", 10);
+    return (Number.isFinite(hours) && hours > 0 ? hours : 72) * 3_600_000;
 }
 
 const STORE_SCAN = 1_000;
@@ -83,8 +97,22 @@ export class InboxSync {
                         this.applyLocal({ op: "unread", key: e.dedupeKey, source: e.source });
                 }
             }
+            this.expireInformational(events as AcediaEvent[]);
         } finally {
             this.running = false;
+        }
+    }
+
+    /**
+     * Removes informational items past their lifetime. Unlike a source removal, the key stays in dedup: the
+     * item is still in its feed and must not come back as news.
+     */
+    private expireInformational(events: AcediaEvent[]): void {
+        const cutoff = (this.deps.now ?? Date.now)() - (this.deps.infoTtlMs ?? defaultInfoTtlMs());
+        for (const e of events) {
+            if (!INFORMATIONAL.has(e.source) || e.ts >= cutoff) continue;
+            this.deps.store.remove(e.dedupeKey);
+            this.deps.emit({ op: "removed", key: e.dedupeKey, source: e.source });
         }
     }
 
