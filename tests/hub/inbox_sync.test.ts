@@ -168,3 +168,21 @@ describe("the wire message", () => {
         });
     });
 });
+
+describe("InboxSync — updated (ADR-019 L3)", () => {
+    it("sends the fresh content on the wire and touches nothing in the store", () => {
+        const { store, emitted, forgotten, sync } = setup([item("cal-1", "calendar")], []);
+        sync.applyLocal({
+            op: "updated",
+            key: "cal-1",
+            source: "calendar",
+            item: { title: "moved", priority: "normal", ts: 2, body: undefined },
+        });
+        expect(store.get("cal-1")?.read).toBe(false);
+        expect(forgotten).toEqual([]);
+        expect(emitted).toHaveLength(1);
+        const wire = InboxSync.toWire(emitted[0]!, 9);
+        expect(wire.type).toBe(INBOX_CHANGED);
+        expect(wire.meta).toMatchObject({ op: "updated", key: "cal-1", item: { title: "moved" } });
+    });
+});
