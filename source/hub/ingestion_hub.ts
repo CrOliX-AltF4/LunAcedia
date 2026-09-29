@@ -58,6 +58,8 @@ export class IngestionHub {
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
     private normalTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
+    /** The initial sweep finished: the box reflects the sources (see isReady). */
+    private initialSweepDone = false;
 
     constructor(
         private readonly connectors: IConnector[],
@@ -152,6 +154,14 @@ export class IngestionHub {
         }
     }
 
+    /**
+     * Whether the box reflects the sources yet: false until the initial sweep after start() finished. A
+     * client reconciling its copies against the box (the Core, ADR-019 L10) must not remove anything before.
+     */
+    isReady(): boolean {
+        return this.initialSweepDone;
+    }
+
     onEvent(handler: EventHandler): () => void {
         this.handlers.add(handler);
         return () => this.handlers.delete(handler);
@@ -209,6 +219,7 @@ export class IngestionHub {
         // Initial sweep
         void this.pollAll().finally(() => {
             this.quietFirstSweep = false;
+            this.initialSweepDone = true;
         });
 
         this.urgentTimer = setInterval(() => void this.pollUrgent(), URGENT_POLL_MS);

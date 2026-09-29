@@ -83,9 +83,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
- *   POST /api/events/held          body: { keys: string[] } (≤ 2000) → { held: { [key]: { read } } } — which of
+ *   POST /api/events/held          body: { keys: string[] } (≤ 2000) → { held: { [key]: { read } }, ready } — which of
  *                                  these keys the box still holds; a key absent from `held` is gone
- *                                  (ADR-019 L10: the Core reconciles its copies against the box)
+ *                                  (ADR-019 L10: the Core reconciles its copies against the box; ready=false
+ *                                  while the initial sweep runs — nothing may be removed on that answer)
  *   POST /api/events/clear-read    → 200 { removed: number } — drops every already-read event
  *   POST /api/events/:dedupeKey/read → 204
  *   GET  /api/stats
@@ -614,7 +615,8 @@ export class AcediaApiServer {
                 const e = this.store.get(key);
                 if (e) held[key] = { read: e.read === true };
             }
-            return json(res, 200, { held });
+            // `ready`: false until the hub's initial sweep finished — the box may still be filling.
+            return json(res, 200, { held, ready: this.hub.isReady() });
         }
 
         // POST /api/events/clear-read

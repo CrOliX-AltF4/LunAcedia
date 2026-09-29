@@ -1712,7 +1712,10 @@ describe("AcediaApiServer — POST /api/events/held (ADR-019 L10)", () => {
         );
         server.stop();
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ held: { e1: { read: false }, e2: { read: true } } });
+        expect(res.body).toEqual({
+            held: { e1: { read: false }, e2: { read: true } },
+            ready: false, // the hub was never started: its initial sweep has not run
+        });
     });
 
     it("refuses a body that is not a bounded list of keys", async () => {
