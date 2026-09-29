@@ -516,3 +516,23 @@ describe("IngestionHub — refresh and held keys (ADR-019 L2/L3)", () => {
         expect(news).toEqual(["gone"]);
     });
 });
+
+describe("IngestionHub.isReady (ADR-019 L10)", () => {
+    let hub: IngestionHub;
+    afterEach(() => hub.stop());
+
+    it("is false until the initial sweep after start() has finished", async () => {
+        let release!: (events: AcediaEvent[]) => void;
+        const poll = vi.fn().mockReturnValueOnce(
+            new Promise<AcediaEvent[]>((r) => {
+                release = r;
+            }),
+        );
+        hub = new IngestionHub([{ slug: "email", name: "Mock", poll }]);
+        expect(hub.isReady()).toBe(false);
+        hub.start();
+        expect(hub.isReady()).toBe(false);
+        release([]);
+        await vi.waitFor(() => expect(hub.isReady()).toBe(true), { timeout: 2000, interval: 10 });
+    });
+});
