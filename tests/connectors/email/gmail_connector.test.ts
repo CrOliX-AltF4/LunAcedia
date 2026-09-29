@@ -98,7 +98,7 @@ describe("GmailConnector", () => {
         expect(events[0]!.type).toBe("email.received");
     });
 
-    it("should filter out messages older than GMAIL_MAX_AGE_HOURS", async () => {
+    it("collects a mail older than GMAIL_MAX_AGE_HOURS, flagged as backlog (C7)", async () => {
         vi.stubGlobal(
             "fetch",
             makeFetch([
@@ -107,8 +107,51 @@ describe("GmailConnector", () => {
             ]),
         );
         const events = await new GmailConnector().poll();
-        expect(events.some((e) => e.title === "Fresh")).toBe(true);
-        expect(events.every((e) => e.title !== "Old")).toBe(true);
+        const fresh = events.find((e) => e.title === "Fresh");
+        const old = events.find((e) => e.title === "Old");
+        expect(fresh?.meta?.["backlog"]).toBeUndefined();
+        expect(old?.meta?.["backlog"]).toBe(true);
+    });
+
+    it("lists the whole inbox page after page, up to GMAIL_MAX_INBOX", async () => {
+        process.env["GMAIL_MAX_INBOX"] = "3";
+        const listUrls: string[] = [];
+        const fetchImpl = vi.fn().mockImplementation((url: string) => {
+            const u = String(url);
+            if (u.includes("oauth2.googleapis.com"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            if (u.includes("/messages?q=")) {
+                listUrls.push(u);
+                const second = u.includes("pageToken=p2");
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve(
+                            second
+                                ? { messages: [{ id: "m3" }, { id: "m4" }] }
+                                : { messages: [{ id: "m1" }, { id: "m2" }], nextPageToken: "p2" },
+                        ),
+                });
+            }
+            const id = /messages\/(m\d)/.exec(u)?.[1] ?? "";
+            return Promise.resolve({
+                ok: true,
+                json: () =>
+                    Promise.resolve({
+                        id,
+                        internalDate: FRESH_TS,
+                        payload: { headers: [{ name: "Subject", value: id }] },
+                    }),
+            });
+        });
+        vi.stubGlobal("fetch", fetchImpl);
+        const events = await new GmailConnector().poll();
+        delete process.env["GMAIL_MAX_INBOX"];
+        expect(listUrls).toHaveLength(2);
+        expect(events.map((e) => e.title)).toEqual(["m1", "m2", "m3"]);
     });
 
     it("should apply priority rules", async () => {
