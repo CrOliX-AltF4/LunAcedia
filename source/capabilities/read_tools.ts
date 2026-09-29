@@ -49,7 +49,10 @@ const SEARCH_SCHEMA: ObjectSchema = {
             maximum: 720,
             description: "Only the last N hours.",
         },
-        text: { type: "string", description: "Case-insensitive text in the title or body." },
+        text: {
+            type: "string",
+            description: "Case-insensitive text in the title, the body or the sender.",
+        },
         limit: {
             type: "integer",
             minimum: 1,
@@ -88,7 +91,7 @@ export function readToolDefinitions(): ToolDefinition[] {
         {
             name: "search_events",
             description:
-                "Search the mail, calendar, tasks, GitHub and feed events LunAcedia received (unread mail, and everything since it started). Returns compact items with the ids actions need.",
+                "Search LunAcedia's box: the whole mail inbox (read and unread), upcoming calendar events, tasks due, GitHub notifications and feed items. Returns compact items with the ids actions need. Filter by `unread` only when the user asks for unread items; when nothing matches, search again with fewer filters before concluding it does not exist.",
             parameters: SEARCH_SCHEMA,
         },
         {
@@ -147,7 +150,8 @@ function searchEvents(args: Record<string, unknown>, deps: ReadToolDeps): ReadTo
         (e) =>
             !text ||
             e.title.toLowerCase().includes(text) ||
-            (e.body ?? "").toLowerCase().includes(text),
+            (e.body ?? "").toLowerCase().includes(text) ||
+            (typeof e.meta?.["from"] === "string" && e.meta["from"].toLowerCase().includes(text)),
     );
     const limit = (args["limit"] as number | undefined) ?? 10;
     return {

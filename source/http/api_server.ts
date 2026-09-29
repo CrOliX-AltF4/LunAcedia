@@ -83,6 +83,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
+ *   POST /api/events/held          body: { keys: string[] } (≤ 2000) → { held: { [key]: { read } } } — which of
+ *                                  these keys the box still holds; a key absent from `held` is gone
+ *                                  (ADR-019 L10: the Core reconciles its copies against the box)
  *   POST /api/events/clear-read    → 200 { removed: number } — drops every already-read event
  *   POST /api/events/:dedupeKey/read → 204
  *   GET  /api/stats
@@ -129,6 +132,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
  */
+/** Keys one /api/events/held call may ask about — the box itself holds at most 1000 items. */
+const HELD_KEYS_MAX = 2000;
+
 export class AcediaApiServer {
     private server: http.Server | null = null;
     private readonly startedAt = Date.now();
@@ -583,6 +589,32 @@ export class AcediaApiServer {
         if (method === "POST" && path === "/api/events/read-all") {
             this.store.markAllRead();
             return json(res, 204, null);
+        }
+
+        // POST /api/events/held — which of these keys the box still holds (ADR-019 L10)
+        if (method === "POST" && path === "/api/events/held") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const keys = (body as { keys?: unknown } | null)?.keys;
+            if (
+                !Array.isArray(keys) ||
+                keys.length > HELD_KEYS_MAX ||
+                !keys.every((k) => typeof k === "string")
+            ) {
+                return json(res, 400, {
+                    error: `Body must be { keys: string[] } with at most ${HELD_KEYS_MAX} keys`,
+                });
+            }
+            const held: Record<string, { read: boolean }> = {};
+            for (const key of keys as string[]) {
+                const e = this.store.get(key);
+                if (e) held[key] = { read: e.read === true };
+            }
+            return json(res, 200, { held });
         }
 
         // POST /api/events/clear-read

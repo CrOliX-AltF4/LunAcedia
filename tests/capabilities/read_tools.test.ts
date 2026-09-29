@@ -70,6 +70,20 @@ describe("search_events", () => {
         expect(keys("dentiste")).toEqual(["email-2"]);
     });
 
+    it("matches the sender too (C23: a mail named by who sent it must be found)", () => {
+        const d = deps([
+            mail("1", { title: "Hello", meta: { messageId: "1", from: "Paul <paul@x.fr>" } }),
+        ]);
+        const r = runReadTool("search_events", { text: "paul" }, d);
+        expect(r.ok && (r.result as { total: number }).total).toBe(1);
+    });
+
+    it("describes the box as the whole inbox, not only unread mail (C23)", () => {
+        const search = readToolDefinitions().find((t) => t.name === "search_events")!;
+        expect(search.description).toContain("read and unread");
+        expect(search.description).not.toContain("everything since it started");
+    });
+
     it("keeps only the recent window when sinceHours is given", () => {
         const d = deps([
             mail("old", { ts: NOW - 5 * 3_600_000 }),
