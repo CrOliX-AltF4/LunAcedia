@@ -19,6 +19,15 @@ const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 /** Trashed mails read at once by listTrash() — fast enough, gentle on the Gmail API quota. */
 const TRASH_READ_CONCURRENCY = 8;
 
+class GmailListError extends Error {
+    constructor(
+        query: string,
+        readonly status: number,
+    ) {
+        super(`[Gmail] list "${query}" returned ${status}`);
+    }
+}
+
 interface MessageHeader {
     name: string;
     value: string;
@@ -36,13 +45,16 @@ interface GmailMessageMeta {
 }
 
 /**
- * Polls Gmail INBOX for unread messages and classifies them by configurable rules.
+ * Polls the whole Gmail INBOX (read and unread) and classifies each mail by configurable rules.
  *
  * Config (in .env):
  *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN — OAuth2 credentials
  *                — GMAIL_REFRESH_TOKEN is a fallback; ignored once GoogleTokenStore has one
  *                  for "gmail" (obtained via GET /api/oauth/google/start?connector=gmail)
- *   GMAIL_MAX_AGE_HOURS=24            — ignore messages older than N hours
+ *   GMAIL_MAX_AGE_HOURS=24            — announce window: an older mail is still collected (the box is the
+ *                                        whole inbox, ADR-018 D2) but flagged `meta.backlog` — stored, never
+ *                                        announced to the Core nor pushed (live check 2026-09-28, C7)
+ *   GMAIL_MAX_INBOX=500               — how many inbox mails are listed at most (paginated)
  *   GMAIL_POLL_INTERVAL_MIN=5         — poll frequency
  *   GMAIL_RULES='[{"senderPattern":"boss@corp.com","priority":"urgent"}]'
  *                — fallback only; ignored once EmailClassificationStore has anything configured
@@ -60,6 +72,7 @@ export class GmailConnector implements IConnector {
     private readonly clientSecret: string;
     private readonly staticRefreshToken: string;
     private readonly maxAgeMs: number;
+    private readonly maxInbox: number;
     /** Legacy fallback, parsed once from GMAIL_RULES at construction. */
     private readonly staticRules: EmailRule[];
     private readonly classificationStore?: EmailClassificationStore;
@@ -79,6 +92,7 @@ export class GmailConnector implements IConnector {
 
         const maxAgeHours = parseInt(process.env["GMAIL_MAX_AGE_HOURS"] ?? "24", 10);
         this.maxAgeMs = Math.max(1, maxAgeHours) * 3_600_000;
+        this.maxInbox = Math.max(1, parseInt(process.env["GMAIL_MAX_INBOX"] ?? "500", 10) || 500);
 
         this.staticRules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
 
@@ -119,21 +133,12 @@ export class GmailConnector implements IConnector {
 
         let ids: string[];
         try {
-            const resp = await fetch(
-                // The whole inbox, read and unread, like Gmail itself (ADR-018 D2): a mail leaves the box
-                // when it is archived or trashed, not when it is read.
-                `${GMAIL_API}/messages?q=label:inbox&maxResults=50`,
-                { headers: authHeaders },
-            );
-            if (!resp.ok) {
-                if (resp.status === 401) clearTokenCache();
-                console.warn(`[Gmail] list messages returned ${resp.status}`);
-                return [];
-            }
-            const data = (await resp.json()) as { messages?: Array<{ id: string }> };
-            ids = (data.messages ?? []).map((m) => m.id);
+            // The whole inbox, read and unread, like Gmail itself (ADR-018 D2): a mail leaves the box
+            // when it is archived or trashed, not when it is read. Paginated — it used to stop at 50.
+            ids = [...(await this.listIds(token, "label:inbox"))];
         } catch (e) {
-            console.error("[Gmail] list error:", (e as Error).message);
+            if (e instanceof GmailListError && e.status === 401) clearTokenCache();
+            console.warn("[Gmail] list error:", (e as Error).message);
             return [];
         }
 
@@ -156,7 +161,8 @@ export class GmailConnector implements IConnector {
                         ?.value ?? "";
 
                 const ts = parseInt(msg.internalDate, 10);
-                if (ts < cutoff) continue;
+                // Collected whatever its age (C7): the age only decides whether it is news.
+                const backlog = ts < cutoff;
 
                 const from = header("From");
                 const subject = header("Subject") || "(no subject)";
@@ -175,6 +181,7 @@ export class GmailConnector implements IConnector {
                     dedupeKey: `email-${id}`,
                     read: !(msg.labelIds ?? []).includes("UNREAD"),
                     meta: {
+                        ...(backlog && { backlog: true }),
                         from,
                         messageId: id,
                         threadId: msg.threadId,
@@ -201,16 +208,28 @@ export class GmailConnector implements IConnector {
         return getAccessToken(this.clientId, this.clientSecret, refreshToken);
     }
 
+    /** Every id the query lists, page after page, up to GMAIL_MAX_INBOX. Throws when a page cannot be read. */
     private async listIds(token: string, query: string): Promise<Set<string>> {
-        const resp = await fetch(
-            `${GMAIL_API}/messages?q=${encodeURIComponent(query)}&maxResults=100`,
-            {
-                headers: { Authorization: `Bearer ${token}` },
-            },
-        );
-        if (!resp.ok) throw new Error(`[Gmail] list "${query}" returned ${resp.status}`);
-        const data = (await resp.json()) as { messages?: Array<{ id: string }> };
-        return new Set((data.messages ?? []).map((m) => m.id));
+        const ids = new Set<string>();
+        let pageToken: string | undefined;
+        do {
+            const page = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+            const resp = await fetch(
+                `${GMAIL_API}/messages?q=${encodeURIComponent(query)}&maxResults=100${page}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (!resp.ok) throw new GmailListError(query, resp.status);
+            const data = (await resp.json()) as {
+                messages?: Array<{ id: string }>;
+                nextPageToken?: string;
+            };
+            for (const m of data.messages ?? []) {
+                if (ids.size >= this.maxInbox) return ids;
+                ids.add(m.id);
+            }
+            pageToken = data.nextPageToken;
+        } while (pageToken);
+        return ids;
     }
 
     /**

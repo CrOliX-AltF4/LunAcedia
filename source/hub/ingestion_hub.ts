@@ -13,7 +13,11 @@ function resolveSeenPath(): string {
     return path.join(storageDir, "dedup_seen.json");
 }
 
-/** `recovered`: the box lost this item and it came back (recoverMissing) — not new to anyone downstream. */
+/**
+ * `recovered`: not news to anyone downstream — the box lost this item and it came back (recoverMissing), it
+ * was collected by the first sweep of a fresh install, or its connector flagged it as backlog (`meta.backlog`:
+ * an old mail collected because the box is the whole inbox, C7). Stored in the box, never announced.
+ */
 export interface DispatchMeta {
     recovered: boolean;
 }
@@ -255,7 +259,10 @@ export class IngestionHub {
 
         this.seen.set(event.dedupeKey, event.ts);
         void this.saveSeen();
-        const recovered = this.recovering.delete(event.dedupeKey) || this.quietFirstSweep;
+        const recovered =
+            this.recovering.delete(event.dedupeKey) ||
+            this.quietFirstSweep ||
+            event.meta?.["backlog"] === true;
         this.notify(event, { recovered });
     }
 

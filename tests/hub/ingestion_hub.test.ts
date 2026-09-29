@@ -420,6 +420,32 @@ describe("IngestionHub — the first sweep without a dedup file is quiet", () =>
         ]);
     });
 
+    it("stores a backlog event without announcing it (C7)", async () => {
+        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+        await fs.writeFile(seenPath, "{}", "utf-8");
+        hub = new IngestionHub(
+            [
+                makeConnector([
+                    { ...baseEvent, dedupeKey: "old", meta: { backlog: true } },
+                    { ...baseEvent, dedupeKey: "new" },
+                ]),
+            ],
+            seenPath,
+        );
+        await hub.load();
+
+        const received: Array<{ key: string; recovered: boolean }> = [];
+        hub.onEvent((e, meta) =>
+            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
+        );
+        hub.start();
+        await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 2000, interval: 20 });
+        expect(received).toEqual([
+            { key: "old", recovered: true },
+            { key: "new", recovered: false },
+        ]);
+    });
+
     it("is not quiet when a dedup file exists", async () => {
         seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
         await fs.writeFile(seenPath, "{}", "utf-8");
