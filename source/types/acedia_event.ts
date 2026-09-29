@@ -16,7 +16,7 @@ export type AcediaEventType =
     | "system.heartbeat"
     /**
      * Sync message (ADR-018 R8): an item changed or died with its source object — meta { op, key }, op one of
-     * removed | read | unread | updated; `updated` (ADR-019 L3) also carries meta.item { title, body, priority,
+     * removed | read | unread | updated — `updated` (ADR-019 L3) also carries meta.item { title, body, priority,
      * ts } — a refresh of what the client holds, never news.
      */
     | "inbox.changed";
