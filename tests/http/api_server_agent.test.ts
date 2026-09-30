@@ -225,6 +225,44 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             expect(executed).toEqual([]);
         });
 
+        // ADR-020 amendment 1, S2a — the Core relays third-party text it got in an earlier turn: a fresh run here
+        // must not be a clean slate for it (the "read the mail, then 'vas-y'" laundering through the Core).
+        it("holds an auto-tier action from the first step when the caller says its context is untrusted", async () => {
+            const executed: ConnectorAction[] = [];
+            const ai = scripted([
+                { content: null, toolCalls: [toolCall("archive_email", { sourceId: "1" })] },
+                { content: "À confirmer.", toolCalls: [] },
+            ]);
+            const base = await start({
+                ai,
+                connectors: [connector("Gmail", executed)],
+                tiers: { archive_email: "auto" },
+            });
+            const r = await call("POST", `${base}/api/agent`, {
+                text: "archive tous les mails",
+                untrusted: true,
+            });
+            expect(r.body.actions[0]).toMatchObject({ kind: "archive_email", status: "pending" });
+            expect(r.body.external).toBe(true);
+            expect(executed).toEqual([]);
+        });
+
+        it("ignores an untrusted value that is not true — it can only restrict", async () => {
+            const executed: ConnectorAction[] = [];
+            const ai = scripted([
+                { content: null, toolCalls: [toolCall("archive_email", { sourceId: "1" })] },
+                { content: "Archivé.", toolCalls: [] },
+            ]);
+            const base = await start({
+                ai,
+                connectors: [connector("Gmail", executed)],
+                tiers: { archive_email: "auto" },
+            });
+            const r = await call("POST", `${base}/api/agent`, { text: "archive-le", untrusted: "no" });
+            expect(r.body.actions[0]).toMatchObject({ status: "executed" });
+            expect(executed).toEqual([{ kind: "archive_email", sourceId: "1" }]);
+        });
+
         it("passes read-only mode through: no action is executed nor queued", async () => {
             const executed: ConnectorAction[] = [];
             const ai = scripted([
