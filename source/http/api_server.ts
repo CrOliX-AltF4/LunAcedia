@@ -12,6 +12,8 @@ import { createAIProvider, loadSystemPrompt } from "../ai/create_ai_provider.js"
 import { AgentService } from "../agent/agent_service.js";
 import type { InboxSync } from "../hub/inbox_sync.js";
 import { InboxRoutes } from "./inbox_routes.js";
+import { ConversationRoutes } from "./conversation_routes.js";
+import type { ConversationStore } from "../store/conversation_store.js";
 import { runAgent, type AgentRequest, type AgentResult } from "../agent/agent_loop.js";
 import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
 import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
@@ -164,12 +166,28 @@ export class AcediaApiServer {
         private readonly agent: AgentService = new AgentService(),
         // The box and the sync rule (ADR-018) — absent in tests that do not exercise them.
         inbox?: InboxSync,
+        // The pocket app's topics (ADR-020 amendment 1, S1) — absent in tests that do not exercise them.
+        topics?: ConversationStore,
     ) {
         this.inboxSync = inbox ?? null;
         this.inboxRoutes = inbox
             ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
             : null;
+        this.conversationRoutes = topics
+            ? new ConversationRoutes({
+                  topics,
+                  store,
+                  ai: () => this.ai,
+                  agentEnabled: () => this.agent.isEnabled(),
+                  runAgent: (r) => this.runAgentRequest(r),
+                  readBody,
+                  json,
+              })
+            : null;
     }
+
+    /** Null without a topic store. Public for tests: settled() waits for background titles and summaries. */
+    readonly conversationRoutes: ConversationRoutes | null;
 
     private readonly inboxSync: InboxSync | null;
 
@@ -812,6 +830,13 @@ export class AcediaApiServer {
 
         // The box: Master's gestures at the source, trash, journal (ADR-018 R1/R3)
         if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
+
+        // The pocket app's topics (ADR-020 amendment 1, S1)
+        if (
+            this.conversationRoutes &&
+            (await this.conversationRoutes.handle(method, path, url, req, res))
+        )
+            return;
 
         // Ingestion guards (chantier A): /api/guard/{rules,journal,journal/restore,preview}
         if (path.startsWith("/api/guard/")) {

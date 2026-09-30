@@ -22,6 +22,7 @@ import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
 import { AgentService, defaultAgentSettingsPath } from "./agent/agent_service.js";
 import { InboxSync } from "./hub/inbox_sync.js";
+import { ConversationStore, defaultConversationDir } from "./store/conversation_store.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -72,6 +73,9 @@ const pendingStore = new PendingActionStore();
 // The agent's switch (ADR-017 M5) — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
+// The pocket app's topics (ADR-020 amendment 1, S1) — kept server side, the same from every client.
+const topics = new ConversationStore(defaultConversationDir());
+await topics.load();
 // The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
 const inboxSync = new InboxSync({
     connectors,
@@ -95,6 +99,7 @@ const api = new AcediaApiServer(
     { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
     agent,
     inboxSync,
+    topics,
 );
 
 if (fcm) await fcm.load();
