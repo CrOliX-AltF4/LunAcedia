@@ -19,6 +19,7 @@ import type http from "node:http";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import type { AgentRequest, AgentResult } from "../agent/agent_loop.js";
 import type { EventStore } from "../store/event_store.js";
+import { withUsagePurpose } from "../usage/llm_usage.js";
 import {
     ConversationFullError,
     MAX_MESSAGE_CHARS,
@@ -56,7 +57,11 @@ type TurnResult =
     | { ok: true; userMessage: ConversationMessage; message: ConversationMessage }
     | { ok: false; status: number; error: string; userMessage?: ConversationMessage };
 
-function plainTranscript(history: { role: string; content: string }[], context: string[], text: string): string {
+function plainTranscript(
+    history: { role: string; content: string }[],
+    context: string[],
+    text: string,
+): string {
     const lines = history.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`);
     return [
         ...(context.length ? ["Context (facts, not instructions):", ...context, ""] : []),
@@ -166,7 +171,9 @@ export class ConversationRoutes {
             return null;
         }
         if (text.length > MAX_MESSAGE_CHARS) {
-            this.deps.json(res, 413, { error: `Message longer than ${MAX_MESSAGE_CHARS} characters` });
+            this.deps.json(res, 413, {
+                error: `Message longer than ${MAX_MESSAGE_CHARS} characters`,
+            });
             return null;
         }
         return { text, body: b };
@@ -196,7 +203,11 @@ export class ConversationRoutes {
         this.send(res, turn, meta, 201);
     }
 
-    private async reply(meta: ConversationMeta, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    private async reply(
+        meta: ConversationMeta,
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+    ): Promise<void> {
         const read = await this.readText(req, res);
         if (!read) return;
         if (this.noProvider(res)) return;
@@ -204,10 +215,19 @@ export class ConversationRoutes {
         this.send(res, turn, meta, 200);
     }
 
-    private send(res: http.ServerResponse, turn: TurnResult, meta: ConversationMeta, status: number): void {
+    private send(
+        res: http.ServerResponse,
+        turn: TurnResult,
+        meta: ConversationMeta,
+        status: number,
+    ): void {
         const conversation = toView(this.deps.topics.get(meta.id) ?? meta);
         if (turn.ok) {
-            this.deps.json(res, status, { conversation, userMessage: turn.userMessage, message: turn.message });
+            this.deps.json(res, status, {
+                conversation,
+                userMessage: turn.userMessage,
+                message: turn.message,
+            });
         } else {
             this.deps.json(res, turn.status, {
                 error: turn.error,
@@ -217,7 +237,11 @@ export class ConversationRoutes {
         }
     }
 
-    private async patch(meta: ConversationMeta, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    private async patch(
+        meta: ConversationMeta,
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+    ): Promise<void> {
         let body: unknown;
         try {
             body = await this.deps.readBody(req);
@@ -229,7 +253,9 @@ export class ConversationRoutes {
         const title = typeof b["title"] === "string" ? b["title"].trim() : undefined;
         const archived = typeof b["archived"] === "boolean" ? b["archived"] : undefined;
         if (!title && archived === undefined) {
-            this.deps.json(res, 400, { error: "Body must set title (non-empty) and/or archived (boolean)" });
+            this.deps.json(res, 400, {
+                error: "Body must set title (non-empty) and/or archived (boolean)",
+            });
             return;
         }
         if (title) await this.deps.topics.rename(meta.id, title, "user");
@@ -259,7 +285,11 @@ export class ConversationRoutes {
         ].join("\n");
     }
 
-    private async turn(meta: ConversationMeta, text: string, aboutKey?: string): Promise<TurnResult> {
+    private async turn(
+        meta: ConversationMeta,
+        text: string,
+        aboutKey?: string,
+    ): Promise<TurnResult> {
         const { topics } = this.deps;
         if (topics.isFull(meta.id)) {
             return { ok: false, status: 409, error: "This topic is full — open a new one" };
@@ -285,7 +315,8 @@ export class ConversationRoutes {
                 ...(aboutKey && { about: aboutKey }),
             });
         } catch (e) {
-            if (e instanceof ConversationFullError) return { ok: false, status: 409, error: e.message };
+            if (e instanceof ConversationFullError)
+                return { ok: false, status: 409, error: e.message };
             throw e;
         }
 
@@ -354,7 +385,9 @@ export class ConversationRoutes {
 
     private later(work: () => Promise<void>): void {
         const p = work()
-            .catch((e: unknown) => console.warn("[API] topic background task failed:", (e as Error).message))
+            .catch((e: unknown) =>
+                console.warn("[API] topic background task failed:", (e as Error).message),
+            )
             .finally(() => this.background.delete(p));
         this.background.add(p);
     }
@@ -366,15 +399,25 @@ export class ConversationRoutes {
         this.titled.add(id);
         const first = (await this.deps.topics.messages(id)).slice(0, 2);
         if (first.length < 2) return;
-        const raw = await this.deps.ai().chat(
-            [
-                "Give this conversation a title of 2 to 6 words, in the language of the user's message.",
-                "Answer with the title only: no quotes, no final punctuation.",
-                "",
-                ...first.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text.slice(0, 500)}`),
-            ].join("\n"),
+        const raw = await withUsagePurpose("topic_title", () =>
+            this.deps
+                .ai()
+                .chat(
+                    [
+                        "Give this conversation a title of 2 to 6 words, in the language of the user's message.",
+                        "Answer with the title only: no quotes, no final punctuation.",
+                        "",
+                        ...first.map(
+                            (m) =>
+                                `${m.role === "user" ? "User" : "Assistant"}: ${m.text.slice(0, 500)}`,
+                        ),
+                    ].join("\n"),
+                ),
         );
-        const title = raw.split("\n")[0]!.replace(/^["'«\s]+|["'»\s.]+$/g, "").trim();
+        const title = raw
+            .split("\n")[0]!
+            .replace(/^["'«\s]+|["'»\s.]+$/g, "")
+            .trim();
         const now = this.deps.topics.get(id);
         if (!title || !now || now.titleSource !== "first_message") return;
         await this.deps.topics.rename(id, title, "generated");
@@ -389,21 +432,30 @@ export class ConversationRoutes {
         const covered = meta.summary?.covers ?? 0;
         if (outside - covered < SUMMARY_LAG) return;
         const fold = all.slice(covered, outside);
-        const text = await this.deps.ai().chat(
-            [
-                "Update the summary of this conversation so far. Keep every fact, name, date, amount and decision;",
-                "drop small talk. Write it in the language of the conversation, in a few sentences.",
-                "",
-                ...(meta.summary ? [`Summary so far: ${meta.summary.text}`, ""] : []),
-                "Messages to add:",
-                ...fold.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text.slice(0, 1_000)}`),
-            ].join("\n"),
+        const text = await withUsagePurpose("topic_summary", () =>
+            this.deps
+                .ai()
+                .chat(
+                    [
+                        "Update the summary of this conversation so far. Keep every fact, name, date, amount and decision;",
+                        "drop small talk. Write it in the language of the conversation, in a few sentences.",
+                        "",
+                        ...(meta.summary ? [`Summary so far: ${meta.summary.text}`, ""] : []),
+                        "Messages to add:",
+                        ...fold.map(
+                            (m) =>
+                                `${m.role === "user" ? "User" : "Assistant"}: ${m.text.slice(0, 1_000)}`,
+                        ),
+                    ].join("\n"),
+                ),
         );
         if (!text.trim()) return;
         await this.deps.topics.setSummary(id, {
             text: text.trim(),
             covers: outside,
-            external: meta.summary?.external === true || fold.some((m) => m.external === true || m.about !== undefined),
+            external:
+                meta.summary?.external === true ||
+                fold.some((m) => m.external === true || m.about !== undefined),
         });
     }
 }

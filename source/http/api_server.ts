@@ -13,6 +13,14 @@ import { AgentService } from "../agent/agent_service.js";
 import type { InboxSync } from "../hub/inbox_sync.js";
 import { InboxRoutes } from "./inbox_routes.js";
 import { ConversationRoutes } from "./conversation_routes.js";
+import {
+    callerOf,
+    withUsageContext,
+    type UsageContext,
+    type UsageLedger,
+} from "../usage/llm_usage.js";
+import type { UsageAlerts } from "../usage/usage_alerts.js";
+import { UsageRoutes } from "./usage_routes.js";
 import type { ConversationStore } from "../store/conversation_store.js";
 import { runAgent, type AgentRequest, type AgentResult } from "../agent/agent_loop.js";
 import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
@@ -135,6 +143,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET|POST /api/conversations, GET|PATCH|DELETE /api/conversations/:id, POST /api/conversations/:id/messages
  *                                  the pocket app's topics, answered by the agent with their earlier turns
  *                                  (ADR-020 amendment 1, S1) — contract in conversation_routes.ts
+ *   GET  /api/usage?days=30        LLM usage by day, caller, purpose and model + alert settings and fired alerts
+ *   GET|PUT /api/config/usage-alerts  spend alert paliers (ADR-021 P2) — information only, never a cap
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
@@ -142,6 +152,19 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
  */
+/**
+ * The usage context of a request (ADR-021 P2): who is asking and for what, from its route. An agent request declares
+ * its caller too (runAgentRequest), which wins — the Core asking counts as the Core.
+ */
+export function usageContextOf(url: string | undefined): UsageContext {
+    const path = new URL(url ?? "/", "http://localhost").pathname;
+    if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
+        return { caller: "topics", purpose: "topic" };
+    }
+    const purpose = /^\/api\/(agent|chat|intent|digest|proposals)$/.exec(path)?.[1] ?? "other";
+    return { caller: "api", purpose };
+}
+
 /** Keys one /api/events/held call may ask about — the box itself holds at most 1000 items. */
 const HELD_KEYS_MAX = 2000;
 
@@ -171,7 +194,10 @@ export class AcediaApiServer {
         inbox?: InboxSync,
         // The pocket app's topics (ADR-020 amendment 1, S1) — absent in tests that do not exercise them.
         topics?: ConversationStore,
+        // LLM usage and its alerts (ADR-021 P2) — absent in tests that do not exercise them.
+        usage?: { ledger: UsageLedger; alerts: UsageAlerts },
     ) {
+        this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
         this.inboxSync = inbox ?? null;
         this.inboxRoutes = inbox
             ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
@@ -189,6 +215,8 @@ export class AcediaApiServer {
             : null;
     }
 
+    private readonly usageRoutes: UsageRoutes | null;
+
     /** Null without a topic store. Public for tests: settled() waits for background titles and summaries. */
     readonly conversationRoutes: ConversationRoutes | null;
 
@@ -202,32 +230,35 @@ export class AcediaApiServer {
 
     /** One agent run over this server's store, calendar and tier gate, journaled (ADR-017). */
     private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
-        return this.agent.run(req, () =>
-            runAgent(req, {
-                provider: this.ai,
-                read: {
-                    store: this.store,
-                    busyIntervals: () => this.calendarBusyIntervals(),
-                    now: () => Date.now(),
-                    // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
-                    markRead: async (event) => {
-                        const connector = this.connectors.find((c) => c.slug === event.source);
-                        if (!connector?.inboxGesture) return;
-                        const r = await connector.inboxGesture("read", event);
-                        if (r.change && this.inboxSync) {
-                            this.inboxSync.applyLocal({
-                                op: r.change,
-                                key: event.dedupeKey,
-                                source: event.source,
-                            });
-                        }
+        // The declared caller wins over the route's default: the Core asking counts as the Core.
+        return withUsageContext({ caller: callerOf(req.callerId) }, () =>
+            this.agent.run(req, () =>
+                runAgent(req, {
+                    provider: this.ai,
+                    read: {
+                        store: this.store,
+                        busyIntervals: () => this.calendarBusyIntervals(),
+                        now: () => Date.now(),
+                        // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
+                        markRead: async (event) => {
+                            const connector = this.connectors.find((c) => c.slug === event.source);
+                            if (!connector?.inboxGesture) return;
+                            const r = await connector.inboxGesture("read", event);
+                            if (r.change && this.inboxSync) {
+                                this.inboxSync.applyLocal({
+                                    op: r.change,
+                                    key: event.dedupeKey,
+                                    source: event.source,
+                                });
+                            }
+                        },
                     },
-                },
-                dispatch: (connector, action, capToConfirm) =>
-                    this.dispatchAction(connector, action, capToConfirm),
-                persona: loadSystemPrompt(),
-                allowWrites: this.agent.writesEnabled(),
-            }),
+                    dispatch: (connector, action, capToConfirm) =>
+                        this.dispatchAction(connector, action, capToConfirm),
+                    persona: loadSystemPrompt(),
+                    allowWrites: this.agent.writesEnabled(),
+                }),
+            ),
         );
     }
 
@@ -343,7 +374,8 @@ export class AcediaApiServer {
 
     start(port: number): void {
         this.server = http.createServer((req, res) => {
-            void this.handle(req, res);
+            // ADR-021 P2: every LLM call a request makes is counted under its caller and purpose.
+            void withUsageContext(usageContextOf(req.url), () => this.handle(req, res));
         });
         this.server.listen(port, () => {
             console.warn(`[LunAcedia] HTTP API listening on port ${port}`);
@@ -836,6 +868,10 @@ export class AcediaApiServer {
 
         // The box: Master's gestures at the source, trash, journal (ADR-018 R1/R3)
         if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
+
+        // LLM usage and its alert settings (ADR-021 P2)
+        if (this.usageRoutes && (await this.usageRoutes.handle(method, path, url, req, res)))
+            return;
 
         // The pocket app's topics (ADR-020 amendment 1, S1)
         if (

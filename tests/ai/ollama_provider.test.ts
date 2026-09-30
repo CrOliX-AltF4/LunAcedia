@@ -67,3 +67,27 @@ describe("OllamaProvider", () => {
         expect(body.messages[1]!.content).toContain("[URGENT]");
     });
 });
+
+// ADR-021 P2 — a local model is free, but its volume still counts.
+describe("OllamaProvider — usage", () => {
+    it("records the tokens Ollama reports, at no cost", async () => {
+        const { usageLedger } = await import("../../source/usage/llm_usage");
+        const provider = new OllamaProvider(
+            "http://localhost:11434",
+            "llama3.2",
+            "You are a butler.",
+        );
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                message: { content: "ok" },
+                prompt_eval_count: 40,
+                eval_count: 10,
+            }),
+        });
+        await provider.chat("Hello");
+        const row = usageLedger.list(1).find((r) => r.model === "ollama:llama3.2");
+        expect(row).toMatchObject({ costUsd: 0 });
+        expect(row!.tokensIn).toBeGreaterThanOrEqual(40);
+    });
+});

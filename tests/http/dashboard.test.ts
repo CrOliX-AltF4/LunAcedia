@@ -224,7 +224,10 @@ describe("dashboard topics (read-only)", () => {
 
     it("lists the topics and opens one, ids read from the row and every text escaped", () => {
         expect(html).toContain('onclick="openTopics()"');
-        const block = html.slice(html.indexOf("async function openTopics"), html.indexOf("async function openDigestLike"));
+        const block = html.slice(
+            html.indexOf("async function openTopics"),
+            html.indexOf("async function openDigestLike"),
+        );
         expect(block).toContain("req('/api/conversations')");
         expect(block).toContain('data-id="${esc(t.id)}"');
         expect(block).toContain("esc(t.title)");
@@ -233,5 +236,29 @@ describe("dashboard topics (read-only)", () => {
         expect(block).toContain("esc(m.text)");
         // Read-only: nothing here posts, renames, archives or deletes.
         expect(block).not.toMatch(/method:'(POST|PATCH|DELETE)'/);
+    });
+});
+
+// ADR-021 P2 — LLM spend on the dashboard: figures, fired alerts, and the paliers (information only).
+describe("dashboard LLM spend", () => {
+    const html = DASHBOARD_HTML;
+
+    it("shows the spend and the alerts, every text escaped, and saves paliers with PUT", () => {
+        expect(html).toContain('onclick="openUsage()"');
+        const block = html.slice(
+            html.indexOf("async function openUsage"),
+            html.indexOf("// The pocket app's topics"),
+        );
+        expect(block).toContain("req('/api/usage?days=7')");
+        expect(block).toContain("esc(a.title)");
+        expect(block).toContain("esc(CALLER_LABELS[c]||c)");
+        expect(block).toContain("req('/api/config/usage-alerts',{method:'PUT'");
+        expect(block).toContain("jamais de coupure");
+    });
+
+    it("ships a script the browser can parse", () => {
+        const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+        expect(scripts.length).toBeGreaterThan(0);
+        for (const s of scripts) expect(() => new Function(s)).not.toThrow();
     });
 });

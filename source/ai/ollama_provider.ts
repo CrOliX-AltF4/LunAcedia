@@ -3,12 +3,15 @@ import { formatDigestPrompt } from "./ai_provider.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 import type { AgentMessage, AgentTurn, ToolCallOptions } from "./agent_types.js";
 import type { ToolDefinition } from "../capabilities/capability_manifest.js";
+import { LOCAL_MODEL_PREFIX, usageLedger } from "../usage/llm_usage.js";
 
 interface OllamaToolCall {
     function: { name: string; arguments: Record<string, unknown> };
 }
 interface OllamaResponse {
     message: { content: string; tool_calls?: OllamaToolCall[] };
+    prompt_eval_count?: number;
+    eval_count?: number;
 }
 
 export class OllamaProvider implements IAIProvider {
@@ -35,6 +38,12 @@ export class OllamaProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`Ollama error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OllamaResponse;
+        // ADR-021 P2: measured like any call — a local model is free, its volume still counts.
+        usageLedger.record(
+            `${LOCAL_MODEL_PREFIX}${this.model}`,
+            data.prompt_eval_count ?? 0,
+            data.eval_count ?? 0,
+        );
         return data.message.content ?? "";
     }
 
@@ -68,6 +77,12 @@ export class OllamaProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`Ollama error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OllamaResponse;
+        // ADR-021 P2: measured like any call — a local model is free, its volume still counts.
+        usageLedger.record(
+            `${LOCAL_MODEL_PREFIX}${this.model}`,
+            data.prompt_eval_count ?? 0,
+            data.eval_count ?? 0,
+        );
         const calls = data.message.tool_calls ?? [];
         return {
             content: data.message.content ? data.message.content : null,
