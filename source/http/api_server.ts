@@ -21,6 +21,10 @@ import {
 } from "../usage/llm_usage.js";
 import type { UsageAlerts } from "../usage/usage_alerts.js";
 import { UsageRoutes } from "./usage_routes.js";
+import { DeviceRoutes } from "./device_routes.js";
+import type { Device, DeviceRegistry } from "../auth/device_registry.js";
+import { isDeviceRoute } from "../auth/device_scope.js";
+import { timingSafeEqual } from "node:crypto";
 import type { ConversationStore } from "../store/conversation_store.js";
 import { runAgent, type AgentRequest, type AgentResult } from "../agent/agent_loop.js";
 import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
@@ -145,6 +149,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  (ADR-020 amendment 1, S1) — contract in conversation_routes.ts
  *   GET  /api/usage?days=30        LLM usage by day, caller, purpose and model + alert settings and fired alerts
  *   GET|PUT /api/config/usage-alerts  spend alert paliers (ADR-021 P2) — information only, never a cap
+ *   POST /api/devices/pair           { code, name } → { device, token } — no auth: the one-time code is the proof
+ *   POST /api/devices/pairing-code · GET /api/devices · DELETE /api/devices/:id   admin (ADR-020 M3)
+ *   A paired device's token opens only the mobile routes (auth/device_scope.ts); everything else needs ACEDIA_SECRET.
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
@@ -196,8 +203,12 @@ export class AcediaApiServer {
         topics?: ConversationStore,
         // LLM usage and its alerts (ADR-021 P2) — absent in tests that do not exercise them.
         usage?: { ledger: UsageLedger; alerts: UsageAlerts },
+        // Paired devices (ADR-020 M3) — absent in tests that do not exercise them.
+        devices?: DeviceRegistry,
     ) {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
+        this.devices = devices ?? null;
+        this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
         this.inboxSync = inbox ?? null;
         this.inboxRoutes = inbox
             ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
@@ -216,6 +227,8 @@ export class AcediaApiServer {
     }
 
     private readonly usageRoutes: UsageRoutes | null;
+    private readonly devices: DeviceRegistry | null;
+    private readonly deviceRoutes: DeviceRoutes | null;
 
     /** Null without a topic store. Public for tests: settled() waits for background titles and summaries. */
     readonly conversationRoutes: ConversationRoutes | null;
@@ -574,10 +587,24 @@ export class AcediaApiServer {
         }
     }
 
-    private authenticate(req: http.IncomingMessage): boolean {
-        if (!this.secret) return true;
+    /**
+     * Who is calling (ADR-020 M3): the admin (the master secret — dashboard, Core), a paired device (its own token,
+     * limited to the mobile routes), or nobody. Without ACEDIA_SECRET the API is open, as before (LAN-only setups).
+     */
+    private authorize(
+        req: http.IncomingMessage,
+    ): { kind: "admin" } | { kind: "device"; device: Device } | null {
+        if (!this.secret) return { kind: "admin" };
         const auth = req.headers["authorization"] ?? "";
-        return auth === `Bearer ${this.secret}`;
+        const expected = Buffer.from(`Bearer ${this.secret}`);
+        const given = Buffer.from(auth);
+        // Constant time: the master secret must not leak through response timings.
+        if (given.length === expected.length && timingSafeEqual(given, expected))
+            return { kind: "admin" };
+        const device = this.devices?.authenticate(
+            auth.startsWith("Bearer ") ? auth.slice(7) : undefined,
+        );
+        return device ? { kind: "device", device } : null;
     }
 
     private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -618,9 +645,24 @@ export class AcediaApiServer {
             return this.handleGoogleOAuthCallback(req, res, url);
         }
 
-        if (!this.authenticate(req)) {
+        // Pairing a device: the code is the proof (ADR-020 M3).
+        if (this.deviceRoutes && (await this.deviceRoutes.handlePairing(method, path, req, res)))
+            return;
+
+        const caller = this.authorize(req);
+        if (!caller) {
             return json(res, 401, { error: "Unauthorized" });
         }
+        if (caller.kind === "device" && !isDeviceRoute(method, path)) {
+            return json(res, 403, { error: "This device cannot reach this route" });
+        }
+        // Device management: the admin only.
+        if (
+            caller.kind === "admin" &&
+            this.deviceRoutes &&
+            (await this.deviceRoutes.handleAdmin(method, path, res))
+        )
+            return;
 
         // GET /api/events
         if (method === "GET" && path === "/api/events") {
@@ -974,6 +1016,10 @@ export class AcediaApiServer {
                     error: "Body must be { enabled?: boolean, writes?: boolean }",
                 });
             }
+            // From a phone, the agent can only be turned OFF (law 3) — turning it back on is the dashboard's or the panel's.
+            if (caller.kind === "device" && (writes !== undefined || enabled !== false)) {
+                return json(res, 403, { error: "From a device, the agent can only be turned off" });
+            }
             if (typeof enabled === "boolean") await this.agent.setEnabled(enabled);
             if (typeof writes === "boolean") await this.agent.setWrites(writes);
             return json(res, 200, this.agentSettings());
@@ -1103,12 +1149,18 @@ export class AcediaApiServer {
                 return json(res, 400, { error: "Body must be { token: string }" });
             }
             await this.fcm.setToken(token);
+            if (caller.kind === "device") await this.devices?.setPushToken(caller.device.id, token);
             return json(res, 204, null);
         }
 
         // DELETE /api/devices/push-token
         if (method === "DELETE" && path === "/api/devices/push-token") {
-            if (this.fcm) await this.fcm.setToken(null);
+            if (caller.kind === "device") {
+                // A device stops its own notifications, never another one's.
+                if (this.fcm && this.fcm.getToken() === caller.device.pushToken)
+                    await this.fcm.setToken(null);
+                await this.devices?.setPushToken(caller.device.id, null);
+            } else if (this.fcm) await this.fcm.setToken(null);
             return json(res, 204, null);
         }
 

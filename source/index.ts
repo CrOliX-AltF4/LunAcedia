@@ -25,6 +25,7 @@ import { InboxSync } from "./hub/inbox_sync.js";
 import { ConversationStore, defaultConversationDir } from "./store/conversation_store.js";
 import { defaultUsagePath, usageLedger } from "./usage/llm_usage.js";
 import { UsageAlerts, defaultAlertsPath } from "./usage/usage_alerts.js";
+import { DeviceRegistry, defaultDevicesPath } from "./auth/device_registry.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -82,6 +83,15 @@ await topics.load();
 await usageLedger.load(defaultUsagePath());
 const usageAlerts = new UsageAlerts(defaultAlertsPath());
 await usageAlerts.load();
+// Paired phones (ADR-020 M3): each has its own token; the master secret never leaves the server.
+const devices = new DeviceRegistry(defaultDevicesPath());
+await devices.load();
+const sweepDevices = async (): Promise<void> => {
+    for (const d of await devices.sweepInactive())
+        console.warn(`[Devices] "${d.name}" silent for 90 days — revoked`);
+};
+await sweepDevices();
+setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
 // The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
 const inboxSync = new InboxSync({
     connectors,
@@ -107,6 +117,7 @@ const api = new AcediaApiServer(
     inboxSync,
     topics,
     { ledger: usageLedger, alerts: usageAlerts },
+    devices,
 );
 
 if (fcm) await fcm.load();

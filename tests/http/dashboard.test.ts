@@ -262,3 +262,23 @@ describe("dashboard LLM spend", () => {
         for (const s of scripts) expect(() => new Function(s)).not.toThrow();
     });
 });
+
+// ADR-020 M3 — paired devices on the dashboard.
+describe("dashboard devices", () => {
+    const html = DASHBOARD_HTML;
+
+    it("lists devices, revokes by the id read from the row, and asks for a pairing code", () => {
+        expect(html).toContain('onclick="openDevices()"');
+        const block = html.slice(
+            html.indexOf("async function openDevices"),
+            html.indexOf("// LLM spend (ADR-021 P2)"),
+        );
+        expect(block).toContain("req('/api/devices')");
+        expect(block).toContain('data-id="${esc(x.id)}"');
+        expect(block).toContain("esc(x.name)");
+        expect(block).toContain("const id=row.dataset.id;");
+        expect(block).toContain("'/api/devices/'+encodeURIComponent(id),{method:'DELETE'}");
+        expect(block).toContain("req('/api/devices/pairing-code',{method:'POST'})");
+        expect(block).toContain("esc(c.code)");
+    });
+});
