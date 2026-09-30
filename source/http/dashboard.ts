@@ -173,6 +173,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openTrash()">Corbeille</button>
   <button onclick="openTopics()">Sujets</button>
   <button onclick="openUsage()">Dépense LLM</button>
+  <button onclick="openDevices()">Appareils</button>
 </header>
 
 <div id="ai-banner">
@@ -324,6 +325,38 @@ async function restoreTrash(btn){
   await req('/api/inbox/trash/'+encodeURIComponent(id)+'/restore',{method:'POST'}).catch(()=>{});
   row.remove();
   setTimeout(load,1500);
+}
+
+// Paired devices (ADR-020 M3): each phone has its own token; revoke one and it is refused at once.
+// Ids are read from the row, never interpolated into onclick.
+async function openDevices(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Appareils appairés';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/devices');
+    const data=await r.json();
+    const rows=(data.devices||[]).map(x=>\`<div class="trash-row" data-id="\${esc(x.id)}"><span>\${esc(x.name)} <small>— appairé le \${esc(new Date(x.createdAt).toLocaleDateString())}, vu \${esc(ago(Date.parse(x.lastSeenAt)))}\${x.pushToken?' · notifications':''}</small></span><button onclick="revokeDevice(this)">Révoquer</button></div>\`).join('')||'<p><small>Aucun appareil appairé.</small></p>';
+    box.innerHTML=rows+\`<p style="margin-top:12px"><button onclick="newPairingCode()">Appairer un appareil</button></p><div id="pairing"></div>
+<p><small>Un appareil muet depuis 90 jours est révoqué automatiquement.</small></p>\`;
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function newPairingCode(){
+  const out=document.getElementById('pairing');
+  try{
+    const r=await req('/api/devices/pairing-code',{method:'POST'});
+    const c=await r.json();
+    out.innerHTML=\`<p>Dans l'application : adresse <code>\${esc(location.origin)}</code>, code <strong style="font-size:20px;letter-spacing:3px">\${esc(c.code)}</strong></p><p><small>Valable jusqu'à \${esc(new Date(c.expiresAt).toLocaleTimeString())}, une seule fois.</small></p>\`;
+  }catch(e){out.textContent='Error: '+e.message;}
+}
+async function revokeDevice(btn){
+  const row=btn.closest('.trash-row');
+  const id=row.dataset.id;
+  btn.disabled=true;
+  await req('/api/devices/'+encodeURIComponent(id),{method:'DELETE'}).catch(()=>{});
+  row.remove();
 }
 
 // LLM spend (ADR-021 P2): what LunAcedia's own model cost, and the alert paliers — information only, nothing is ever cut.
