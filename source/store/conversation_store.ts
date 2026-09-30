@@ -68,8 +68,14 @@ export interface ConversationMeta {
 export type ConversationView = Omit<ConversationMeta, "summary" | "titleSource">;
 
 export function toView(meta: ConversationMeta): ConversationView {
-    const { summary: _summary, titleSource: _titleSource, ...view } = meta;
-    return view;
+    return {
+        id: meta.id,
+        title: meta.title,
+        createdAt: meta.createdAt,
+        updatedAt: meta.updatedAt,
+        archived: meta.archived,
+        messageCount: meta.messageCount,
+    };
 }
 
 export class ConversationFullError extends Error {
