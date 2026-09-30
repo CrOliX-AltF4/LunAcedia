@@ -132,6 +132,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  called) and whether it may write (off = triage only, default)
  *   POST /api/chat                 body: { text, context? } → { response, agent? } — the agent's
  *                                  answer; plain dialogue with no tool when the agent is off
+ *   GET|POST /api/conversations, GET|PATCH|DELETE /api/conversations/:id, POST /api/conversations/:id/messages
+ *                                  the pocket app's topics, answered by the agent with their earlier turns
+ *                                  (ADR-020 amendment 1, S1) — contract in conversation_routes.ts
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
