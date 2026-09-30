@@ -124,7 +124,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
- *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly? }  → the agent
+ *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly?, untrusted? }  → the agent
  *                                  (ADR-017): reads the events, acts only through the tier gate;
  *                                  versioned { version, status, summary, items, actions, steps }
  *   GET  /api/agent/journal        the last 50 agent runs (who asked, steps, actions)
@@ -255,6 +255,9 @@ export class AcediaApiServer {
             ...(context && { context }),
             ...(callerId && { callerId }),
             ...(b["readOnly"] === true && { readOnly: true }),
+            // The caller's context carries third-party text (e.g. the Core relayed a mail read in an earlier turn):
+            // every action is held for confirmation from the first step. It can only restrict, never widen (D2).
+            ...(b["untrusted"] === true && { untrusted: true }),
         };
     }
 
