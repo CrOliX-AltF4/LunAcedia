@@ -172,6 +172,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="openTrash()">Corbeille</button>
   <button onclick="openTopics()">Sujets</button>
+  <button onclick="openUsage()">Dépense LLM</button>
 </header>
 
 <div id="ai-banner">
@@ -323,6 +324,59 @@ async function restoreTrash(btn){
   await req('/api/inbox/trash/'+encodeURIComponent(id)+'/restore',{method:'POST'}).catch(()=>{});
   row.remove();
   setTimeout(load,1500);
+}
+
+// LLM spend (ADR-021 P2): what LunAcedia's own model cost, and the alert paliers — information only, nothing is ever cut.
+const CALLER_LABELS={core:'Natsume (Core)',topics:'Sujets du téléphone',api:'API directe',background:'Tâches de fond',unattributed:'Non attribué'};
+function usd(n){return (Number(n)||0).toFixed(2)+' $';}
+function paliersText(list){return (list||[]).join('/');}
+function callerPaliersText(map){return Object.entries(map||{}).map(([c,l])=>c+'='+paliersText(l)).join(', ');}
+function parsePaliersInput(s){return String(s||'').split('/').map(x=>Number(x.trim().replace(',','.'))).filter(n=>Number.isFinite(n)&&n>0);}
+function parseCallerInput(s){const out={};for(const part of String(s||'').split(',')){const [c,v]=part.split('=').map(x=>(x||'').trim());if(c&&v){const p=parsePaliersInput(v);if(p.length)out[c]=p;}}return out;}
+async function openUsage(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Dépense LLM (estimation)';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/usage?days=7');
+    const u=await r.json();
+    const today=u.days[0]||{totalUsd:0,byCaller:{},calls:0,unpricedCalls:0};
+    const byCaller=Object.entries(today.byCaller||{}).map(([c,v])=>\`<div class="topic-msg">\${esc(CALLER_LABELS[c]||c)} : \${esc(usd(v))}</div>\`).join('');
+    const week=u.days.map(x=>\`<div class="topic-msg"><small>\${esc(x.day)}</small> \${esc(usd(x.totalUsd))} · \${esc(x.calls)} appels</div>\`).join('');
+    const fired=(u.fired||[]).map(a=>\`<div class="topic-msg"><small>\${esc(new Date(a.at).toLocaleString())}</small><br>\${esc(a.title)}</div>\`).join('')||'<div class="topic-msg"><small>Aucune alerte cette semaine.</small></div>';
+    const unpriced=today.unpricedCalls?\`<p><small>\${esc(today.unpricedCalls)} appel(s) d'un modèle sans prix connu, hors total.</small></p>\`:'';
+    box.innerHTML=\`<p><strong>Aujourd'hui : \${esc(usd(today.totalUsd))}</strong> · \${esc(today.calls)} appels · dernière heure \${esc(usd(u.lastHourUsd))} (habituellement \${esc(usd(u.usualHourlyUsd))}/h)</p>\${unpriced}\${byCaller}
+<h4 style="margin-top:12px">7 derniers jours</h4>\${week}
+<h4 style="margin-top:12px">Alertes émises</h4>\${fired}
+<h4 style="margin-top:12px">Paliers d'alerte (jamais de coupure)</h4>
+<label>Par jour (ex. 5/10/20)<input id="ua-daily" type="text"></label>
+<label>Par appelant (ex. topics=1/2, core=5)<input id="ua-callers" type="text"></label>
+<label>Dépense inhabituelle : facteur (0 = désactivée)<input id="ua-factor" type="number" min="0" step="0.5"></label>
+<label>…au-dessus de ($/h)<input id="ua-min" type="number" min="0" step="0.1"></label>
+<button onclick="saveUsageAlerts(this)">Enregistrer</button> <span id="ua-status"></span>\`;
+    document.getElementById('ua-daily').value=paliersText(u.alerts.dailyUsd);
+    document.getElementById('ua-callers').value=callerPaliersText(u.alerts.perCallerUsd);
+    document.getElementById('ua-factor').value=u.alerts.spikeFactor;
+    document.getElementById('ua-min').value=u.alerts.spikeMinUsd;
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function saveUsageAlerts(btn){
+  const status=document.getElementById('ua-status');
+  btn.disabled=true;
+  try{
+    const body={
+      dailyUsd:parsePaliersInput(document.getElementById('ua-daily').value),
+      perCallerUsd:parseCallerInput(document.getElementById('ua-callers').value),
+      spikeFactor:Number(document.getElementById('ua-factor').value)||0,
+      spikeMinUsd:Number(document.getElementById('ua-min').value)||0,
+    };
+    const r=await req('/api/config/usage-alerts',{method:'PUT',body:JSON.stringify(body)});
+    const data=await r.json();
+    status.textContent=r.ok?'Enregistré.':('Refusé : '+(data.error||r.status));
+  }catch(e){status.textContent='Error: '+e.message;}
+  btn.disabled=false;
 }
 
 // The pocket app's topics (ADR-020 amendment 1, S1) — read-only here: the phone is where they are used.
