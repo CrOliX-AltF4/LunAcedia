@@ -217,3 +217,21 @@ describe("dashboard box (ADR-018 R5)", () => {
         expect(block).toContain("'/api/inbox/trash/'+encodeURIComponent(id)+'/restore'");
     });
 });
+
+// ADR-020 amendment 1, S1 — parity: the pocket app's topics are visible from the dashboard, read-only.
+describe("dashboard topics (read-only)", () => {
+    const html = DASHBOARD_HTML;
+
+    it("lists the topics and opens one, ids read from the row and every text escaped", () => {
+        expect(html).toContain('onclick="openTopics()"');
+        const block = html.slice(html.indexOf("async function openTopics"), html.indexOf("async function openDigestLike"));
+        expect(block).toContain("req('/api/conversations')");
+        expect(block).toContain('data-id="${esc(t.id)}"');
+        expect(block).toContain("esc(t.title)");
+        expect(block).toContain("const id=row.dataset.id;");
+        expect(block).toContain("'/api/conversations/'+encodeURIComponent(id)+'?limit=100'");
+        expect(block).toContain("esc(m.text)");
+        // Read-only: nothing here posts, renames, archives or deletes.
+        expect(block).not.toMatch(/method:'(POST|PATCH|DELETE)'/);
+    });
+});

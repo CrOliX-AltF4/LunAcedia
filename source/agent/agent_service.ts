@@ -23,6 +23,8 @@ const TEXT_CHARS = 300;
 export interface AgentJournalEntry {
     at: string;
     callerId?: string;
+    /** The topic the run answered in (ADR-020 amendment 1, S1) — absent for a one-off request. */
+    conversationId?: string;
     text: string;
     status: AgentResult["status"];
     limit?: AgentResult["limit"];
@@ -92,6 +94,7 @@ export class AgentService {
         const base = {
             at: new Date(started).toISOString(),
             ...(req.callerId && { callerId: req.callerId }),
+            ...(req.conversationId && { conversationId: req.conversationId }),
             text: req.text.length > TEXT_CHARS ? `${req.text.slice(0, TEXT_CHARS)}…` : req.text,
         };
         try {

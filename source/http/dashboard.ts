@@ -43,6 +43,10 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 .card-actions button{padding:3px 10px;font-size:12px}
 .trash-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)}
 .trash-row span{flex:1;font-size:13px}
+.topic-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.topic-row span{flex:1;font-size:13px}
+.topic-row small,.topic-msg small{color:var(--muted)}
+.topic-msg{padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;white-space:pre-wrap}
 #empty{color:var(--muted);text-align:center;padding:60px 20px;display:none}
 /* auth overlay */
 #auth{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100}
@@ -167,6 +171,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openDigest()">Digest</button>
   <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="openTrash()">Corbeille</button>
+  <button onclick="openTopics()">Sujets</button>
 </header>
 
 <div id="ai-banner">
@@ -318,6 +323,33 @@ async function restoreTrash(btn){
   await req('/api/inbox/trash/'+encodeURIComponent(id)+'/restore',{method:'POST'}).catch(()=>{});
   row.remove();
   setTimeout(load,1500);
+}
+
+// The pocket app's topics (ADR-020 amendment 1, S1) — read-only here: the phone is where they are used.
+// Ids are read from the row, never interpolated into onclick.
+async function openTopics(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Sujets (application mobile)';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/conversations');
+    const items=(await r.json()).conversations||[];
+    box.innerHTML=items.length?items.map(t=>\`<div class="topic-row" data-id="\${esc(t.id)}" onclick="openTopic(this)"><span>\${esc(t.title)}\${t.archived?' <small>(archivé)</small>':''}</span><small>\${esc(t.messageCount)} messages · \${esc(ago(Date.parse(t.updatedAt)))}</small></div>\`).join(''):'Aucun sujet pour le moment.';
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function openTopic(row){
+  const id=row.dataset.id;
+  const box=document.getElementById('digest-text');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/conversations/'+encodeURIComponent(id)+'?limit=100');
+    const data=await r.json();
+    document.getElementById('digest-title').textContent=data.conversation?data.conversation.title:'Sujet';
+    const back='<button onclick="openTopics()">← Sujets</button>';
+    box.innerHTML=back+(data.messages||[]).map(m=>\`<div class="topic-msg"><small>\${m.role==='user'?'Toi':'Assistant'} · \${esc(new Date(m.at).toLocaleString())}</small><br>\${esc(m.text)}</div>\`).join('');
+  }catch(e){box.textContent='Error: '+e.message;}
 }
 
 async function openDigestLike(path,title){
