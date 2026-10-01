@@ -105,3 +105,21 @@ describe("AgentService — switch and journal (ADR-017 M5, law 3)", () => {
         });
     });
 });
+
+describe("AgentService — topics (ADR-020 amendment 1, S1)", () => {
+    it("journals the topic a run answered in", async () => {
+        const s = new AgentService();
+        await s.run({ text: "et le deuxième ?", conversationId: "topic-1" }, async () => ({
+            version: 1,
+            status: "done",
+            summary: "ok",
+            items: [],
+            actions: [],
+            steps: [],
+        }));
+        expect(s.journal()[0]).toMatchObject({
+            conversationId: "topic-1",
+            text: "et le deuxième ?",
+        });
+    });
+});

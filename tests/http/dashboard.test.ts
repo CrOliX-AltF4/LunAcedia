@@ -217,3 +217,68 @@ describe("dashboard box (ADR-018 R5)", () => {
         expect(block).toContain("'/api/inbox/trash/'+encodeURIComponent(id)+'/restore'");
     });
 });
+
+// ADR-020 amendment 1, S1 — parity: the pocket app's topics are visible from the dashboard, read-only.
+describe("dashboard topics (read-only)", () => {
+    const html = DASHBOARD_HTML;
+
+    it("lists the topics and opens one, ids read from the row and every text escaped", () => {
+        expect(html).toContain('onclick="openTopics()"');
+        const block = html.slice(
+            html.indexOf("async function openTopics"),
+            html.indexOf("async function openDigestLike"),
+        );
+        expect(block).toContain("req('/api/conversations')");
+        expect(block).toContain('data-id="${esc(t.id)}"');
+        expect(block).toContain("esc(t.title)");
+        expect(block).toContain("const id=row.dataset.id;");
+        expect(block).toContain("'/api/conversations/'+encodeURIComponent(id)+'?limit=100'");
+        expect(block).toContain("esc(m.text)");
+        // Read-only: nothing here posts, renames, archives or deletes.
+        expect(block).not.toMatch(/method:'(POST|PATCH|DELETE)'/);
+    });
+});
+
+// ADR-021 P2 — LLM spend on the dashboard: figures, fired alerts, and the paliers (information only).
+describe("dashboard LLM spend", () => {
+    const html = DASHBOARD_HTML;
+
+    it("shows the spend and the alerts, every text escaped, and saves paliers with PUT", () => {
+        expect(html).toContain('onclick="openUsage()"');
+        const block = html.slice(
+            html.indexOf("async function openUsage"),
+            html.indexOf("// The pocket app's topics"),
+        );
+        expect(block).toContain("req('/api/usage?days=7')");
+        expect(block).toContain("esc(a.title)");
+        expect(block).toContain("esc(CALLER_LABELS[c]||c)");
+        expect(block).toContain("req('/api/config/usage-alerts',{method:'PUT'");
+        expect(block).toContain("jamais de coupure");
+    });
+
+    it("ships a script the browser can parse", () => {
+        const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+        expect(scripts.length).toBeGreaterThan(0);
+        for (const s of scripts) expect(() => new Function(s)).not.toThrow();
+    });
+});
+
+// ADR-020 M3 — paired devices on the dashboard.
+describe("dashboard devices", () => {
+    const html = DASHBOARD_HTML;
+
+    it("lists devices, revokes by the id read from the row, and asks for a pairing code", () => {
+        expect(html).toContain('onclick="openDevices()"');
+        const block = html.slice(
+            html.indexOf("async function openDevices"),
+            html.indexOf("// LLM spend (ADR-021 P2)"),
+        );
+        expect(block).toContain("req('/api/devices')");
+        expect(block).toContain('data-id="${esc(x.id)}"');
+        expect(block).toContain("esc(x.name)");
+        expect(block).toContain("const id=row.dataset.id;");
+        expect(block).toContain("'/api/devices/'+encodeURIComponent(id),{method:'DELETE'}");
+        expect(block).toContain("req('/api/devices/pairing-code',{method:'POST'})");
+        expect(block).toContain("esc(c.code)");
+    });
+});

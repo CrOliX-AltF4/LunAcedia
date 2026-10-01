@@ -12,6 +12,20 @@ import { createAIProvider, loadSystemPrompt } from "../ai/create_ai_provider.js"
 import { AgentService } from "../agent/agent_service.js";
 import type { InboxSync } from "../hub/inbox_sync.js";
 import { InboxRoutes } from "./inbox_routes.js";
+import { ConversationRoutes } from "./conversation_routes.js";
+import {
+    callerOf,
+    withUsageContext,
+    type UsageContext,
+    type UsageLedger,
+} from "../usage/llm_usage.js";
+import type { UsageAlerts } from "../usage/usage_alerts.js";
+import { UsageRoutes } from "./usage_routes.js";
+import { DeviceRoutes } from "./device_routes.js";
+import type { Device, DeviceRegistry } from "../auth/device_registry.js";
+import { isDeviceRoute } from "../auth/device_scope.js";
+import { timingSafeEqual } from "node:crypto";
+import type { ConversationStore } from "../store/conversation_store.js";
 import { runAgent, type AgentRequest, type AgentResult } from "../agent/agent_loop.js";
 import { validateAiProviderPatch, writeAiProviderConfig } from "../ai/ai_provider_writer.js";
 import { computeFreeSlots } from "../connectors/calendar/free_slots.js";
@@ -80,6 +94,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *
  * Routes (all require Bearer auth if ACEDIA_SECRET is set, except /api/health):
  *   GET  /api/health
+ *   GET  /api/identity             → { name, kind: "lunacedia", version } — who the mobile app is talking to
+ *                                  (ADR-020 D2: the app shows the server's name, never a hardcoded one).
+ *                                  Authenticated: it doubles as the app's connection test.
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
@@ -119,7 +136,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/start?connector=gmail|gcal|gtasks  → 302 to Google consent
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
- *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly? }  → the agent
+ *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly?, untrusted? }  → the agent
  *                                  (ADR-017): reads the events, acts only through the tier gate;
  *                                  versioned { version, status, summary, items, actions, steps }
  *   GET  /api/agent/journal        the last 50 agent runs (who asked, steps, actions)
@@ -127,6 +144,14 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  called) and whether it may write (off = triage only, default)
  *   POST /api/chat                 body: { text, context? } → { response, agent? } — the agent's
  *                                  answer; plain dialogue with no tool when the agent is off
+ *   GET|POST /api/conversations, GET|PATCH|DELETE /api/conversations/:id, POST /api/conversations/:id/messages
+ *                                  the pocket app's topics, answered by the agent with their earlier turns
+ *                                  (ADR-020 amendment 1, S1) — contract in conversation_routes.ts
+ *   GET  /api/usage?days=30        LLM usage by day, caller, purpose and model + alert settings and fired alerts
+ *   GET|PUT /api/config/usage-alerts  spend alert paliers (ADR-021 P2) — information only, never a cap
+ *   POST /api/devices/pair           { code, name } → { device, token } — no auth: the one-time code is the proof
+ *   POST /api/devices/pairing-code · GET /api/devices · DELETE /api/devices/:id   admin (ADR-020 M3)
+ *   A paired device's token opens only the mobile routes (auth/device_scope.ts); everything else needs ACEDIA_SECRET.
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
  *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
@@ -134,6 +159,19 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
  */
+/**
+ * The usage context of a request (ADR-021 P2): who is asking and for what, from its route. An agent request declares
+ * its caller too (runAgentRequest), which wins — the Core asking counts as the Core.
+ */
+export function usageContextOf(url: string | undefined): UsageContext {
+    const path = new URL(url ?? "/", "http://localhost").pathname;
+    if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
+        return { caller: "topics", purpose: "topic" };
+    }
+    const purpose = /^\/api\/(agent|chat|intent|digest|proposals)$/.exec(path)?.[1] ?? "other";
+    return { caller: "api", purpose };
+}
+
 /** Keys one /api/events/held call may ask about — the box itself holds at most 1000 items. */
 const HELD_KEYS_MAX = 2000;
 
@@ -161,12 +199,39 @@ export class AcediaApiServer {
         private readonly agent: AgentService = new AgentService(),
         // The box and the sync rule (ADR-018) — absent in tests that do not exercise them.
         inbox?: InboxSync,
+        // The pocket app's topics (ADR-020 amendment 1, S1) — absent in tests that do not exercise them.
+        topics?: ConversationStore,
+        // LLM usage and its alerts (ADR-021 P2) — absent in tests that do not exercise them.
+        usage?: { ledger: UsageLedger; alerts: UsageAlerts },
+        // Paired devices (ADR-020 M3) — absent in tests that do not exercise them.
+        devices?: DeviceRegistry,
     ) {
+        this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
+        this.devices = devices ?? null;
+        this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
         this.inboxSync = inbox ?? null;
         this.inboxRoutes = inbox
             ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
             : null;
+        this.conversationRoutes = topics
+            ? new ConversationRoutes({
+                  topics,
+                  store,
+                  ai: () => this.ai,
+                  agentEnabled: () => this.agent.isEnabled(),
+                  runAgent: (r) => this.runAgentRequest(r),
+                  readBody,
+                  json,
+              })
+            : null;
     }
+
+    private readonly usageRoutes: UsageRoutes | null;
+    private readonly devices: DeviceRegistry | null;
+    private readonly deviceRoutes: DeviceRoutes | null;
+
+    /** Null without a topic store. Public for tests: settled() waits for background titles and summaries. */
+    readonly conversationRoutes: ConversationRoutes | null;
 
     private readonly inboxSync: InboxSync | null;
 
@@ -178,32 +243,35 @@ export class AcediaApiServer {
 
     /** One agent run over this server's store, calendar and tier gate, journaled (ADR-017). */
     private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
-        return this.agent.run(req, () =>
-            runAgent(req, {
-                provider: this.ai,
-                read: {
-                    store: this.store,
-                    busyIntervals: () => this.calendarBusyIntervals(),
-                    now: () => Date.now(),
-                    // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
-                    markRead: async (event) => {
-                        const connector = this.connectors.find((c) => c.slug === event.source);
-                        if (!connector?.inboxGesture) return;
-                        const r = await connector.inboxGesture("read", event);
-                        if (r.change && this.inboxSync) {
-                            this.inboxSync.applyLocal({
-                                op: r.change,
-                                key: event.dedupeKey,
-                                source: event.source,
-                            });
-                        }
+        // The declared caller wins over the route's default: the Core asking counts as the Core.
+        return withUsageContext({ caller: callerOf(req.callerId) }, () =>
+            this.agent.run(req, () =>
+                runAgent(req, {
+                    provider: this.ai,
+                    read: {
+                        store: this.store,
+                        busyIntervals: () => this.calendarBusyIntervals(),
+                        now: () => Date.now(),
+                        // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
+                        markRead: async (event) => {
+                            const connector = this.connectors.find((c) => c.slug === event.source);
+                            if (!connector?.inboxGesture) return;
+                            const r = await connector.inboxGesture("read", event);
+                            if (r.change && this.inboxSync) {
+                                this.inboxSync.applyLocal({
+                                    op: r.change,
+                                    key: event.dedupeKey,
+                                    source: event.source,
+                                });
+                            }
+                        },
                     },
-                },
-                dispatch: (connector, action, capToConfirm) =>
-                    this.dispatchAction(connector, action, capToConfirm),
-                persona: loadSystemPrompt(),
-                allowWrites: this.agent.writesEnabled(),
-            }),
+                    dispatch: (connector, action, capToConfirm) =>
+                        this.dispatchAction(connector, action, capToConfirm),
+                    persona: loadSystemPrompt(),
+                    allowWrites: this.agent.writesEnabled(),
+                }),
+            ),
         );
     }
 
@@ -231,6 +299,9 @@ export class AcediaApiServer {
             ...(context && { context }),
             ...(callerId && { callerId }),
             ...(b["readOnly"] === true && { readOnly: true }),
+            // The caller's context carries third-party text (e.g. the Core relayed a mail read in an earlier turn):
+            // every action is held for confirmation from the first step. It can only restrict, never widen (D2).
+            ...(b["untrusted"] === true && { untrusted: true }),
         };
     }
 
@@ -316,7 +387,8 @@ export class AcediaApiServer {
 
     start(port: number): void {
         this.server = http.createServer((req, res) => {
-            void this.handle(req, res);
+            // ADR-021 P2: every LLM call a request makes is counted under its caller and purpose.
+            void withUsageContext(usageContextOf(req.url), () => this.handle(req, res));
         });
         this.server.listen(port, () => {
             console.warn(`[LunAcedia] HTTP API listening on port ${port}`);
@@ -515,10 +587,24 @@ export class AcediaApiServer {
         }
     }
 
-    private authenticate(req: http.IncomingMessage): boolean {
-        if (!this.secret) return true;
+    /**
+     * Who is calling (ADR-020 M3): the admin (the master secret — dashboard, Core), a paired device (its own token,
+     * limited to the mobile routes), or nobody. Without ACEDIA_SECRET the API is open, as before (LAN-only setups).
+     */
+    private authorize(
+        req: http.IncomingMessage,
+    ): { kind: "admin" } | { kind: "device"; device: Device } | null {
+        if (!this.secret) return { kind: "admin" };
         const auth = req.headers["authorization"] ?? "";
-        return auth === `Bearer ${this.secret}`;
+        const expected = Buffer.from(`Bearer ${this.secret}`);
+        const given = Buffer.from(auth);
+        // Constant time: the master secret must not leak through response timings.
+        if (given.length === expected.length && timingSafeEqual(given, expected))
+            return { kind: "admin" };
+        const device = this.devices?.authenticate(
+            auth.startsWith("Bearer ") ? auth.slice(7) : undefined,
+        );
+        return device ? { kind: "device", device } : null;
     }
 
     private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -559,9 +645,24 @@ export class AcediaApiServer {
             return this.handleGoogleOAuthCallback(req, res, url);
         }
 
-        if (!this.authenticate(req)) {
+        // Pairing a device: the code is the proof (ADR-020 M3).
+        if (this.deviceRoutes && (await this.deviceRoutes.handlePairing(method, path, req, res)))
+            return;
+
+        const caller = this.authorize(req);
+        if (!caller) {
             return json(res, 401, { error: "Unauthorized" });
         }
+        if (caller.kind === "device" && !isDeviceRoute(method, path)) {
+            return json(res, 403, { error: "This device cannot reach this route" });
+        }
+        // Device management: the admin only.
+        if (
+            caller.kind === "admin" &&
+            this.deviceRoutes &&
+            (await this.deviceRoutes.handleAdmin(method, path, res))
+        )
+            return;
 
         // GET /api/events
         if (method === "GET" && path === "/api/events") {
@@ -592,6 +693,13 @@ export class AcediaApiServer {
         if (method === "POST" && path === "/api/events/read-all") {
             this.store.markAllRead();
             return json(res, 204, null);
+        }
+
+        // GET /api/identity — the assistant's name the mobile app shows (ADR-020 D2): ASSISTANT_NAME, else
+        // "LunAcedia". Standalone is a product of its own — never "Natsume" here.
+        if (method === "GET" && path === "/api/identity") {
+            const name = process.env["ASSISTANT_NAME"]?.trim() || "LunAcedia";
+            return json(res, 200, { name, kind: "lunacedia", version: PACKAGE_VERSION });
         }
 
         // POST /api/events/held — which of these keys the box still holds (ADR-019 L10)
@@ -803,6 +911,17 @@ export class AcediaApiServer {
         // The box: Master's gestures at the source, trash, journal (ADR-018 R1/R3)
         if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
 
+        // LLM usage and its alert settings (ADR-021 P2)
+        if (this.usageRoutes && (await this.usageRoutes.handle(method, path, url, req, res)))
+            return;
+
+        // The pocket app's topics (ADR-020 amendment 1, S1)
+        if (
+            this.conversationRoutes &&
+            (await this.conversationRoutes.handle(method, path, url, req, res))
+        )
+            return;
+
         // Ingestion guards (chantier A): /api/guard/{rules,journal,journal/restore,preview}
         if (path.startsWith("/api/guard/")) {
             if (!this.guards) return json(res, 503, { error: "Guards not configured" });
@@ -896,6 +1015,10 @@ export class AcediaApiServer {
                 return json(res, 400, {
                     error: "Body must be { enabled?: boolean, writes?: boolean }",
                 });
+            }
+            // From a phone, the agent can only be turned OFF (law 3) — turning it back on is the dashboard's or the panel's.
+            if (caller.kind === "device" && (writes !== undefined || enabled !== false)) {
+                return json(res, 403, { error: "From a device, the agent can only be turned off" });
             }
             if (typeof enabled === "boolean") await this.agent.setEnabled(enabled);
             if (typeof writes === "boolean") await this.agent.setWrites(writes);
@@ -1026,12 +1149,18 @@ export class AcediaApiServer {
                 return json(res, 400, { error: "Body must be { token: string }" });
             }
             await this.fcm.setToken(token);
+            if (caller.kind === "device") await this.devices?.setPushToken(caller.device.id, token);
             return json(res, 204, null);
         }
 
         // DELETE /api/devices/push-token
         if (method === "DELETE" && path === "/api/devices/push-token") {
-            if (this.fcm) await this.fcm.setToken(null);
+            if (caller.kind === "device") {
+                // A device stops its own notifications, never another one's.
+                if (this.fcm && this.fcm.getToken() === caller.device.pushToken)
+                    await this.fcm.setToken(null);
+                await this.devices?.setPushToken(caller.device.id, null);
+            } else if (this.fcm) await this.fcm.setToken(null);
             return json(res, 204, null);
         }
 

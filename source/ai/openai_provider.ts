@@ -3,6 +3,7 @@ import { formatDigestPrompt } from "./ai_provider.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 import type { AgentMessage, AgentTurn, ToolCallOptions } from "./agent_types.js";
 import type { ToolDefinition } from "../capabilities/capability_manifest.js";
+import { usageLedger } from "../usage/llm_usage.js";
 
 interface OpenAIToolCall {
     id: string;
@@ -14,6 +15,7 @@ interface OpenAIChoice {
 }
 interface OpenAIResponse {
     choices: OpenAIChoice[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 export class OpenAIProvider implements IAIProvider {
@@ -43,6 +45,12 @@ export class OpenAIProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OpenAIResponse;
+        // ADR-021 P2: every call is measured (never capped).
+        usageLedger.record(
+            this.model,
+            data.usage?.prompt_tokens ?? 0,
+            data.usage?.completion_tokens ?? 0,
+        );
         return data.choices[0]?.message.content ?? "";
     }
 
@@ -79,6 +87,12 @@ export class OpenAIProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OpenAIResponse;
+        // ADR-021 P2: every call is measured (never capped).
+        usageLedger.record(
+            this.model,
+            data.usage?.prompt_tokens ?? 0,
+            data.usage?.completion_tokens ?? 0,
+        );
         const message = data.choices[0]?.message;
         return {
             content: message?.content ?? null,

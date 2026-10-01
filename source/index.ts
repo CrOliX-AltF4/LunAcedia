@@ -22,6 +22,10 @@ import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
 import { AgentService, defaultAgentSettingsPath } from "./agent/agent_service.js";
 import { InboxSync } from "./hub/inbox_sync.js";
+import { ConversationStore, defaultConversationDir } from "./store/conversation_store.js";
+import { defaultUsagePath, usageLedger } from "./usage/llm_usage.js";
+import { UsageAlerts, defaultAlertsPath } from "./usage/usage_alerts.js";
+import { DeviceRegistry, defaultDevicesPath } from "./auth/device_registry.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -72,6 +76,22 @@ const pendingStore = new PendingActionStore();
 // The agent's switch (ADR-017 M5) — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
+// The pocket app's topics (ADR-020 amendment 1, S1) — kept server side, the same from every client.
+const topics = new ConversationStore(defaultConversationDir());
+await topics.load();
+// LLM usage (ADR-021 P2): measured and alerted on, never capped — the owner manages spend at the provider.
+await usageLedger.load(defaultUsagePath());
+const usageAlerts = new UsageAlerts(defaultAlertsPath());
+await usageAlerts.load();
+// Paired phones (ADR-020 M3): each has its own token; the master secret never leaves the server.
+const devices = new DeviceRegistry(defaultDevicesPath());
+await devices.load();
+const sweepDevices = async (): Promise<void> => {
+    for (const d of await devices.sweepInactive())
+        console.warn(`[Devices] "${d.name}" silent for 90 days — revoked`);
+};
+await sweepDevices();
+setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
 // The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
 const inboxSync = new InboxSync({
     connectors,
@@ -95,9 +115,25 @@ const api = new AcediaApiServer(
     { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
     agent,
     inboxSync,
+    topics,
+    { ledger: usageLedger, alerts: usageAlerts },
+    devices,
 );
 
 if (fcm) await fcm.load();
+// Spend alerts (ADR-021 P2): logged, and pushed to the phone within its priority filter; the Core relays them when wired.
+usageAlerts.watch(usageLedger, (alert) => {
+    console.warn(`[Usage] ${alert.title} — ${alert.body}`);
+    return fcm?.send({
+        type: "system.llm_spend",
+        ts: alert.at,
+        source: "system",
+        title: alert.title,
+        body: alert.body,
+        priority: alert.priority,
+        dedupeKey: `llm-spend-${alert.key}`,
+    });
+});
 await tierStore.load();
 await hub.load();
 await store.load();

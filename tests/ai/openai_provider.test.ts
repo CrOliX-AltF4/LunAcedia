@@ -66,3 +66,23 @@ describe("OpenAIProvider", () => {
         expect(body.messages[1]!.content).toContain("[EMAIL]");
     });
 });
+
+// ADR-021 P2 — every call is measured, with the tokens OpenAI reports.
+describe("OpenAIProvider — usage", () => {
+    it("records the tokens of each call in the usage ledger", async () => {
+        const { usageLedger } = await import("../../source/usage/llm_usage");
+        const provider = new OpenAIProvider("sk-test", "gpt-4o-mini", "You are a butler.");
+        const before = usageLedger.day().calls;
+        mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+                choices: [{ message: { content: "ok" } }],
+                usage: { prompt_tokens: 120, completion_tokens: 30 },
+            }),
+        });
+        await provider.chat("Hello");
+        const row = usageLedger.list(1).find((r) => r.model === "gpt-4o-mini");
+        expect(usageLedger.day().calls).toBe(before + 1);
+        expect(row?.tokensIn).toBeGreaterThanOrEqual(120);
+    });
+});

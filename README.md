@@ -71,6 +71,12 @@ HA     ──┘
 
 **Agent** — `POST /api/agent` answers a request in natural language ("quels mails urgents je n'ai pas lus ?", "archive le premier") with native tool calling: it searches the events LunAcedia holds (unread mail and everything received since it started), reads one in full, finds free slots, and acts **only** through the same tier gate as `POST /api/actions`. Every tool argument is re-validated against the capability manifest (`source/capabilities/`); `merge_pr` is never built from model output; once the agent has read third-party text (a mail body…), every action it proposes is held for confirmation even if its tier is `auto`. Bounded to 6 steps, 20 s and 3 actions per request. The switch is `GET|PUT /api/agent/settings` (off = no tool is ever called) and `GET /api/agent/journal` lists the last 50 runs. `POST /api/chat` (LunAvaritia) and `POST /api/intent` (one action) are answered by the same agent. Requires `AI_PROVIDER != none` and a model with tool calling (OpenAI; Ollama with a tool-capable model).
 
+**Topics** — the pocket app's conversations, kept server side so they are the same from every client: one conversation is one topic to deal with. `POST /api/conversations` opens one (optionally `about` a box item — a notification's "Traiter"), `POST /api/conversations/:id/messages` follows up, `GET /api/conversations[/:id]` lists and pages, `PATCH` renames or archives, `DELETE` removes (journaled). Each turn is answered by the agent with the topic's earlier turns, so a follow-up ("et le deuxième ?") makes sense; older turns are folded into a summary, never silently dropped. Third-party text read in an earlier turn — or the item the topic is about — keeps every later action held for confirmation. With the agent off, answers are plain dialogue with no tool. Stored under `STORAGE_DIR/conversations/` (one append-only file per topic); 4000 characters per message, 500 messages per topic, no automatic purge. The dashboard lists them read-only (**Sujets**).
+
+**Paired devices** — a phone never holds `ACEDIA_SECRET`: from the dashboard (**Appareils**), ask for a pairing code (8 characters, one use, 10 minutes) and type it in the app with the server's address; the phone receives its own token (only its SHA-256 is kept), which opens the mobile routes only (the box, topics, pending actions, digest, its notifications, turning the agent off). Revoke a device and its token is refused at once; a device silent for 90 days is revoked automatically. Five wrong codes invalidate every open code; pairing attempts are rate-limited.
+
+**LLM spend** — every call of LunAcedia's own model is measured by day, caller (the Core, the phone's topics, a direct API client, a background pass), purpose and model, with an estimated cost in dollars (`LLM_PRICES` overrides the price table; a local model is free). `GET /api/usage` reports it; the dashboard shows it (**Dépense LLM**) with **alert paliers** per day and per caller and an unusual-spend alert (`GET|PUT /api/config/usage-alerts`; defaults from `LLM_ALERT_DAILY_USD`, `LLM_ALERT_CALLER_USD`, `LLM_ALERT_SPIKE_FACTOR`, `LLM_ALERT_SPIKE_MIN_USD`). Alerts are pushed to the phone within its priority filter, and relayed by the Core when wired. **Nothing is ever cut for a cost** — spend is managed at the provider.
+
 **Calendar conflict detection & rescheduling** — overlapping timed events emit a `calendar.conflict` entry automatically; `GET /api/calendar/free-slots` computes open gaps deterministically (no LLM); `GET /api/proposals` names an actual free slot when proposing a fix for a conflict.
 
 **AI butler** — LunAcedia's own LLM (`openai` or `ollama`), configured from the dashboard's onboarding screen. It powers the agent above, `GET /api/digest` and `GET /api/proposals` (suggests next actions for urgent/conflict items). Natsume's Core never acts as LunAcedia's LLM: it delegates requests to the agent instead (ADR-008 D2).
@@ -95,7 +101,7 @@ GITHUB_WATCHED_REPOS=*
 RSS_ENABLED=true
 RSS_FEEDS='["https://hnrss.org/frontpage"]'
 
-AI_PROVIDER=none   # events and actions work — /api/agent, /api/chat and /api/digest return 503
+AI_PROVIDER=none   # events and actions work — /api/agent, /api/chat, /api/conversations and /api/digest return 503
 ```
 
 ```bash

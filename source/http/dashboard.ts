@@ -43,6 +43,10 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 .card-actions button{padding:3px 10px;font-size:12px}
 .trash-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)}
 .trash-row span{flex:1;font-size:13px}
+.topic-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.topic-row span{flex:1;font-size:13px}
+.topic-row small,.topic-msg small{color:var(--muted)}
+.topic-msg{padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;white-space:pre-wrap}
 #empty{color:var(--muted);text-align:center;padding:60px 20px;display:none}
 /* auth overlay */
 #auth{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100}
@@ -167,6 +171,9 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openDigest()">Digest</button>
   <button onclick="openSettings()">⚙ Réglages</button>
   <button onclick="openTrash()">Corbeille</button>
+  <button onclick="openTopics()">Sujets</button>
+  <button onclick="openUsage()">Dépense LLM</button>
+  <button onclick="openDevices()">Appareils</button>
 </header>
 
 <div id="ai-banner">
@@ -318,6 +325,118 @@ async function restoreTrash(btn){
   await req('/api/inbox/trash/'+encodeURIComponent(id)+'/restore',{method:'POST'}).catch(()=>{});
   row.remove();
   setTimeout(load,1500);
+}
+
+// Paired devices (ADR-020 M3): each phone has its own token; revoke one and it is refused at once.
+// Ids are read from the row, never interpolated into onclick.
+async function openDevices(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Appareils appairés';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/devices');
+    const data=await r.json();
+    const rows=(data.devices||[]).map(x=>\`<div class="trash-row" data-id="\${esc(x.id)}"><span>\${esc(x.name)} <small>— appairé le \${esc(new Date(x.createdAt).toLocaleDateString())}, vu \${esc(ago(Date.parse(x.lastSeenAt)))}\${x.pushToken?' · notifications':''}</small></span><button onclick="revokeDevice(this)">Révoquer</button></div>\`).join('')||'<p><small>Aucun appareil appairé.</small></p>';
+    box.innerHTML=rows+\`<p style="margin-top:12px"><button onclick="newPairingCode()">Appairer un appareil</button></p><div id="pairing"></div>
+<p><small>Un appareil muet depuis 90 jours est révoqué automatiquement.</small></p>\`;
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function newPairingCode(){
+  const out=document.getElementById('pairing');
+  try{
+    const r=await req('/api/devices/pairing-code',{method:'POST'});
+    const c=await r.json();
+    out.innerHTML=\`<p>Dans l'application : adresse <code>\${esc(location.origin)}</code>, code <strong style="font-size:20px;letter-spacing:3px">\${esc(c.code)}</strong></p><p><small>Valable jusqu'à \${esc(new Date(c.expiresAt).toLocaleTimeString())}, une seule fois.</small></p>\`;
+  }catch(e){out.textContent='Error: '+e.message;}
+}
+async function revokeDevice(btn){
+  const row=btn.closest('.trash-row');
+  const id=row.dataset.id;
+  btn.disabled=true;
+  await req('/api/devices/'+encodeURIComponent(id),{method:'DELETE'}).catch(()=>{});
+  row.remove();
+}
+
+// LLM spend (ADR-021 P2): what LunAcedia's own model cost, and the alert paliers — information only, nothing is ever cut.
+const CALLER_LABELS={core:'Natsume (Core)',topics:'Sujets du téléphone',api:'API directe',background:'Tâches de fond',unattributed:'Non attribué'};
+function usd(n){return (Number(n)||0).toFixed(2)+' $';}
+function paliersText(list){return (list||[]).join('/');}
+function callerPaliersText(map){return Object.entries(map||{}).map(([c,l])=>c+'='+paliersText(l)).join(', ');}
+function parsePaliersInput(s){return String(s||'').split('/').map(x=>Number(x.trim().replace(',','.'))).filter(n=>Number.isFinite(n)&&n>0);}
+function parseCallerInput(s){const out={};for(const part of String(s||'').split(',')){const [c,v]=part.split('=').map(x=>(x||'').trim());if(c&&v){const p=parsePaliersInput(v);if(p.length)out[c]=p;}}return out;}
+async function openUsage(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Dépense LLM (estimation)';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/usage?days=7');
+    const u=await r.json();
+    const today=u.days[0]||{totalUsd:0,byCaller:{},calls:0,unpricedCalls:0};
+    const byCaller=Object.entries(today.byCaller||{}).map(([c,v])=>\`<div class="topic-msg">\${esc(CALLER_LABELS[c]||c)} : \${esc(usd(v))}</div>\`).join('');
+    const week=u.days.map(x=>\`<div class="topic-msg"><small>\${esc(x.day)}</small> \${esc(usd(x.totalUsd))} · \${esc(x.calls)} appels</div>\`).join('');
+    const fired=(u.fired||[]).map(a=>\`<div class="topic-msg"><small>\${esc(new Date(a.at).toLocaleString())}</small><br>\${esc(a.title)}</div>\`).join('')||'<div class="topic-msg"><small>Aucune alerte cette semaine.</small></div>';
+    const unpriced=today.unpricedCalls?\`<p><small>\${esc(today.unpricedCalls)} appel(s) d'un modèle sans prix connu, hors total.</small></p>\`:'';
+    box.innerHTML=\`<p><strong>Aujourd'hui : \${esc(usd(today.totalUsd))}</strong> · \${esc(today.calls)} appels · dernière heure \${esc(usd(u.lastHourUsd))} (habituellement \${esc(usd(u.usualHourlyUsd))}/h)</p>\${unpriced}\${byCaller}
+<h4 style="margin-top:12px">7 derniers jours</h4>\${week}
+<h4 style="margin-top:12px">Alertes émises</h4>\${fired}
+<h4 style="margin-top:12px">Paliers d'alerte (jamais de coupure)</h4>
+<label>Par jour (ex. 5/10/20)<input id="ua-daily" type="text"></label>
+<label>Par appelant (ex. topics=1/2, core=5)<input id="ua-callers" type="text"></label>
+<label>Dépense inhabituelle : facteur (0 = désactivée)<input id="ua-factor" type="number" min="0" step="0.5"></label>
+<label>…au-dessus de ($/h)<input id="ua-min" type="number" min="0" step="0.1"></label>
+<button onclick="saveUsageAlerts(this)">Enregistrer</button> <span id="ua-status"></span>\`;
+    document.getElementById('ua-daily').value=paliersText(u.alerts.dailyUsd);
+    document.getElementById('ua-callers').value=callerPaliersText(u.alerts.perCallerUsd);
+    document.getElementById('ua-factor').value=u.alerts.spikeFactor;
+    document.getElementById('ua-min').value=u.alerts.spikeMinUsd;
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function saveUsageAlerts(btn){
+  const status=document.getElementById('ua-status');
+  btn.disabled=true;
+  try{
+    const body={
+      dailyUsd:parsePaliersInput(document.getElementById('ua-daily').value),
+      perCallerUsd:parseCallerInput(document.getElementById('ua-callers').value),
+      spikeFactor:Number(document.getElementById('ua-factor').value)||0,
+      spikeMinUsd:Number(document.getElementById('ua-min').value)||0,
+    };
+    const r=await req('/api/config/usage-alerts',{method:'PUT',body:JSON.stringify(body)});
+    const data=await r.json();
+    status.textContent=r.ok?'Enregistré.':('Refusé : '+(data.error||r.status));
+  }catch(e){status.textContent='Error: '+e.message;}
+  btn.disabled=false;
+}
+
+// The pocket app's topics (ADR-020 amendment 1, S1) — read-only here: the phone is where they are used.
+// Ids are read from the row, never interpolated into onclick.
+async function openTopics(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Sujets (application mobile)';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/conversations');
+    const items=(await r.json()).conversations||[];
+    box.innerHTML=items.length?items.map(t=>\`<div class="topic-row" data-id="\${esc(t.id)}" onclick="openTopic(this)"><span>\${esc(t.title)}\${t.archived?' <small>(archivé)</small>':''}</span><small>\${esc(t.messageCount)} messages · \${esc(ago(Date.parse(t.updatedAt)))}</small></div>\`).join(''):'Aucun sujet pour le moment.';
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function openTopic(row){
+  const id=row.dataset.id;
+  const box=document.getElementById('digest-text');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/conversations/'+encodeURIComponent(id)+'?limit=100');
+    const data=await r.json();
+    document.getElementById('digest-title').textContent=data.conversation?data.conversation.title:'Sujet';
+    const back='<button onclick="openTopics()">← Sujets</button>';
+    box.innerHTML=back+(data.messages||[]).map(m=>\`<div class="topic-msg"><small>\${m.role==='user'?'Toi':'Assistant'} · \${esc(new Date(m.at).toLocaleString())}</small><br>\${esc(m.text)}</div>\`).join('');
+  }catch(e){box.textContent='Error: '+e.message;}
 }
 
 async function openDigestLike(path,title){

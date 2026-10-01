@@ -67,6 +67,18 @@ export interface AgentRequest {
      * ("Pause autonomie", law 3) is on — pausing autonomy must stop every action, even a held one.
      */
     readOnly?: boolean;
+    /**
+     * Earlier turns of the same topic (ADR-020 amendment 1, S1): the user's messages and the agent's answers,
+     * oldest first — never raw tool results. Sent between the system prompt and the request.
+     */
+    history?: { role: "user" | "assistant"; content: string }[];
+    /**
+     * The history or the context carries text written by a third party (a mail read in an earlier turn, the box
+     * item a topic is about): the run starts contaminated, every action capped at confirm from the first step (D2).
+     */
+    untrusted?: boolean;
+    /** The topic this run answers in — for the journal. */
+    conversationId?: string;
 }
 
 export type ActionStatus = "executed" | "pending" | "refused" | "invalid" | "error";
@@ -100,6 +112,8 @@ export interface AgentResult {
     actions: AgentAction[];
     steps: AgentStep[];
     error?: string;
+    /** This run read third-party text, or started from some (`untrusted`) — its answer may carry it. */
+    external?: boolean;
 }
 
 const MAX_ITEMS = 20;
@@ -168,6 +182,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
         items: [],
         actions: [],
         steps: [],
+        ...(req.untrusted === true && { external: true }),
     };
 
     const provider = deps.provider;
@@ -198,6 +213,12 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                 unavailableActions(new Set(tools.map((t) => t.name))),
             ),
         },
+        ...(req.history ?? [])
+            .filter(
+                (m) =>
+                    (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+            )
+            .map((m): AgentMessage => ({ role: m.role, content: m.content })),
         { role: "user", content: userMessage(req) },
     ];
     const seenItems = new Set<string>();
@@ -212,7 +233,8 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), limits.timeoutMs);
-    let external = false;
+    // D2 across turns: third-party text in the history or the context contaminates the run from the start.
+    let external = req.untrusted === true;
     let actionAttempts = 0;
     let lastContent = "";
 
@@ -271,6 +293,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         step.ok = true;
                         step.external = r.external;
                         external = external || r.external;
+                        if (external) result.external = true;
                         const res = r.result as { events?: Record<string, unknown>[] };
                         if (Array.isArray(res.events)) addItems(res.events);
                         else if (call.name === "get_event")

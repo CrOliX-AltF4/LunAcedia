@@ -14,6 +14,8 @@ export type AcediaEventType =
     | "ha.state_changed"
     | "tasks.due"
     | "system.heartbeat"
+    /** A spend alert on LunAcedia's own LLM (ADR-021 P2) — pushed to the phone, never put in the box. */
+    | "system.llm_spend"
     /**
      * Sync message (ADR-018 R8): an item changed or died with its source object — meta { op, key }, op one of
      * removed | read | unread | updated — `updated` (ADR-019 L3) also carries meta.item { title, body, priority,

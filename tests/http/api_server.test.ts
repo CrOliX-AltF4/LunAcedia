@@ -1848,3 +1848,31 @@ describe("AcediaApiServer — POST /api/config/ai-provider (ADR-013 I1)", () => 
         expect(res.status).toBe(401);
     });
 });
+
+describe("AcediaApiServer — GET /api/identity (ADR-020 D2)", () => {
+    afterEach(() => {
+        delete process.env["ASSISTANT_NAME"];
+    });
+
+    it("names the assistant LunAcedia by default — never Natsume", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/identity`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ name: "LunAcedia", kind: "lunacedia" });
+    });
+
+    it("uses ASSISTANT_NAME when set, and requires the token", async () => {
+        process.env["ASSISTANT_NAME"] = "Alfred";
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const ok = await get(`http://localhost:${port}/api/identity`, AUTH);
+        const anon = await get(`http://localhost:${port}/api/identity`, {});
+        server.stop();
+        expect(ok.body).toMatchObject({ name: "Alfred" });
+        expect(anon.status).toBe(401);
+    });
+});
