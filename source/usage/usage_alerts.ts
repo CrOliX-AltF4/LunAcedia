@@ -59,7 +59,9 @@ export function parsePaliers(raw: string | undefined): number[] {
 }
 
 /** "topics=1/2, core=5" → { topics: [1, 2], core: [5] }; unknown callers ignored. */
-export function parseCallerPaliers(raw: string | undefined): Partial<Record<UsageCaller, number[]>> {
+export function parseCallerPaliers(
+    raw: string | undefined,
+): Partial<Record<UsageCaller, number[]>> {
     const out: Partial<Record<UsageCaller, number[]>> = {};
     for (const part of (raw ?? "").split(",")) {
         const [name, values] = part.split("=").map((s) => s?.trim());
@@ -96,17 +98,21 @@ export function validateSettings(input: unknown): UsageAlertSettings | { error: 
     if (!daily) return { error: "dailyUsd must be a list of positive amounts" };
     const perCaller: Partial<Record<UsageCaller, number[]>> = {};
     const raw = (b["perCallerUsd"] ?? {}) as Record<string, unknown>;
-    if (typeof raw !== "object" || Array.isArray(raw)) return { error: "perCallerUsd must be an object" };
+    if (typeof raw !== "object" || Array.isArray(raw))
+        return { error: "perCallerUsd must be an object" };
     for (const [caller, v] of Object.entries(raw)) {
-        if (!(USAGE_CALLERS as readonly string[]).includes(caller)) return { error: `unknown caller ${caller}` };
+        if (!(USAGE_CALLERS as readonly string[]).includes(caller))
+            return { error: `unknown caller ${caller}` };
         const p = amounts(v);
         if (!p) return { error: `perCallerUsd.${caller} must be a list of positive amounts` };
         if (p.length) perCaller[caller as UsageCaller] = p;
     }
     const factor = b["spikeFactor"] ?? 5;
     const floor = b["spikeMinUsd"] ?? 0.5;
-    if (typeof factor !== "number" || !Number.isFinite(factor) || factor < 0) return { error: "spikeFactor must be ≥ 0" };
-    if (typeof floor !== "number" || !Number.isFinite(floor) || floor < 0) return { error: "spikeMinUsd must be ≥ 0" };
+    if (typeof factor !== "number" || !Number.isFinite(factor) || factor < 0)
+        return { error: "spikeFactor must be ≥ 0" };
+    if (typeof floor !== "number" || !Number.isFinite(floor) || floor < 0)
+        return { error: "spikeMinUsd must be ≥ 0" };
     return { dailyUsd: daily, perCallerUsd: perCaller, spikeFactor: factor, spikeMinUsd: floor };
 }
 
@@ -195,7 +201,10 @@ export class UsageAlerts {
                 body: `${usd(today.totalUsd)} estimés aujourd'hui. Rien n'est coupé : c'est une information.`,
             });
         }
-        for (const [caller, paliers] of Object.entries(this.settings.perCallerUsd) as [UsageCaller, number[]][]) {
+        for (const [caller, paliers] of Object.entries(this.settings.perCallerUsd) as [
+            UsageCaller,
+            number[],
+        ][]) {
             const spent = today.byCaller[caller] ?? 0;
             for (const palier of paliers) {
                 const key = `${day}|${caller}|${palier}`;

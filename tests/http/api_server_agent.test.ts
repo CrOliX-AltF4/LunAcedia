@@ -258,7 +258,10 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
                 connectors: [connector("Gmail", executed)],
                 tiers: { archive_email: "auto" },
             });
-            const r = await call("POST", `${base}/api/agent`, { text: "archive-le", untrusted: "no" });
+            const r = await call("POST", `${base}/api/agent`, {
+                text: "archive-le",
+                untrusted: "no",
+            });
             expect(r.body.actions[0]).toMatchObject({ status: "executed" });
             expect(executed).toEqual([{ kind: "archive_email", sourceId: "1" }]);
         });

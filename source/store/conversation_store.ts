@@ -219,7 +219,11 @@ export class ConversationStore {
         return { messages: all.slice(start, end), hasMore: start > 0 };
     }
 
-    async rename(id: string, title: string, source: ConversationMeta["titleSource"]): Promise<ConversationMeta> {
+    async rename(
+        id: string,
+        title: string,
+        source: ConversationMeta["titleSource"],
+    ): Promise<ConversationMeta> {
         const meta = this.require(id);
         meta.title = titleFromText(title);
         meta.titleSource = source;

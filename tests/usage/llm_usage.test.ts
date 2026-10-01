@@ -27,7 +27,10 @@ describe("usage context", () => {
     });
 
     it("counts a purpose outside any caller as background, and nothing at all as unattributed", () => {
-        expect(withUsagePurpose("digest", () => currentUsageContext())).toEqual({ caller: "background", purpose: "digest" });
+        expect(withUsagePurpose("digest", () => currentUsageContext())).toEqual({
+            caller: "background",
+            purpose: "digest",
+        });
         expect(currentUsageContext()).toEqual({ caller: "unattributed", purpose: "unknown" });
     });
 
@@ -38,7 +41,10 @@ describe("usage context", () => {
     });
 
     it("derives a request's context from its route", () => {
-        expect(usageContextOf("/api/conversations/abc/messages")).toEqual({ caller: "topics", purpose: "topic" });
+        expect(usageContextOf("/api/conversations/abc/messages")).toEqual({
+            caller: "topics",
+            purpose: "topic",
+        });
         expect(usageContextOf("/api/digest")).toEqual({ caller: "api", purpose: "digest" });
         expect(usageContextOf("/api/agent?x=1")).toEqual({ caller: "api", purpose: "agent" });
         expect(usageContextOf("/api/inbox")).toEqual({ caller: "api", purpose: "other" });
@@ -60,7 +66,10 @@ describe("UsageLedger", () => {
         ledger.record("gpt-4o-mini", 1_000_000, 0, { caller: "core", purpose: "agent" });
         ledger.record("gpt-4o-mini", 0, 1_000_000, { caller: "core", purpose: "agent" });
         ledger.record("gpt-4o-mini", 1_000_000, 0, { caller: "topics", purpose: "topic" });
-        expect(ledger.list(1).find((r) => r.caller === "core")).toMatchObject({ calls: 2, costUsd: 0.75 });
+        expect(ledger.list(1).find((r) => r.caller === "core")).toMatchObject({
+            calls: 2,
+            costUsd: 0.75,
+        });
         expect(ledger.day().totalUsd).toBeCloseTo(0.9);
         expect(ledger.day().byCaller).toEqual({ core: 0.75, topics: expect.closeTo(0.15) });
     });
@@ -74,7 +83,9 @@ describe("UsageLedger", () => {
     it("never throws, and a failing listener breaks nothing", () => {
         const ledger = new UsageLedger(undefined, () => NOW);
         const seen = vi.fn();
-        ledger.onRecord(() => { throw new Error("boom"); });
+        ledger.onRecord(() => {
+            throw new Error("boom");
+        });
         ledger.onRecord(seen);
         expect(() => ledger.record("gpt-4o-mini", 1, 1)).not.toThrow();
         expect(seen).toHaveBeenCalledOnce();
@@ -82,14 +93,31 @@ describe("UsageLedger", () => {
 
     describe("on disk", () => {
         let dir: string;
-        beforeEach(async () => { dir = await fs.mkdtemp(path.join(os.tmpdir(), "acedia-usage-")); });
-        afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+        beforeEach(async () => {
+            dir = await fs.mkdtemp(path.join(os.tmpdir(), "acedia-usage-"));
+        });
+        afterEach(async () => {
+            await fs.rm(dir, { recursive: true, force: true });
+        });
 
         it("survives a restart and drops days beyond the retention", async () => {
             const file = path.join(dir, "llm_usage.json");
-            await fs.writeFile(file, JSON.stringify([
-                { day: localDay(NOW - 120 * 86_400_000), caller: "api", purpose: "chat", model: "gpt-4o-mini", calls: 1, tokensIn: 1, tokensOut: 1, costUsd: 0 },
-            ]), "utf-8");
+            await fs.writeFile(
+                file,
+                JSON.stringify([
+                    {
+                        day: localDay(NOW - 120 * 86_400_000),
+                        caller: "api",
+                        purpose: "chat",
+                        model: "gpt-4o-mini",
+                        calls: 1,
+                        tokensIn: 1,
+                        tokensOut: 1,
+                        costUsd: 0,
+                    },
+                ]),
+                "utf-8",
+            );
             const ledger = new UsageLedger(undefined, () => NOW);
             await ledger.load(file);
             ledger.record("gpt-4o-mini", 1_000_000, 0, { caller: "core", purpose: "agent" });

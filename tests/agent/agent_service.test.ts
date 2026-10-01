@@ -117,6 +117,9 @@ describe("AgentService — topics (ADR-020 amendment 1, S1)", () => {
             actions: [],
             steps: [],
         }));
-        expect(s.journal()[0]).toMatchObject({ conversationId: "topic-1", text: "et le deuxième ?" });
+        expect(s.journal()[0]).toMatchObject({
+            conversationId: "topic-1",
+            text: "et le deuxième ?",
+        });
     });
 });

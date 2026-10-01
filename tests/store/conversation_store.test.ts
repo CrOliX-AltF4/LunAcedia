@@ -42,7 +42,11 @@ describe("ConversationStore — in memory", () => {
 
     it("creates a topic titled after its first message, then appends messages in order", async () => {
         const topic = await store.create("Qu'est-ce qui est urgent ?");
-        expect(topic).toMatchObject({ title: "Qu'est-ce qui est urgent ?", archived: false, messageCount: 0 });
+        expect(topic).toMatchObject({
+            title: "Qu'est-ce qui est urgent ?",
+            archived: false,
+            messageCount: 0,
+        });
 
         await store.append(topic.id, { role: "user", text: "Qu'est-ce qui est urgent ?" });
         await store.append(topic.id, { role: "assistant", text: "Deux mails.", external: true });
@@ -91,7 +95,8 @@ describe("ConversationStore — in memory", () => {
 
     it("refuses a message beyond the limit instead of dropping old ones", async () => {
         const t = await store.create("t");
-        for (let i = 0; i < MAX_MESSAGES; i++) await store.append(t.id, { role: "user", text: "x" });
+        for (let i = 0; i < MAX_MESSAGES; i++)
+            await store.append(t.id, { role: "user", text: "x" });
         expect(store.isFull(t.id)).toBe(true);
         await expect(store.append(t.id, { role: "user", text: "one more" })).rejects.toBeInstanceOf(
             ConversationFullError,
@@ -142,11 +147,19 @@ describe("ConversationStore — on disk", () => {
 
         const again = new ConversationStore(dir);
         await again.load();
-        expect(again.get(t.id)).toMatchObject({ title: "Mails urgents", archived: true, messageCount: 2 });
+        expect(again.get(t.id)).toMatchObject({
+            title: "Mails urgents",
+            archived: true,
+            messageCount: 2,
+        });
         expect(again.get(t.id)!.summary).toEqual({ text: "s", covers: 1, external: false });
         const messages = await again.messages(t.id);
         expect(messages[0]).toMatchObject({ role: "user", about: "email-1" });
-        expect(messages[1]).toMatchObject({ role: "assistant", external: true, agent: { items: [{ key: "email-1" }] } });
+        expect(messages[1]).toMatchObject({
+            role: "assistant",
+            external: true,
+            agent: { items: [{ key: "email-1" }] },
+        });
     });
 
     it("keeps the rest of a topic when its last line was torn by a crash", async () => {

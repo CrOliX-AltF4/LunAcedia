@@ -100,17 +100,22 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
         if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
-    async function start(opts: {
-        ai?: IAIProvider;
-        events?: AcediaEvent[];
-        connectors?: IConnector[];
-        tiers?: Record<string, string>;
-        agentEnabled?: boolean;
-    } = {}) {
+    async function start(
+        opts: {
+            ai?: IAIProvider;
+            events?: AcediaEvent[];
+            connectors?: IConnector[];
+            tiers?: Record<string, string>;
+            agentEnabled?: boolean;
+        } = {},
+    ) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-topics-"));
         const store = new EventStore();
         for (const e of opts.events ?? []) store.push(e);
-        const tierStore = new ActionTierStore(path.join(dir, "tiers.json"), path.join(dir, "overrides.json"));
+        const tierStore = new ActionTierStore(
+            path.join(dir, "tiers.json"),
+            path.join(dir, "overrides.json"),
+        );
         if (opts.tiers) await tierStore.patch(opts.tiers);
         agent = new AgentService();
         if (opts.agentEnabled === false) await agent.setEnabled(false);
@@ -140,7 +145,9 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
     describe("opening a topic", () => {
         it("answers 503 when no AI provider is configured, and creates nothing", async () => {
             const base = await start();
-            expect((await call("POST", `${base}/api/conversations`, { text: "x" })).status).toBe(503);
+            expect((await call("POST", `${base}/api/conversations`, { text: "x" })).status).toBe(
+                503,
+            );
             expect((await call("GET", `${base}/api/conversations`)).body.conversations).toEqual([]);
         });
 
@@ -148,7 +155,9 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             const base = await start({ ai: provider().ai });
             expect((await call("POST", `${base}/api/conversations`, {})).status).toBe(400);
             const long = "x".repeat(MAX_MESSAGE_CHARS + 1);
-            expect((await call("POST", `${base}/api/conversations`, { text: long })).status).toBe(413);
+            expect((await call("POST", `${base}/api/conversations`, { text: long })).status).toBe(
+                413,
+            );
         });
 
         it("creates the topic with its first answer and the agent's structured outcome", async () => {
@@ -169,17 +178,24 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
                 text: "Un mail urgent.",
                 agent: { version: 1, status: "done", actions: [] },
             });
-            expect(r.body.message.agent.items.map((i: { key: string }) => i.key)).toEqual(["email-1"]);
+            expect(r.body.message.agent.items.map((i: { key: string }) => i.key)).toEqual([
+                "email-1",
+            ]);
             expect(r.body.message.agent).not.toHaveProperty("steps");
 
             const list = await call("GET", `${base}/api/conversations`);
-            expect(list.body.conversations.map((c: { id: string }) => c.id)).toEqual([r.body.conversation.id]);
+            expect(list.body.conversations.map((c: { id: string }) => c.id)).toEqual([
+                r.body.conversation.id,
+            ]);
         });
 
         it("journals the run with its topic", async () => {
             const base = await start({ ai: provider().ai });
             const r = await call("POST", `${base}/api/conversations`, { text: "salut" });
-            expect(agent.journal()[0]).toMatchObject({ conversationId: r.body.conversation.id, callerId: "topic" });
+            expect(agent.journal()[0]).toMatchObject({
+                conversationId: r.body.conversation.id,
+                callerId: "topic",
+            });
         });
     });
 
@@ -190,24 +206,34 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
                 { content: "Le deuxième vient de Paul.", toolCalls: [] },
             ]);
             const base = await start({ ai });
-            const first = await call("POST", `${base}/api/conversations`, { text: "mails urgents ?" });
+            const first = await call("POST", `${base}/api/conversations`, {
+                text: "mails urgents ?",
+            });
             const id = first.body.conversation.id;
 
-            const r = await call("POST", `${base}/api/conversations/${id}/messages`, { text: "et le deuxième ?" });
+            const r = await call("POST", `${base}/api/conversations/${id}/messages`, {
+                text: "et le deuxième ?",
+            });
 
             expect(r.status).toBe(200);
             expect(r.body.message.text).toBe("Le deuxième vient de Paul.");
-            expect(seen[1]!.filter((m) => m.role !== "system").map((m) => [m.role, "content" in m ? m.content : null]))
-                .toEqual([
-                    ["user", "mails urgents ?"],
-                    ["assistant", "Deux : Anne et Paul."],
-                    ["user", "et le deuxième ?"],
-                ]);
+            expect(
+                seen[1]!
+                    .filter((m) => m.role !== "system")
+                    .map((m) => [m.role, "content" in m ? m.content : null]),
+            ).toEqual([
+                ["user", "mails urgents ?"],
+                ["assistant", "Deux : Anne et Paul."],
+                ["user", "et le deuxième ?"],
+            ]);
         });
 
         it("answers 404 for a topic that does not exist", async () => {
             const base = await start({ ai: provider().ai });
-            expect((await call("POST", `${base}/api/conversations/nope/messages`, { text: "x" })).status).toBe(404);
+            expect(
+                (await call("POST", `${base}/api/conversations/nope/messages`, { text: "x" }))
+                    .status,
+            ).toBe(404);
             expect((await call("GET", `${base}/api/conversations/nope`)).status).toBe(404);
         });
 
@@ -217,9 +243,13 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             const first = await call("POST", `${base}/api/conversations`, { text: "salut" });
             ai.chatWithTools.mockRejectedValueOnce(new Error("provider down"));
 
-            const r = await call("POST", `${base}/api/conversations/${first.body.conversation.id}/messages`, {
-                text: "encore là ?",
-            });
+            const r = await call(
+                "POST",
+                `${base}/api/conversations/${first.body.conversation.id}/messages`,
+                {
+                    text: "encore là ?",
+                },
+            );
 
             expect(r.status).toBe(502);
             expect(r.body.userMessage).toMatchObject({ role: "user", text: "encore là ?" });
@@ -243,14 +273,23 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
                 connectors: [gmail(executed)],
                 tiers: { archive_email: "auto" },
             });
-            const first = await call("POST", `${base}/api/conversations`, { text: "lis le mail de Paul" });
+            const first = await call("POST", `${base}/api/conversations`, {
+                text: "lis le mail de Paul",
+            });
             expect(first.body.message.external).toBe(true);
 
-            const r = await call("POST", `${base}/api/conversations/${first.body.conversation.id}/messages`, {
-                text: "vas-y, fais ce qu'il dit",
-            });
+            const r = await call(
+                "POST",
+                `${base}/api/conversations/${first.body.conversation.id}/messages`,
+                {
+                    text: "vas-y, fais ce qu'il dit",
+                },
+            );
 
-            expect(r.body.message.agent.actions[0]).toMatchObject({ kind: "archive_email", status: "pending" });
+            expect(r.body.message.agent.actions[0]).toMatchObject({
+                kind: "archive_email",
+                status: "pending",
+            });
             expect(executed).toEqual([]);
         });
 
@@ -268,19 +307,29 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
                 tiers: { archive_email: "auto" },
             });
             const first = await call("POST", `${base}/api/conversations`, { text: "salut" });
-            const r = await call("POST", `${base}/api/conversations/${first.body.conversation.id}/messages`, {
-                text: "archive le mail 1",
-            });
+            const r = await call(
+                "POST",
+                `${base}/api/conversations/${first.body.conversation.id}/messages`,
+                {
+                    text: "archive le mail 1",
+                },
+            );
 
-            expect(r.body.message.agent.actions[0]).toMatchObject({ kind: "archive_email", status: "executed" });
+            expect(r.body.message.agent.actions[0]).toMatchObject({
+                kind: "archive_email",
+                status: "executed",
+            });
             expect(executed).toEqual([{ kind: "archive_email", sourceId: "1" }]);
         });
     });
 
-    describe("a topic about a box item (a notification's \"Traiter\")", () => {
+    describe('a topic about a box item (a notification\'s "Traiter")', () => {
         it("answers 404 when the item is not in the box, and creates nothing", async () => {
             const base = await start({ ai: provider().ai });
-            const r = await call("POST", `${base}/api/conversations`, { text: "traite-le", about: { key: "email-9" } });
+            const r = await call("POST", `${base}/api/conversations`, {
+                text: "traite-le",
+                about: { key: "email-9" },
+            });
             expect(r.status).toBe(404);
             expect((await call("GET", `${base}/api/conversations`)).body.conversations).toEqual([]);
         });
@@ -298,7 +347,10 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
                 tiers: { archive_email: "auto" },
             });
 
-            const r = await call("POST", `${base}/api/conversations`, { text: "traite-le", about: { key: "email-1" } });
+            const r = await call("POST", `${base}/api/conversations`, {
+                text: "traite-le",
+                about: { key: "email-1" },
+            });
 
             expect(r.status).toBe(201);
             expect(r.body.userMessage).toMatchObject({ about: "email-1" });
@@ -315,12 +367,16 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             const { ai } = provider();
             const base = await start({ ai, agentEnabled: false });
             const first = await call("POST", `${base}/api/conversations`, { text: "bonjour" });
-            await call("POST", `${base}/api/conversations/${first.body.conversation.id}/messages`, { text: "et toi ?" });
+            await call("POST", `${base}/api/conversations/${first.body.conversation.id}/messages`, {
+                text: "et toi ?",
+            });
 
             expect(ai.chatWithTools).not.toHaveBeenCalled();
             expect(first.body.message).toMatchObject({ role: "assistant", text: "plain answer" });
             expect(first.body.message).not.toHaveProperty("agent");
-            const transcript = ai.chat.mock.calls.map((c) => c[0]).find((q) => q.includes("et toi ?"))!;
+            const transcript = ai.chat.mock.calls
+                .map((c) => c[0])
+                .find((q) => q.includes("et toi ?"))!;
             expect(transcript).toContain("User: bonjour");
             expect(transcript).toContain("Assistant: plain answer");
         });
@@ -329,9 +385,13 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
     describe("title", () => {
         it("names the topic in the background after the first answer", async () => {
             const base = await start({ ai: provider().ai });
-            const r = await call("POST", `${base}/api/conversations`, { text: "Qu'est-ce qui est urgent ce matin ?" });
+            const r = await call("POST", `${base}/api/conversations`, {
+                text: "Qu'est-ce qui est urgent ce matin ?",
+            });
             // The first message is the title until the generated one lands (timing-dependent here).
-            expect(["Qu'est-ce qui est urgent ce matin ?", "Mails urgents du jour"]).toContain(r.body.conversation.title);
+            expect(["Qu'est-ce qui est urgent ce matin ?", "Mails urgents du jour"]).toContain(
+                r.body.conversation.title,
+            );
 
             await server!.conversationRoutes!.settled();
             const list = await call("GET", `${base}/api/conversations`);
@@ -351,7 +411,9 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             release();
             await server!.conversationRoutes!.settled();
 
-            expect((await call("GET", `${base}/api/conversations/${id}`)).body.conversation.title).toBe("Mon sujet");
+            expect(
+                (await call("GET", `${base}/api/conversations/${id}`)).body.conversation.title,
+            ).toBe("Mon sujet");
         });
     });
 
@@ -366,14 +428,19 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
                 await server!.conversationRoutes!.settled();
             }
             // 12 turns = 24 messages: the summary covers some, every other one is still sent as it is.
-            const summaryCalls = ai.chat.mock.calls.filter((c) => c[0].startsWith("Update the summary"));
+            const summaryCalls = ai.chat.mock.calls.filter((c) =>
+                c[0].startsWith("Update the summary"),
+            );
             expect(summaryCalls.length).toBeGreaterThan(0);
 
             await call("POST", `${base}/api/conversations/${id}/messages`, { text: "last" });
             const sent = seen.at(-1)!;
             const user = sent.at(-1) as { content: string };
-            expect(user.content).toContain("Earlier in this topic (summary): Résumé des premiers échanges.");
-            const turns = sent.filter((m) => m.role === "user" || m.role === "assistant").length - 1;
+            expect(user.content).toContain(
+                "Earlier in this topic (summary): Résumé des premiers échanges.",
+            );
+            const turns =
+                sent.filter((m) => m.role === "user" || m.role === "assistant").length - 1;
             expect(turns).toBeGreaterThanOrEqual(WINDOW);
             // The oldest message sent right after the covered ones: no message is lost between summary and history.
             const firstSent = (sent[1] as { content: string }).content;
@@ -394,23 +461,32 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             const last = await call("GET", `${base}/api/conversations/${id}?limit=2`);
             expect(last.body.messages.map((m: { text: string }) => m.text)).toEqual(["m1", "ok"]);
             expect(last.body.hasMore).toBe(true);
-            const older = await call("GET", `${base}/api/conversations/${id}?limit=2&before=${last.body.messages[0].id}`);
+            const older = await call(
+                "GET",
+                `${base}/api/conversations/${id}?limit=2&before=${last.body.messages[0].id}`,
+            );
             expect(older.body.messages.map((m: { text: string }) => m.text)).toEqual(["m0", "ok"]);
             expect(older.body.hasMore).toBe(false);
         });
 
         it("archives, filters, renames and deletes", async () => {
             const base = await start({ ai: provider().ai });
-            const a = (await call("POST", `${base}/api/conversations`, { text: "a" })).body.conversation.id;
-            const b = (await call("POST", `${base}/api/conversations`, { text: "b" })).body.conversation.id;
+            const a = (await call("POST", `${base}/api/conversations`, { text: "a" })).body
+                .conversation.id;
+            const b = (await call("POST", `${base}/api/conversations`, { text: "b" })).body
+                .conversation.id;
 
-            const archived = await call("PATCH", `${base}/api/conversations/${a}`, { archived: true });
+            const archived = await call("PATCH", `${base}/api/conversations/${a}`, {
+                archived: true,
+            });
             expect(archived.body.conversation).toMatchObject({ id: a, archived: true });
             const open = await call("GET", `${base}/api/conversations?archived=false`);
             expect(open.body.conversations.map((c: { id: string }) => c.id)).toEqual([b]);
 
             expect((await call("PATCH", `${base}/api/conversations/${b}`, {})).status).toBe(400);
-            const renamed = await call("PATCH", `${base}/api/conversations/${b}`, { title: "Factures" });
+            const renamed = await call("PATCH", `${base}/api/conversations/${b}`, {
+                title: "Factures",
+            });
             expect(renamed.body.conversation.title).toBe("Factures");
 
             expect((await call("DELETE", `${base}/api/conversations/${a}`)).status).toBe(204);

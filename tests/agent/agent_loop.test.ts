@@ -355,7 +355,9 @@ describe("runAgent — actions it cannot take are declared (C17)", () => {
 // ADR-020 amendment 1, S1 — a topic: the agent answers with the earlier turns, and D2 holds across them.
 describe("runAgent — turns of a topic", () => {
     it("sends the earlier turns between the system prompt and the request, oldest first", async () => {
-        const { provider, seen } = scripted([{ content: "Le deuxième vient de Paul.", toolCalls: [] }]);
+        const { provider, seen } = scripted([
+            { content: "Le deuxième vient de Paul.", toolCalls: [] },
+        ]);
         await runAgent(
             {
                 text: "et le deuxième ?",
@@ -409,18 +411,31 @@ describe("runAgent — turns of a topic", () => {
             },
             d,
         );
-        expect(d.dispatch).toHaveBeenCalledWith("Gmail", { kind: "archive_email", sourceId: "1" }, true);
+        expect(d.dispatch).toHaveBeenCalledWith(
+            "Gmail",
+            { kind: "archive_email", sourceId: "1" },
+            true,
+        );
         expect(r.external).toBe(true);
     });
 
     it("does not cap actions in a topic that never touched third-party text", async () => {
         const { provider } = scripted([
-            { content: null, toolCalls: [call("c1", "create_task", { fields: { title: "Appeler Paul" } })] },
+            {
+                content: null,
+                toolCalls: [call("c1", "create_task", { fields: { title: "Appeler Paul" } })],
+            },
             { content: "Proposé.", toolCalls: [] },
         ]);
         const d = deps(provider);
         const r = await runAgent(
-            { text: "et ajoute une tâche", history: [{ role: "user", content: "salut" }, { role: "assistant", content: "Salut." }] },
+            {
+                text: "et ajoute une tâche",
+                history: [
+                    { role: "user", content: "salut" },
+                    { role: "assistant", content: "Salut." },
+                ],
+            },
             d,
         );
         expect(d.dispatch).toHaveBeenCalledWith("Tasks", expect.anything(), false);

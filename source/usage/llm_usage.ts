@@ -16,7 +16,13 @@ import * as path from "node:path";
 
 /** Who asked: the Core (wired), the phone's topics, a direct API client (the app, the dashboard), a background pass. */
 export type UsageCaller = "core" | "topics" | "api" | "background" | "unattributed";
-export const USAGE_CALLERS: readonly UsageCaller[] = ["core", "topics", "api", "background", "unattributed"];
+export const USAGE_CALLERS: readonly UsageCaller[] = [
+    "core",
+    "topics",
+    "api",
+    "background",
+    "unattributed",
+];
 
 export interface UsageContext {
     caller: UsageCaller;
@@ -30,7 +36,10 @@ const als = new AsyncLocalStorage<UsageContext>();
 /** Runs `fn` with calls attributed to `ctx`; a missing field is inherited from the enclosing context. */
 export function withUsageContext<T>(ctx: Partial<UsageContext>, fn: () => T): T {
     const parent = als.getStore() ?? UNATTRIBUTED;
-    return als.run({ caller: ctx.caller ?? parent.caller, purpose: ctx.purpose ?? parent.purpose }, fn);
+    return als.run(
+        { caller: ctx.caller ?? parent.caller, purpose: ctx.purpose ?? parent.purpose },
+        fn,
+    );
 }
 
 export function currentUsageContext(): UsageContext {
@@ -40,7 +49,10 @@ export function currentUsageContext(): UsageContext {
 /** Names what a call is for, keeping the caller; outside any caller it counts as background. */
 export function withUsagePurpose<T>(purpose: string, fn: () => T): T {
     const parent = currentUsageContext();
-    return withUsageContext({ caller: parent.caller === "unattributed" ? "background" : parent.caller, purpose }, fn);
+    return withUsageContext(
+        { caller: parent.caller === "unattributed" ? "background" : parent.caller, purpose },
+        fn,
+    );
 }
 
 /** The caller of an agent request, from its declared callerId. */
@@ -64,12 +76,19 @@ const DEFAULT_PRICES: Record<string, [number, number]> = {
 /** Local models cost nothing per token. */
 export const LOCAL_MODEL_PREFIX = "ollama:";
 
-export function priceOf(model: string, overrides: string | undefined = process.env["LLM_PRICES"]): [number, number] | null {
+export function priceOf(
+    model: string,
+    overrides: string | undefined = process.env["LLM_PRICES"],
+): [number, number] | null {
     if (model.startsWith(LOCAL_MODEL_PREFIX)) return [0, 0];
     if (overrides) {
         try {
             const p = (JSON.parse(overrides) as Record<string, unknown>)[model];
-            if (Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && n >= 0)) {
+            if (
+                Array.isArray(p) &&
+                p.length === 2 &&
+                p.every((n) => typeof n === "number" && n >= 0)
+            ) {
                 return [p[0] as number, p[1] as number];
             }
         } catch {
@@ -141,7 +160,8 @@ export class UsageLedger {
         try {
             const saved = JSON.parse(await fs.readFile(this.filePath, "utf-8")) as unknown;
             for (const r of Array.isArray(saved) ? (saved as UsageRow[]) : []) {
-                if (r && typeof r.day === "string" && typeof r.model === "string") this.rows.set(keyOf(r), r);
+                if (r && typeof r.day === "string" && typeof r.model === "string")
+                    this.rows.set(keyOf(r), r);
             }
         } catch {
             // Missing or unreadable: start empty.
@@ -155,7 +175,12 @@ export class UsageLedger {
     }
 
     /** One model call. Never throws: measuring must not break a call. */
-    record(model: string, tokensIn: number, tokensOut: number, context: UsageContext = currentUsageContext()): void {
+    record(
+        model: string,
+        tokensIn: number,
+        tokensOut: number,
+        context: UsageContext = currentUsageContext(),
+    ): void {
         try {
             const at = this.now();
             const price = priceOf(model);
@@ -180,7 +205,8 @@ export class UsageLedger {
 
             const call: RecordedCall = { at, model, context, costUsd };
             this.recent.push(call);
-            while (this.recent.length && this.recent[0]!.at < at - RECENT_WINDOW_MS) this.recent.shift();
+            while (this.recent.length && this.recent[0]!.at < at - RECENT_WINDOW_MS)
+                this.recent.shift();
 
             this.persist();
             for (const fn of this.listeners) {
@@ -221,7 +247,9 @@ export class UsageLedger {
 
     spentSince(ms: number): number {
         const since = this.now() - ms;
-        return this.recent.filter((c) => c.at >= since).reduce((sum, c) => sum + (c.costUsd ?? 0), 0);
+        return this.recent
+            .filter((c) => c.at >= since)
+            .reduce((sum, c) => sum + (c.costUsd ?? 0), 0);
     }
 
     /** Average spend per hour over the `days` days before today. */

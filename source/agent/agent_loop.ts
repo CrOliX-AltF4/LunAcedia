@@ -214,7 +214,10 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
             ),
         },
         ...(req.history ?? [])
-            .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+            .filter(
+                (m) =>
+                    (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+            )
             .map((m): AgentMessage => ({ role: m.role, content: m.content })),
         { role: "user", content: userMessage(req) },
     ];
