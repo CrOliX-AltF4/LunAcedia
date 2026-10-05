@@ -398,7 +398,7 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
     });
 });
 
-describe("TasksConnector — lifecycle at the source (ADR-019 L5)", () => {
+describe("TasksConnector — lifecycle at the source", () => {
     const held = (key: string) => ({
         type: "tasks.due" as const,
         ts: 1,
@@ -453,5 +453,59 @@ describe("TasksConnector — lifecycle at the source (ADR-019 L5)", () => {
             }),
         );
         expect((await new TasksConnector().poll()).map((e) => e.title)).toEqual(["A", "B"]);
+    });
+});
+
+// "Fait" on a task, from the box: Master's own hand, never the agent's writes.
+describe("TasksConnector.inboxGesture", () => {
+    const item = {
+        type: "tasks.due" as const,
+        ts: NOW,
+        source: "tasks" as const,
+        title: "Renvoyer le formulaire",
+        priority: "normal" as const,
+        dedupeKey: "task-t1",
+        meta: { taskId: "t1", listId: "list-9" },
+    };
+
+    function googleFetch() {
+        return vi.fn().mockImplementation((url: string) => {
+            if (String(url).includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+    }
+
+    it("done completes the task in its own list at Google, and the item leaves the box", async () => {
+        const mockFetch = googleFetch();
+        vi.stubGlobal("fetch", mockFetch);
+        const r = await new TasksConnector().inboxGesture("done", item);
+        expect(r.change).toBe("removed");
+        const patch = mockFetch.mock.calls.find(
+            ([, o]: [string, RequestInit]) => o?.method === "PATCH",
+        );
+        expect(String(patch![0])).toContain("/lists/list-9/tasks/t1");
+        expect(JSON.parse(patch![1]!.body as string)).toEqual({ status: "completed" });
+    });
+
+    it("says so when Google Tasks is not configured, instead of pretending it was done", async () => {
+        delete process.env["GTASKS_REFRESH_TOKEN"];
+        vi.stubGlobal("fetch", googleFetch());
+        await expect(new TasksConnector().inboxGesture("done", item)).rejects.toThrow(
+            /not configured/,
+        );
+    });
+
+    it("refuses any other gesture, and an item without its task", async () => {
+        vi.stubGlobal("fetch", googleFetch());
+        await expect(new TasksConnector().inboxGesture("archive", item)).rejects.toThrow(
+            /does not apply/,
+        );
+        await expect(
+            new TasksConnector().inboxGesture("done", { ...item, meta: {} }),
+        ).rejects.toThrow(/has no task/);
     });
 });

@@ -1,5 +1,5 @@
 /**
- * The box (ADR-018 R1/R3): Master's own gestures on an item, applied at the source — Gmail, GitHub — then
+ * The box: Master's own gestures on an item, applied at the source — Gmail, GitHub — then
  * followed by the item and told to the Core (InboxSync.applyLocal, the same path as a change seen at the
  * source, R8). A gesture is Master's own hand, not an autonomous decision: it runs directly, without the
  * tier gate that governs the agent (D1), and every gesture is journaled.

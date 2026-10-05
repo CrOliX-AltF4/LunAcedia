@@ -234,7 +234,7 @@ describe("EventStore.markAllRead", () => {
     });
 });
 
-describe("EventStore.refresh — a known item whose content changed at the source (ADR-019 L3)", () => {
+describe("EventStore.refresh — a known item whose content changed at the source", () => {
     it("replaces the content and keeps what the box decided: read state, guard tags and rule", () => {
         const store = new EventStore();
         store.push(

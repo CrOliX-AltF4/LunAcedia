@@ -1,5 +1,5 @@
 /**
- * Topics — the pocket app's conversations (ADR-020 amendment 1, S1). One conversation = one topic to deal with,
+ * Topics — the pocket app's conversations. One conversation = one topic to deal with,
  * answered by LunAcedia's default agent with the topic's earlier turns.
  *
  *   GET    /api/conversations?archived=true|false   { conversations }, most recent activity first

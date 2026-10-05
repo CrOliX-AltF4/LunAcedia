@@ -69,7 +69,7 @@ function mail(id: string): AcediaEvent {
     };
 }
 
-describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
+describe("AcediaApiServer — agent routes", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
 
@@ -109,7 +109,7 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             opts.ai ?? new NullAIProvider(),
             undefined,
             tierStore,
-            new PendingActionStore(),
+            new PendingActionStore(null),
             undefined,
             undefined,
             undefined,
@@ -225,7 +225,7 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             expect(executed).toEqual([]);
         });
 
-        // ADR-020 amendment 1, S2a — the Core relays third-party text it got in an earlier turn: a fresh run here
+        // The Core relays third-party text it got in an earlier turn: a fresh run here
         // must not be a clean slate for it (the "read the mail, then 'vas-y'" laundering through the Core).
         it("holds an auto-tier action from the first step when the caller says its context is untrusted", async () => {
             const executed: ConnectorAction[] = [];
@@ -245,6 +245,14 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             expect(r.body.actions[0]).toMatchObject({ kind: "archive_email", status: "pending" });
             expect(r.body.external).toBe(true);
             expect(executed).toEqual([]);
+            // M5a: the list says it came from the agent after a third party's text, and when it expires.
+            expect(typeof r.body.actions[0].expiresAt).toBe("number");
+            const pending = await call("GET", `${base}/api/actions/pending`);
+            expect(pending.body[0]).toMatchObject({
+                origin: "agent",
+                untrusted: true,
+                expiresAt: r.body.actions[0].expiresAt,
+            });
         });
 
         it("ignores an untrusted value that is not true — it can only restrict", async () => {

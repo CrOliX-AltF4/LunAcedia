@@ -2,8 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 /**
- * Configures LunAcedia's own AI provider from the dashboard onboarding screen (ADR-013 I1,
- * LunAnima repo). Unlike the Core's config_writer.ts (which blanket-rejects any key matching
+ * Configures LunAcedia's own AI provider from the dashboard onboarding screen. Unlike a hub's config writer (which blanket-rejects any key matching
  * SECRET_PATTERN), this one deliberately writes an API key — CrOliX asked for a LunIra-style
  * onboarding ("configure at least one key on first use") rather than a pre-picked default
  * (there is none to pick: AI_PROVIDER=none ships with no key in the repo).

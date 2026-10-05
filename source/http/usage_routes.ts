@@ -1,5 +1,5 @@
 /**
- * LunAcedia's LLM usage (ADR-021 P2) — it reports, it never caps (D2).
+ * LunAcedia's LLM usage — it reports, it never caps (D2).
  *
  *   GET /api/usage?days=30          { days: [{ day, totalUsd, byCaller, calls, unpricedCalls }] (newest first, every day of
  *                                    the range), rows: [{ day, caller, purpose, model, calls, tokensIn, tokensOut, costUsd }],

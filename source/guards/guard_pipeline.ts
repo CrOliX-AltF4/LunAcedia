@@ -32,7 +32,7 @@ const PREVIEW_SAMPLE = 20;
 /**
  * Applies the user's guard rules to events at collection time and remembers what it decided.
  *
- * The verdict cache is the answer to the real cost of a guard (ADR-010 §2): a dropped mail stays
+ * The verdict cache is the answer to the real cost of a guard: a dropped mail stays
  * unread in the inbox, so without a memory the connector would re-fetch it on every poll. A dropped
  * key is "settled" for as long as the rules have not changed (the cache keys on the rules version),
  * and the hub tells the connector to skip settled keys BEFORE it spends an API call on them.

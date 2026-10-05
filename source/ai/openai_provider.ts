@@ -45,7 +45,7 @@ export class OpenAIProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OpenAIResponse;
-        // ADR-021 P2: every call is measured (never capped).
+        // Every call is measured (never capped).
         usageLedger.record(
             this.model,
             data.usage?.prompt_tokens ?? 0,
@@ -87,7 +87,7 @@ export class OpenAIProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`OpenAI error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OpenAIResponse;
-        // ADR-021 P2: every call is measured (never capped).
+        // Every call is measured (never capped).
         usageLedger.record(
             this.model,
             data.usage?.prompt_tokens ?? 0,

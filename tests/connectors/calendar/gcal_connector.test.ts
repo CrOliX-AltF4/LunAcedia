@@ -598,7 +598,7 @@ describe("GcalConnector.executeAction — update_event / create_event / delete_e
     });
 });
 
-describe("GcalConnector — lifecycle at the source (ADR-019 L4)", () => {
+describe("GcalConnector — lifecycle at the source", () => {
     const held = (key: string) => ({
         type: "calendar.upcoming" as const,
         ts: 1,

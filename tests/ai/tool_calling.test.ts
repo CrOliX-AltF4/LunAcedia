@@ -37,7 +37,7 @@ function lastBody(): Record<string, unknown> {
     return JSON.parse((call[1] as { body: string }).body) as Record<string, unknown>;
 }
 
-describe("OpenAIProvider.chatWithTools (ADR-017 M3)", () => {
+describe("OpenAIProvider.chatWithTools", () => {
     const provider = new OpenAIProvider("sk-test", "gpt-4o-mini", "butler");
     beforeEach(() => mockFetch.mockReset());
 
@@ -146,7 +146,7 @@ describe("OpenAIProvider.chatWithTools (ADR-017 M3)", () => {
     });
 });
 
-describe("OllamaProvider.chatWithTools (ADR-017 M3)", () => {
+describe("OllamaProvider.chatWithTools", () => {
     const provider = new OllamaProvider("http://ollama:11434", "llama3.2", "butler");
     beforeEach(() => mockFetch.mockReset());
 

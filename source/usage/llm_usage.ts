@@ -1,5 +1,5 @@
 /**
- * LunAcedia's LLM usage ledger (ADR-021 P2, on the Core's model): every model call by day, caller, purpose and model —
+ * LunAcedia's LLM usage ledger (on the Core's model): every model call by day, caller, purpose and model —
  * tokens and an estimated cost in dollars. It MEASURES, it never blocks (D2): LunAcedia is a standalone product whose
  * owner manages spend at the provider; the ledger and its alerts make spend visible.
  *

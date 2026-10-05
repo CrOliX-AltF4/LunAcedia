@@ -12,7 +12,7 @@ import {
     type FiredAlert,
 } from "../../source/usage/usage_alerts.js";
 
-// ADR-021 P2 — LunAcedia's spend alerts inform, they never cut.
+// LunAcedia's spend alerts inform, they never cut.
 
 const NOW = Date.parse("2026-09-30T12:00:00");
 const spend = (ledger: UsageLedger, usd: number, caller: UsageCaller = "core") =>

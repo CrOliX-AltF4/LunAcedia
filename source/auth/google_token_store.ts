@@ -26,9 +26,8 @@ function resolveTokenPath(): string {
  * one was actually persisted here) — existing deployments that already pasted a token by
  * hand keep working unchanged.
  *
- * Encryption at rest (docs/standards/04-securite-auth.md rule 2, LunAnima side) — opt-in via
- * ACEDIA_TOKEN_ENCRYPTION_ENABLED, same fail-closed contract as LunAnima's own
- * STORAGE_ENCRYPTION_ENABLED (enabled without a configured key throws at construction, never
+ * Encryption at rest — opt-in via
+ * ACEDIA_TOKEN_ENCRYPTION_ENABLED, fail-closed (enabled without a configured key throws at construction, never
  * a silent plaintext fallback). Migrates transparently: a plaintext file from before
  * encryption was turned on still loads fine, and gets encrypted on the very next save() — no
  * separate migration script or manual step.

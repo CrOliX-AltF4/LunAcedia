@@ -1,4 +1,9 @@
-﻿import type { IConnector, SourceState } from "../connector_interface.js";
+﻿import type {
+    IConnector,
+    InboxGesture,
+    InboxGestureResult,
+    SourceState,
+} from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
@@ -80,7 +85,7 @@ export class TasksConnector implements IConnector {
     }
 
     /**
-     * Where each held task stands (ADR-019 L5). The due listing (incomplete tasks due by tonight) IS the truth
+     * Where each held task stands. The due listing (incomplete tasks due by tonight) IS the truth
      * for this source: a task it no longer lists was completed, deleted or pushed past today — gone (a
      * postponed task comes back when it is due: forgetting its key lets it be collected again). What the
      * listing still has is not judged. null when the list cannot be read.
@@ -123,7 +128,7 @@ export class TasksConnector implements IConnector {
             `?showCompleted=false&showHidden=false` +
             `&dueMax=${encodeURIComponent(dueMax.toISOString())}&maxResults=100`;
 
-        // Paginated (ADR-019 L5): the listing used to stop at 50 tasks.
+        // Paginated: the listing used to stop at 50 tasks.
         const tasks: Task[] = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_PAGES; page++) {
@@ -166,6 +171,23 @@ export class TasksConnector implements IConnector {
                     meta: { taskId: task.id, due: task.due, overdue, listId: this.listId },
                 };
             });
+    }
+
+    /**
+     * "Fait" from the box: Master's own hand, run directly like the Gmail gestures —
+     * the agent's writes stay cut. The task is completed in its own list and the item leaves the box.
+     */
+    async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
+        if (gesture !== "done") throw new Error(`[Tasks] "${gesture}" does not apply to a task`);
+        const taskId = event.meta?.["taskId"];
+        if (typeof taskId !== "string") throw new Error("[Tasks] item has no task id");
+        // executeAction returns quietly when unconfigured; a gesture must never claim it was done.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken())
+            throw new Error("[Tasks] not configured");
+        const listId =
+            typeof event.meta?.["listId"] === "string" ? event.meta["listId"] : this.listId;
+        await this.executeAction({ kind: "complete_task", sourceId: `${listId}/${taskId}` });
+        return { change: "removed" };
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {

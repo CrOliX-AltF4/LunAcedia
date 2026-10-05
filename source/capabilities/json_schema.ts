@@ -1,5 +1,5 @@
 /**
- * The small subset of JSON Schema the capability manifest uses (ADR-017 M1). The same schema is sent
+ * The small subset of JSON Schema the capability manifest uses. The same schema is sent
  * to the model as a tool's `parameters` and used here to re-validate whatever the model returns —
  * a tool call is a request, never a guarantee. No dependency: the subset is deliberately tiny.
  *

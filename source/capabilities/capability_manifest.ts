@@ -1,5 +1,5 @@
 /**
- * Capability manifests (ADR-017 M1 — the "capabilities" half of ADR-009 D2, called K1a). Each
+ * Capability manifests. Each
  * connector that can act declares its actions once, here: what the model is told (description +
  * JSON schema), how the arguments are re-validated, the default autonomy tier and the risk level.
  *

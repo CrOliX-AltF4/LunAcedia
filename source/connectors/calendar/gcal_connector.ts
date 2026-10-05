@@ -113,7 +113,7 @@ export class GcalConnector implements IConnector {
     }
 
     /**
-     * Where each held item stands (ADR-019 L4). The lookahead window IS the truth for this source: an event
+     * Where each held item stands. The lookahead window IS the truth for this source: an event
      * the window no longer lists was deleted, cancelled, has ended or moved out of it — gone (a moved event
      * comes back when it re-enters the window: forgetting its key lets it be collected again). A conflict
      * the window no longer produces is resolved — gone too. What the window still lists is not judged (a
@@ -315,7 +315,7 @@ export class GcalConnector implements IConnector {
             `&timeMax=${encodeURIComponent(timeMax)}` +
             `&singleEvents=true&orderBy=startTime&maxResults=250`;
 
-        // Paginated (ADR-019 L4): the window used to stop at 50 events. null = this calendar could not be read.
+        // Paginated: the window used to stop at 50 events. null = this calendar could not be read.
         const events: CalEvent[] = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_PAGES; page++) {

@@ -21,7 +21,7 @@ function makeThread(
             type: overrides.type ?? "Issue",
             url: overrides.url,
         },
-        repository: { full_name: overrides.repoName ?? "CrOliX-AltF4/LunAnima" },
+        repository: { full_name: overrides.repoName ?? "octo-org/sample-repo" },
     };
 }
 
@@ -112,7 +112,7 @@ describe("GitHubConnector", () => {
     });
 
     it("should exclude repos in GITHUB_EXCLUDE_REPOS", async () => {
-        process.env["GITHUB_EXCLUDE_REPOS"] = JSON.stringify(["CrOliX-AltF4/LunAnima"]);
+        process.env["GITHUB_EXCLUDE_REPOS"] = JSON.stringify(["octo-org/sample-repo"]);
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue({
@@ -133,7 +133,7 @@ describe("GitHubConnector", () => {
                 ok: true,
                 status: 200,
                 headers: { get: () => null },
-                json: () => Promise.resolve([makeThread()]), // LunAnima — not in watched list
+                json: () => Promise.resolve([makeThread()]), // sample-repo — not in watched list
             }),
         );
         expect(await new GitHubConnector().poll()).toHaveLength(0);
@@ -148,7 +148,7 @@ describe("GitHubConnector", () => {
                 headers: { get: () => null },
                 json: () =>
                     Promise.resolve([
-                        makeThread({ repoName: "CrOliX-AltF4/LunAnima" }),
+                        makeThread({ repoName: "octo-org/sample-repo" }),
                         makeThread({ id: "t2", repoName: "CrOliX-AltF4/LunAcedia" }),
                     ]),
             }),
@@ -203,7 +203,7 @@ describe("GitHubConnector", () => {
     it("should fetch check runs for ci_activity threads and emit per failed run", async () => {
         const ciThread = makeThread({
             reason: "ci_activity",
-            url: "https://api.github.com/repos/CrOliX-AltF4/LunAnima/commits/abc123",
+            url: "https://api.github.com/repos/octo-org/sample-repo/commits/abc123",
         });
 
         vi.stubGlobal(
@@ -235,7 +235,7 @@ describe("GitHubConnector", () => {
     it("should fall back to generic ci event when check run fetch returns no failures", async () => {
         const ciThread = makeThread({
             reason: "ci_activity",
-            url: "https://api.github.com/repos/CrOliX-AltF4/LunAnima/commits/abc123",
+            url: "https://api.github.com/repos/octo-org/sample-repo/commits/abc123",
         });
 
         vi.stubGlobal(
@@ -294,12 +294,12 @@ describe("GitHubConnector.executeAction", () => {
         vi.stubGlobal("fetch", mockFetch);
         await new GitHubConnector().executeAction({
             kind: "comment_issue",
-            sourceId: "CrOliX-AltF4/LunAnima#42",
+            sourceId: "octo-org/sample-repo#42",
             body: "Looking into it.",
         });
         const [url, opts] = mockFetch.mock.calls[0]!;
         expect(String(url)).toBe(
-            "https://api.github.com/repos/CrOliX-AltF4/LunAnima/issues/42/comments",
+            "https://api.github.com/repos/octo-org/sample-repo/issues/42/comments",
         );
         expect(JSON.parse((opts as RequestInit).body as string)).toEqual({
             body: "Looking into it.",
@@ -445,7 +445,7 @@ describe("GitHubConnector.executeAction", () => {
     });
 });
 
-describe("GitHubConnector — pagination (ADR-019 L6)", () => {
+describe("GitHubConnector — pagination", () => {
     it("follows the Link header to read every page of notifications", async () => {
         const next = "https://api.github.com/notifications?page=2";
         const fetchImpl = vi.fn().mockImplementation((url: string) => {

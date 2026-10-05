@@ -3,7 +3,7 @@ import { GmailConnector } from "../../../source/connectors/email/gmail_connector
 import { clearTokenCache } from "../../../source/connectors/email/gmail_auth.js";
 import type { AcediaEvent } from "../../../source/types/acedia_event.js";
 
-// ADR-018 — the inbox follows Gmail's own inbox: read and unread mail, and what happens at the source.
+// The inbox follows Gmail's own inbox: read and unread mail, and what happens at the source.
 
 const NOW = Date.now();
 const FRESH = String(NOW - 1_000);
@@ -126,7 +126,7 @@ afterEach(() => {
         delete process.env[k];
 });
 
-describe("GmailConnector — the inbox, read and unread (ADR-018 R2)", () => {
+describe("GmailConnector — the inbox, read and unread", () => {
     it("collects every mail of the inbox, with its read state from Gmail", async () => {
         const { fetchImpl } = fakeGmail([
             { id: "a", labels: ["INBOX", "UNREAD"] },
@@ -142,7 +142,7 @@ describe("GmailConnector — the inbox, read and unread (ADR-018 R2)", () => {
     });
 });
 
-describe("GmailConnector.sourceState — what Gmail says about mail we hold (ADR-018 R8)", () => {
+describe("GmailConnector.sourceState — what Gmail says about mail we hold", () => {
     it("reports read, unread and gone (archived, trashed or deleted at the source)", async () => {
         const { fetchImpl } = fakeGmail([
             { id: "a", labels: ["INBOX", "UNREAD"] },
@@ -190,7 +190,7 @@ describe("GmailConnector.sourceState — what Gmail says about mail we hold (ADR
     });
 });
 
-describe("GmailConnector — opening and restoring a mail (ADR-018 R1/R4)", () => {
+describe("GmailConnector — opening and restoring a mail", () => {
     it("opens a mail: returns its whole plain-text body and marks it read in Gmail", async () => {
         const { fetchImpl, calls } = fakeGmail([
             { id: "a", labels: ["INBOX", "UNREAD"], body: "Bonjour,\nvoici la facture complète." },
@@ -220,7 +220,7 @@ describe("GmailConnector — opening and restoring a mail (ADR-018 R1/R4)", () =
     });
 });
 
-describe("GmailConnector.inboxGesture — Master's own gestures, applied in Gmail (ADR-018 R1)", () => {
+describe("GmailConnector.inboxGesture — Master's own gestures, applied in Gmail", () => {
     const cases: [string, string, string | null][] = [
         ["read", "/messages/a/modify", "read"],
         ["unread", "/messages/a/modify", "unread"],

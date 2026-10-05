@@ -10,7 +10,7 @@ import {
     toView,
 } from "../../source/store/conversation_store.js";
 
-// ADR-020 amendment 1, S1a — the pocket app's topics live here, server side.
+// The pocket app's topics live here, server side.
 
 function clock(start = Date.parse("2026-09-30T10:00:00Z")): () => number {
     let t = start;

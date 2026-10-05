@@ -17,7 +17,7 @@ import type {
 } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// ADR-018 R1 — Master's own gestures act at the source, directly (D1), are journaled, and the item
+// Master's own gestures act at the source, directly (D1), are journaled, and the item
 // follows (R8): same path as a change seen at the source.
 
 let PORT = 48_700 + Math.floor(Math.random() * 300);
@@ -82,7 +82,7 @@ function fakeGmail(fail = false): FakeGmail {
     };
 }
 
-describe("AcediaApiServer — inbox routes (ADR-018 R1)", () => {
+describe("AcediaApiServer — inbox routes", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
 

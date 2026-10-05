@@ -6,7 +6,7 @@ import {
 } from "../../../source/connectors/github/github_formatter.js";
 import type { AcediaEvent } from "../../../source/types/acedia_event.js";
 
-// ADR-018 — a GitHub notification lives in the box until it is read or done at GitHub.
+// A GitHub notification lives in the box until it is read or done at GitHub.
 
 interface FakeThread {
     id: string;
@@ -67,7 +67,7 @@ afterEach(() => {
     delete process.env["GITHUB_TOKEN"];
 });
 
-describe("GitHub events keep their notification thread (ADR-018 R8)", () => {
+describe("GitHub events keep their notification thread", () => {
     it("formatThread records the thread id", () => {
         const e = formatThread({
             id: "42",
@@ -146,7 +146,7 @@ describe("GitHubConnector.markThreadDone", () => {
     });
 });
 
-describe("GitHubConnector.inboxGesture (ADR-018 R1)", () => {
+describe("GitHubConnector.inboxGesture", () => {
     it("done takes the thread out of GitHub's inbox and the item dies", async () => {
         process.env["GITHUB_TOKEN"] = "t";
         const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: true }]);

@@ -1,11 +1,11 @@
 /**
- * What a paired device may reach (ADR-020 M3) — an explicit allowlist: everything else needs the admin secret
+ * What a paired device may reach — an explicit allowlist: everything else needs the admin secret
  * (configuration, guards, OAuth, action tiers, direct actions, the raw agent, spend settings, device management).
  * Adding a mobile feature means adding its route here, on purpose.
  */
 const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "GET", pattern: /^\/api\/identity$/ },
-    // The box (ADR-018) and its gestures
+    // The box and its gestures
     { method: "GET", pattern: /^\/api\/inbox$/ },
     { method: "GET", pattern: /^\/api\/inbox\/trash$/ },
     { method: "POST", pattern: /^\/api\/inbox\/trash\/[^/]+\/restore$/ },
@@ -15,7 +15,7 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "POST", pattern: /^\/api\/events\/read-all$/ },
     { method: "POST", pattern: /^\/api\/events\/.+\/read$/ },
     { method: "POST", pattern: /^\/api\/chat$/ },
-    // Topics (ADR-020 amendment 1)
+    // Topics
     { method: "GET", pattern: /^\/api\/conversations$/ },
     { method: "POST", pattern: /^\/api\/conversations$/ },
     { method: "GET", pattern: /^\/api\/conversations\/[^/]+$/ },

@@ -127,7 +127,7 @@ describe("dashboard toggle()", () => {
     });
 });
 
-describe("dashboard AI provider onboarding (ADR-013 I1)", () => {
+describe("dashboard AI provider onboarding", () => {
     it("checks /api/health's ai field to decide whether to show the onboarding banner", () => {
         expect(DASHBOARD_HTML).toContain("function checkAiProvider");
         const block = DASHBOARD_HTML.slice(
@@ -158,8 +158,8 @@ describe("dashboard AI provider onboarding (ADR-013 I1)", () => {
     });
 });
 
-// ADR-018 R5 — the standalone dashboard is LunAcedia's own panel: the same box as the Core's.
-describe("dashboard box (ADR-018 R5)", () => {
+// The standalone dashboard is LunAcedia's own panel: the same box as the Core's.
+describe("dashboard box", () => {
     const script = DASHBOARD_HTML;
 
     it("loads the box from /api/inbox, not the raw event stream", () => {
@@ -189,6 +189,10 @@ describe("dashboard box (ADR-018 R5)", () => {
         expect(cardBlock).toContain('data-g="trash"');
         expect(cardBlock).toContain('data-g="unread"');
         expect(cardBlock).toContain('data-g="done"');
+        // "Fait" on a task — same gesture as GitHub's, its own label.
+        expect(cardBlock).toContain(
+            "e.source==='tasks'?'<button data-g=\"done\" onclick=\"gesture(this,event)\">Fait</button>'",
+        );
         expect(cardBlock).toContain('onclick="gesture(this,event)"');
         const g = script.slice(
             script.indexOf("async function gesture"),
@@ -218,7 +222,7 @@ describe("dashboard box (ADR-018 R5)", () => {
     });
 });
 
-// ADR-020 amendment 1, S1 — parity: the pocket app's topics are visible from the dashboard, read-only.
+// Parity: the pocket app's topics are visible from the dashboard, read-only.
 describe("dashboard topics (read-only)", () => {
     const html = DASHBOARD_HTML;
 
@@ -239,7 +243,7 @@ describe("dashboard topics (read-only)", () => {
     });
 });
 
-// ADR-021 P2 — LLM spend on the dashboard: figures, fired alerts, and the paliers (information only).
+// LLM spend on the dashboard: figures, fired alerts, and the paliers (information only).
 describe("dashboard LLM spend", () => {
     const html = DASHBOARD_HTML;
 
@@ -263,7 +267,7 @@ describe("dashboard LLM spend", () => {
     });
 });
 
-// ADR-020 M3 — paired devices on the dashboard.
+// Paired devices on the dashboard.
 describe("dashboard devices", () => {
     const html = DASHBOARD_HTML;
 
@@ -271,7 +275,7 @@ describe("dashboard devices", () => {
         expect(html).toContain('onclick="openDevices()"');
         const block = html.slice(
             html.indexOf("async function openDevices"),
-            html.indexOf("// LLM spend (ADR-021 P2)"),
+            html.indexOf("// LLM spend"),
         );
         expect(block).toContain("req('/api/devices')");
         expect(block).toContain('data-id="${esc(x.id)}"');
@@ -280,5 +284,42 @@ describe("dashboard devices", () => {
         expect(block).toContain("'/api/devices/'+encodeURIComponent(id),{method:'DELETE'}");
         expect(block).toContain("req('/api/devices/pairing-code',{method:'POST'})");
         expect(block).toContain("esc(c.code)");
+    });
+});
+
+// Law 3 — the agent's switch and its writes, set from the dashboard; pending writes say when they
+// expire and why a confirmation failed.
+describe("dashboard agent and pending writes", () => {
+    const html = DASHBOARD_HTML;
+
+    it("reads and sets the agent's switch and its writes with PUT /api/agent/settings", () => {
+        expect(html).toContain('onclick="openAgent()"');
+        const block = html.slice(
+            html.indexOf("async function openAgent"),
+            html.indexOf("// End of the agent section"),
+        );
+        expect(block).toContain("req('/api/agent/settings')");
+        expect(block).toContain("req('/api/agent/settings',{method:'PUT'");
+        expect(block).toContain("toujours avec ta confirmation");
+    });
+
+    it("says when a pending write expires, flags a third party's text, and says why a confirmation failed", () => {
+        const render = html.slice(
+            html.indexOf("function renderPending"),
+            html.indexOf("async function confirmPending"),
+        );
+        expect(render).toContain("p.expiresAt");
+        expect(render).toContain("p.untrusted");
+        const confirm = html.slice(
+            html.indexOf("async function confirmPending"),
+            html.indexOf("async function cancelPending"),
+        );
+        expect(confirm).toContain("if(!r.ok)");
+        expect(confirm).toContain("esc(");
+    });
+
+    it("ships a script the browser can parse", () => {
+        const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+        for (const s of scripts) expect(() => new Function(s)).not.toThrow();
     });
 });

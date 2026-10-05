@@ -1,5 +1,5 @@
 /**
- * Paired devices (ADR-020 M3, D3): each phone gets its OWN token, limited to the mobile routes, revocable — the master
+ * Paired devices: each phone gets its OWN token, limited to the mobile routes, revocable — the master
  * secret (ACEDIA_SECRET) never leaves the server again.
  *
  *   - Pairing: an admin asks for a code (8 characters, one use, 10 minutes); the app sends it with a name and receives

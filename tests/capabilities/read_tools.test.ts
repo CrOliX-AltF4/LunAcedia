@@ -30,7 +30,7 @@ function deps(events: AcediaEvent[], busy: { start: number; end: number }[] = []
     return { store, busyIntervals: () => busy, now: () => NOW };
 }
 
-describe("readToolDefinitions (ADR-017 M2)", () => {
+describe("readToolDefinitions", () => {
     it("offers search_events, get_event and free_slots with object schemas", () => {
         const defs = readToolDefinitions();
         expect(defs.map((d) => d.name)).toEqual(["search_events", "get_event", "free_slots"]);
@@ -165,7 +165,7 @@ describe("runReadTool", () => {
     });
 });
 
-// ADR-018 D3 — when Natsume reads a mail in full, it is read, like opening it in Gmail.
+// When Natsume reads a mail in full, it is read, like opening it in Gmail.
 describe("get_event marks an unread mail read", () => {
     it("asks for the mail to be marked read at the source", async () => {
         const markRead = vi.fn(async () => {});

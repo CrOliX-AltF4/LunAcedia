@@ -7,7 +7,7 @@ export interface IAIProvider {
     chat(query: string): Promise<string>;
     digest(events: AcediaEvent[]): Promise<string>;
     /**
-     * One model turn with tools offered (ADR-017 M3). Absent = this provider cannot call tools, and
+     * One model turn with tools offered. Absent = this provider cannot call tools, and
      * the agent says so instead of pretending. The messages are sent as given (no persona added).
      */
     chatWithTools?(

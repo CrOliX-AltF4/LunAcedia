@@ -17,7 +17,7 @@ import type { IConnector } from "../../source/connectors/connector_interface.js"
 import type { ConnectorAction } from "../../source/types/connector_action.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// ADR-020 amendment 1, S1 — the pocket app's topics: one conversation = one topic, answered by the default agent
+// The pocket app's topics: one conversation = one topic, answered by the default agent
 // with the topic's earlier turns, D2 held across them.
 
 let PORT = 49_100 + Math.floor(Math.random() * 400);
@@ -88,7 +88,7 @@ function gmail(executed: ConnectorAction[]): IConnector {
     };
 }
 
-describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
+describe("AcediaApiServer — topics", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
     let agent: AgentService;
@@ -128,7 +128,7 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             opts.ai ?? new NullAIProvider(),
             undefined,
             tierStore,
-            new PendingActionStore(),
+            new PendingActionStore(null),
             undefined,
             undefined,
             undefined,

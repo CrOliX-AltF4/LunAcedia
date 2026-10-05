@@ -8,10 +8,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LunAcedia</title>
 <style>
-/* Palette pulled from the Lun ecosystem's shared identity sheet (LunAnima repo,
-   docs/lun-identity-tokens.md) — LunAcedia keeps its own variable names for its own
+/* Palette pulled from the Lun ecosystem's shared identity sheet — LunAcedia keeps its own variable names for its own
    concepts (urgent/normal/info priority), but the hex values are the shared ones so
-   this dashboard and the Natsume panel read as one system. */
+   this dashboard and a hub's panel read as one system. */
 :root{--bg:#0d0f14;--surface:#111827;--border:#1e2330;--text:#d1d5db;--muted:#9ca3af;--urgent:#f87171;--normal:#b9945a;--info:#9ca3af;--accent:#b9945a}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif;min-height:100vh}
@@ -148,7 +147,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
 <div id="ai-setup">
   <div id="ai-setup-box">
     <h3>⚙ Configurer l'IA</h3>
-    <div class="field-hint">LunAcedia garde toujours son propre fournisseur IA (chat, digest, propositions, commandes) — le Core ne le fournit plus (ADR-008 D2).</div>
+    <div class="field-hint">LunAcedia garde toujours son propre fournisseur IA (chat, digest, propositions, commandes) — le Core ne le fournit plus.</div>
     <select id="ai-provider-select" onchange="onAiProviderChange()">
       <option value="openai">OpenAI</option>
       <option value="ollama">Ollama (local)</option>
@@ -174,6 +173,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openTopics()">Sujets</button>
   <button onclick="openUsage()">Dépense LLM</button>
   <button onclick="openDevices()">Appareils</button>
+  <button onclick="openAgent()">Agent</button>
 </header>
 
 <div id="ai-banner">
@@ -235,7 +235,7 @@ document.getElementById('tok').addEventListener('keydown',e=>{if(e.key==='Enter'
 
 async function load(){
   try{
-    // The box (ADR-018): what is in the inbox at the source, read and unread.
+    // The box: what is in the inbox at the source, read and unread.
     const r=await req('/api/inbox');
     if(!r.ok)return;
     events=(await r.json()).items||[];
@@ -267,7 +267,7 @@ function render(){
   <div class="card-title">\${esc(e.title)}</div>
   <div class="card-body">\${e.body?esc(e.body):''}</div>
   <div class="card-time">\${ago(e.ts)}</div>
-  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}</div>
+  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
 </div>\`).join('');
 }
 
@@ -275,7 +275,7 @@ async function toggle(el){
   const key=el.dataset.key;
   el.classList.toggle('open');
   if(!el.classList.contains('open')||el.dataset.loaded)return;
-  // Opening = reading it: the whole text, and it is read at the source (ADR-018 R1).
+  // Opening = reading it: the whole text, and it is read at the source.
   try{
     const r=await req('/api/inbox/'+encodeURIComponent(key)+'/open',{method:'POST'});
     if(!r.ok)return;
@@ -327,7 +327,7 @@ async function restoreTrash(btn){
   setTimeout(load,1500);
 }
 
-// Paired devices (ADR-020 M3): each phone has its own token; revoke one and it is refused at once.
+// Paired devices: each phone has its own token; revoke one and it is refused at once.
 // Ids are read from the row, never interpolated into onclick.
 async function openDevices(){
   const d=document.getElementById('digest');
@@ -359,7 +359,7 @@ async function revokeDevice(btn){
   row.remove();
 }
 
-// LLM spend (ADR-021 P2): what LunAcedia's own model cost, and the alert paliers — information only, nothing is ever cut.
+// LLM spend: what LunAcedia's own model cost, and the alert paliers — information only, nothing is ever cut.
 const CALLER_LABELS={core:'Natsume (Core)',topics:'Sujets du téléphone',api:'API directe',background:'Tâches de fond',unattributed:'Non attribué'};
 function usd(n){return (Number(n)||0).toFixed(2)+' $';}
 function paliersText(list){return (list||[]).join('/');}
@@ -412,7 +412,7 @@ async function saveUsageAlerts(btn){
   btn.disabled=false;
 }
 
-// The pocket app's topics (ADR-020 amendment 1, S1) — read-only here: the phone is where they are used.
+// The pocket app's topics — read-only here: the phone is where they are used.
 // Ids are read from the row, never interpolated into onclick.
 async function openTopics(){
   const d=document.getElementById('digest');
@@ -470,7 +470,7 @@ async function sendCommand(){
   }catch(e){status.textContent='Erreur.';}
 }
 
-// ── AI provider onboarding (ADR-013 I1) ──────────────────────────────────────
+// ── AI provider onboarding ──────────────────────────────────────
 function openAiSetup(){document.getElementById('ai-setup').classList.add('open');}
 function closeAiSetup(){document.getElementById('ai-setup').classList.remove('open');}
 function onAiProviderChange(){
@@ -548,17 +548,28 @@ function renderPending(pending){
   el.className='';
   // id passed via data-id + this, never interpolated straight into onclick as a JS string
   // argument — see dashboard.test.ts's toggle()/dedupeKey regression guard for why.
+  // A durable list since M5: each write says when it expires, and if a third party's text led to it.
   el.innerHTML=pending.map(p=>\`
 <div class="pending-row" data-id="\${esc(p.id)}">
-  <span>\${describeAction(p)}</span>
+  <span>\${describeAction(p)} <small>— expire à \${esc(new Date(p.expiresAt).toLocaleTimeString())}\${p.untrusted?" · après un texte d'un tiers":''}</small></span>
   <button class="confirm" onclick="confirmPending(this)">Confirmer</button>
   <button class="cancel" onclick="cancelPending(this)">Annuler</button>
 </div>\`).join('');
 }
 
 async function confirmPending(btn){
-  const id=btn.closest('.pending-row').dataset.id;
-  await req('/api/actions/'+encodeURIComponent(id)+'/confirm',{method:'POST'}).catch(()=>{});
+  const row=btn.closest('.pending-row');
+  const id=row.dataset.id;
+  btn.disabled=true;
+  try{
+    const r=await req('/api/actions/'+encodeURIComponent(id)+'/confirm',{method:'POST'});
+    // Hours may have passed: the source or the tier may say no — said, never swallowed.
+    if(!r.ok){
+      const e=await r.json().catch(()=>({}));
+      row.querySelector('span').innerHTML='<strong>Rien n’a été fait</strong> — '+esc(e.error||('HTTP '+r.status));
+      return;
+    }
+  }catch(e){row.querySelector('span').textContent='Erreur : '+e.message;return;}
   loadPending();
 }
 async function cancelPending(btn){
@@ -566,6 +577,31 @@ async function cancelPending(btn){
   await req('/api/actions/'+encodeURIComponent(id)+'/cancel',{method:'POST'}).catch(()=>{});
   loadPending();
 }
+
+// The agent (law 3): its switch, and its writes. Writes always wait for Master's confirmation
+// (tiers), merging a PR stays manual; the phone can only turn the agent off.
+async function openAgent(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Agent';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/agent/settings');
+    const s=await r.json();
+    box.innerHTML=\`<label style="display:block;margin-bottom:10px"><input type="checkbox" id="agent-enabled" \${s.enabled?'checked':''} onchange="setAgent('enabled',this.checked)"> Agent actif <small>— coupé, aucun outil n'est jamais appelé</small></label>
+<label style="display:block;margin-bottom:10px"><input type="checkbox" id="agent-writes" \${s.writes?'checked':''} onchange="setAgent('writes',this.checked)"> Écritures <small>— répondre, créer, modifier, supprimer : toujours avec ta confirmation ; fusionner une PR reste manuel</small></label>
+<p id="agent-msg"><small></small></p>\`;
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function setAgent(key,value){
+  const msg=document.getElementById('agent-msg');
+  try{
+    const r=await req('/api/agent/settings',{method:'PUT',body:JSON.stringify({[key]:value})});
+    msg.innerHTML=r.ok?'<small>Enregistré.</small>':'<small>Refusé ('+esc(String(r.status))+').</small>';
+  }catch(e){msg.textContent='Erreur : '+e.message;}
+}
+// End of the agent section
 
 // ── Settings (sources / tiers / email rules) ─────────────────────────────────
 const GOOGLE_SOURCES=[{key:'gmail',label:'Gmail'},{key:'gcal',label:'Google Calendar'},{key:'gtasks',label:'Google Tasks'}];

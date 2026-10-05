@@ -1,12 +1,12 @@
 /**
- * Read tools of the agent (ADR-017 M2, decision D1): they only see what LunAcedia already ingested —
+ * Read tools of the agent: they only see what LunAcedia already ingested —
  * the EventStore (currently unread mail plus everything received since the last start; it is
  * deliberately in-memory) and the calendar's busy intervals. Live searches in Gmail/Calendar/Tasks
  * are v2.
  *
  * Every result that carries event text is flagged `external`: it was written by someone else, so
- * it is data, never an instruction (ADR-009 D7) — the agent loop uses the flag to cap the tier of
- * any action proposed afterwards (ADR-017 D2).
+ * it is data, never an instruction — the agent loop uses the flag to cap the tier of
+ * any action proposed afterwards.
  */
 import type { EventStore } from "../store/event_store.js";
 import type { AcediaEvent, AcediaEventPriority, AcediaEventSource } from "../types/acedia_event.js";
@@ -19,7 +19,7 @@ export interface ReadToolDeps {
     busyIntervals: () => TimeSlot[];
     now: () => number;
     /**
-     * Marks a mail read at its source once read in full (ADR-018 D3 — like opening it in Gmail). Runs in
+     * Marks a mail read at its source once read in full (like opening it in Gmail). Runs in
      * the background: a failure never keeps the agent from reading the mail.
      */
     markRead?: (event: AcediaEvent) => Promise<void>;

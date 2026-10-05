@@ -34,7 +34,7 @@ function sameContent(a: AcediaEvent, b: AcediaEvent): boolean {
 }
 
 /**
- * Ring buffer for AcediaEvents — since ADR-018 it IS the box.
+ * Ring buffer for AcediaEvents — it IS the box.
  * Oldest event is evicted when capacity is reached.
  * Thread-safe for single-threaded Node.js use.
  *
@@ -92,7 +92,7 @@ export class EventStore {
     }
 
     /**
-     * Replaces a held item with a fresh collection of it when its content changed at the source (ADR-019 L3:
+     * Replaces a held item with a fresh collection of it when its content changed at the source (
      * a moved event, a new due date). What the box decided locally survives: the read state (unless the
      * source reports one), and the guard's tags/ruleId/priority (a refresh does not go through the guard again).
      * Returns the stored item when it changed, null when nothing changed or the key is not held.

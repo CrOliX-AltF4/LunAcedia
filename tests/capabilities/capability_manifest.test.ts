@@ -50,7 +50,7 @@ const HISTORICAL_RISK = {
     merge_pr: "high",
 };
 
-describe("capability manifests (ADR-017 M1, K1a)", () => {
+describe("capability manifests", () => {
     it("declares every action kind exactly once", () => {
         const kinds = actionCapabilities().map((a) => a.kind);
         expect(new Set(kinds).size).toBe(kinds.length);

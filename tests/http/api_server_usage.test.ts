@@ -12,7 +12,7 @@ import { UsageLedger, localDay } from "../../source/usage/llm_usage.js";
 import { UsageAlerts } from "../../source/usage/usage_alerts.js";
 import type { IAIProvider } from "../../source/ai/ai_provider.js";
 
-// ADR-021 P2 — GET /api/usage and the alert settings; and every request's LLM calls land under the right caller.
+// GET /api/usage and the alert settings; and every request's LLM calls land under the right caller.
 
 let PORT = 49_600 + Math.floor(Math.random() * 300);
 const nextPort = () => PORT++;
@@ -32,7 +32,7 @@ async function call(
     return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
-describe("AcediaApiServer — usage (ADR-021 P2)", () => {
+describe("AcediaApiServer — usage", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
 

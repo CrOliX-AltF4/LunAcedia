@@ -85,7 +85,7 @@ export class IngestionHub {
     }
 
     /**
-     * The guard stage (chantier A): runs at COLLECTION, before the urgent filter and before dedup, so the
+     * The guard stage: runs at COLLECTION, before the urgent filter and before dedup, so the
      * two poll paths (urgent every 60 s, normal on the connector interval) share one behaviour and a rule's
      * `set_priority` can promote an event even on the urgent path. Settled keys are skipped without being
      * re-evaluated (or re-counted).
@@ -102,7 +102,7 @@ export class IngestionHub {
     }
 
     /**
-     * Drops a key from dedup (ADR-018 R8): an item removed because its source object is gone comes back if
+     * Drops a key from dedup: an item removed because its source object is gone comes back if
      * the object does — a mail restored from the trash, a GitHub thread with new activity.
      */
     forget(key: string): void {
@@ -156,7 +156,7 @@ export class IngestionHub {
 
     /**
      * Whether the box reflects the sources yet: false until the initial sweep after start() finished. A
-     * client reconciling its copies against the box (the Core, ADR-019 L10) must not remove anything before.
+     * client reconciling its copies against the box (the Core) must not remove anything before.
      */
     isReady(): boolean {
         return this.initialSweepDone;
@@ -168,7 +168,7 @@ export class IngestionHub {
     }
 
     /**
-     * Called for every already-dispatched item a normal poll collects again (ADR-019 L3): a calendar event
+     * Called for every already-dispatched item a normal poll collects again: a calendar event
      * moved, a task whose due date changed keep their key, so dedup alone would keep the stale version
      * forever. The handler decides whether anything changed.
      */

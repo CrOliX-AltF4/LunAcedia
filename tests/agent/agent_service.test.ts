@@ -22,7 +22,7 @@ async function tmpFile(): Promise<string> {
     return path.join(dir, "agent_settings.json");
 }
 
-describe("AgentService — switch and journal (ADR-017 M5, law 3)", () => {
+describe("AgentService — switch and journal (law 3)", () => {
     it("is on by default", async () => {
         const s = new AgentService(await tmpFile());
         await s.load();
@@ -106,7 +106,7 @@ describe("AgentService — switch and journal (ADR-017 M5, law 3)", () => {
     });
 });
 
-describe("AgentService — topics (ADR-020 amendment 1, S1)", () => {
+describe("AgentService — topics", () => {
     it("journals the topic a run answered in", async () => {
         const s = new AgentService();
         await s.run({ text: "et le deuxième ?", conversationId: "topic-1" }, async () => ({

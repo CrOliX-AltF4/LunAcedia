@@ -4,7 +4,7 @@ import { EventStore } from "../../source/store/event_store.js";
 import type { IConnector, SourceState } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// ADR-018 R8 — an item never outlives its linked object, wherever the change happened.
+// An item never outlives its linked object, wherever the change happened.
 
 function item(key: string, source: AcediaEvent["source"] = "email", read = false): AcediaEvent {
     return {
@@ -169,7 +169,7 @@ describe("the wire message", () => {
     });
 });
 
-describe("InboxSync — updated (ADR-019 L3)", () => {
+describe("InboxSync — updated", () => {
     it("sends the fresh content on the wire and touches nothing in the store", () => {
         const { store, emitted, forgotten, sync } = setup([item("cal-1", "calendar")], []);
         sync.applyLocal({
@@ -187,7 +187,7 @@ describe("InboxSync — updated (ADR-019 L3)", () => {
     });
 });
 
-describe("InboxSync — informational items expire (ADR-019 L7)", () => {
+describe("InboxSync — informational items expire", () => {
     it("removes RSS and Home Assistant items past their lifetime, keeps them in dedup, tells the Core", async () => {
         const store = new EventStore();
         const old = { ...item("rss-old", "rss"), ts: 1_000 };

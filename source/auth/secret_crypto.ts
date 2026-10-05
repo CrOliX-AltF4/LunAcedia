@@ -1,10 +1,9 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 
-// Ports LunAnima's source/module/secret_crypto.ts pattern (AES-256-GCM, same versioned
-// prefix/format) — no shared package between the two repos (bridge pattern,
-// docs/standards/02-architecture-ecosystem.md on the LunAnima side), so this is a deliberate
-// copy, not an import, kept small enough that drift is easy to notice.
+// The ecosystem's encrypted-store pattern (AES-256-GCM, same versioned prefix/format) — no shared
+// package between repositories, so this is a deliberate copy, not an import, kept small enough
+// that drift is easy to notice.
 
 const ALGO = "aes-256-gcm";
 const KEY_LEN = 32; // AES-256

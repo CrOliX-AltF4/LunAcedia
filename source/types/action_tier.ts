@@ -18,7 +18,7 @@ export type ActionTierConfig = Record<ActionKind, ActionTier>;
 
 /**
  * merge_pr can never be set to anything but "manual" — "ouvrir une PR peut être auto ou
- * confirmation, mais merger reste toujours humain" (CrOliX, chantier LunAcedia 2026-08-15).
+ * confirmation, mais merger reste toujours humain" (CrOliX, 2026-08-15).
  * ActionTierStore.patch() silently drops any attempt to change it.
  */
 export const IMMUTABLE_TIERS: Partial<ActionTierConfig> = {
