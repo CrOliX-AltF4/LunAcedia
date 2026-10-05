@@ -189,6 +189,10 @@ describe("dashboard box (ADR-018 R5)", () => {
         expect(cardBlock).toContain('data-g="trash"');
         expect(cardBlock).toContain('data-g="unread"');
         expect(cardBlock).toContain('data-g="done"');
+        // "Fait" on a task (ADR-020 §5.10 M4d) — same gesture as GitHub's, its own label.
+        expect(cardBlock).toContain(
+            "e.source==='tasks'?'<button data-g=\"done\" onclick=\"gesture(this,event)\">Fait</button>'",
+        );
         expect(cardBlock).toContain('onclick="gesture(this,event)"');
         const g = script.slice(
             script.indexOf("async function gesture"),

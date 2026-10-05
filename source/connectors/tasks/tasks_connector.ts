@@ -1,4 +1,9 @@
-﻿import type { IConnector, SourceState } from "../connector_interface.js";
+﻿import type {
+    IConnector,
+    InboxGesture,
+    InboxGestureResult,
+    SourceState,
+} from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
@@ -166,6 +171,23 @@ export class TasksConnector implements IConnector {
                     meta: { taskId: task.id, due: task.due, overdue, listId: this.listId },
                 };
             });
+    }
+
+    /**
+     * "Fait" from the box (ADR-020 §5.10 M4d): Master's own hand, run directly like the Gmail gestures (ADR-018 D1) —
+     * the agent's writes stay cut. The task is completed in its own list and the item leaves the box.
+     */
+    async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
+        if (gesture !== "done") throw new Error(`[Tasks] "${gesture}" does not apply to a task`);
+        const taskId = event.meta?.["taskId"];
+        if (typeof taskId !== "string") throw new Error("[Tasks] item has no task id");
+        // executeAction returns quietly when unconfigured; a gesture must never claim it was done.
+        if (!this.clientId || !this.clientSecret || !this.refreshToken())
+            throw new Error("[Tasks] not configured");
+        const listId =
+            typeof event.meta?.["listId"] === "string" ? event.meta["listId"] : this.listId;
+        await this.executeAction({ kind: "complete_task", sourceId: `${listId}/${taskId}` });
+        return { change: "removed" };
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
