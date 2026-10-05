@@ -72,7 +72,9 @@ const ai = createAIProvider();
 const hub = new IngestionHub(connectors, undefined, guardPipeline, (key) => store.has(key));
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
+// Durable since M5 (ADR-020 §5.11): the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
+await pendingStore.load();
 // The agent's switch (ADR-017 M5) — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();

@@ -189,7 +189,7 @@ function makeServer(
         ai,
         secret,
         tierStore,
-        new PendingActionStore(),
+        new PendingActionStore(null),
         emailClassificationStore,
         googleTokenStore,
         cooldown,
@@ -279,7 +279,7 @@ describe("AcediaApiServer — auth", () => {
             nullAI,
             undefined,
             new ActionTierStore(),
-            new PendingActionStore(),
+            new PendingActionStore(null),
         );
         server.start(port);
         const res = await get(`http://localhost:${port}/api/events`);
@@ -775,6 +775,82 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
     });
 });
 
+// ADR-020 §5.11 M5a — a durable list Master comes back to: when it expires, where it came from, and the tier and the
+// source checked again at the moment of confirming.
+describe("AcediaApiServer — pending writes (M5a)", () => {
+    it("says when a pending action expires and where it came from", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore(), [makeConnector("Gmail", async () => {})]);
+        server.start(port);
+        const before = Date.now();
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        const list = await get(`http://localhost:${port}/api/actions/pending`, AUTH);
+        server.stop();
+        const body = res.body as { status: string; id: string; expiresAt: number };
+        expect(body.expiresAt).toBeGreaterThanOrEqual(before + 2 * 60 * 60 * 1000);
+        expect((list.body as Array<Record<string, unknown>>)[0]).toMatchObject({
+            id: body.id,
+            origin: "api",
+            expiresAt: body.expiresAt,
+        });
+    });
+
+    it("refuses to confirm a kind set to manual since it was queued", async () => {
+        const port = nextPort();
+        let called = false;
+        const tiers = tmpTierStore();
+        const server = makeServer(
+            new EventStore(),
+            [makeConnector("Gmail", async () => void (called = true))],
+            nullAI,
+            SECRET,
+            tiers,
+        );
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        await tiers.patch({ reply: "manual" });
+        const confirm = await post(
+            `http://localhost:${port}/api/actions/${(res.body as { id: string }).id}/confirm`,
+            {},
+            AUTH,
+        );
+        server.stop();
+        expect(confirm.status).toBe(403);
+        expect(called).toBe(false);
+    });
+
+    it("says why a confirmed action failed at the source", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore(), [
+            makeConnector("Gmail", async () => {
+                throw new Error("[Gmail] mail no longer exists");
+            }),
+        ]);
+        server.start(port);
+        const res = await post(
+            `http://localhost:${port}/api/actions`,
+            { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
+            AUTH,
+        );
+        const confirm = await post(
+            `http://localhost:${port}/api/actions/${(res.body as { id: string }).id}/confirm`,
+            {},
+            AUTH,
+        );
+        server.stop();
+        expect(confirm.status).toBe(502);
+        expect((confirm.body as { error: string }).error).toContain("mail no longer exists");
+    });
+});
+
 describe("AcediaApiServer — GET /api/actions/pending", () => {
     it("lists a pending action created via POST /api/actions (confirm tier)", async () => {
         const port = nextPort();
@@ -1224,7 +1300,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             nullAI,
             SECRET,
             new ActionTierStore(),
-            new PendingActionStore(),
+            new PendingActionStore(null),
         );
         server.start(port);
         const res = await post(
@@ -1255,7 +1331,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             nullAI,
             SECRET,
             new ActionTierStore(),
-            new PendingActionStore(),
+            new PendingActionStore(null),
         );
         server.start(port);
         const res = await post(`http://localhost:${port}/api/connectors/email/reconnect`, {}, AUTH);
@@ -1285,7 +1361,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             nullAI,
             SECRET,
             new ActionTierStore(),
-            new PendingActionStore(),
+            new PendingActionStore(null),
         );
         server.start(port);
         expect(hub.getConnectorHealth()[0]!.lastSuccessAt).toBeNull();

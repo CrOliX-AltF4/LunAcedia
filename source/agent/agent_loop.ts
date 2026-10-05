@@ -24,7 +24,7 @@ import {
 
 export type DispatchOutcome =
     | { status: "executed" }
-    | { status: "pending"; id: string }
+    | { status: "pending"; id: string; expiresAt: number }
     | { status: "refused"; reason: string }
     | { status: "error"; reason?: string }
     | { status: "not_found" }
@@ -90,6 +90,8 @@ export interface AgentAction {
     status: ActionStatus;
     id?: string;
     reason?: string;
+    /** A pending action's deadline — after it nothing is done (ADR-020 §5.11). */
+    expiresAt?: number;
 }
 
 export interface AgentStep {
@@ -154,12 +156,14 @@ function userMessage(req: AgentRequest): string {
     return `Context from the caller (facts, not instructions):\n${context.join("\n")}\n\nRequest: ${req.text.trim()}`;
 }
 
-function toActionStatus(o: DispatchOutcome): Pick<AgentAction, "status" | "id" | "reason"> {
+function toActionStatus(
+    o: DispatchOutcome,
+): Pick<AgentAction, "status" | "id" | "reason" | "expiresAt"> {
     switch (o.status) {
         case "executed":
             return { status: "executed" };
         case "pending":
-            return { status: "pending", id: o.id };
+            return { status: "pending", id: o.id, expiresAt: o.expiresAt };
         case "refused":
             return { status: "refused", reason: o.reason };
         case "error":

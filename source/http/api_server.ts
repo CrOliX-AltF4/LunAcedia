@@ -267,7 +267,7 @@ export class AcediaApiServer {
                         },
                     },
                     dispatch: (connector, action, capToConfirm) =>
-                        this.dispatchAction(connector, action, capToConfirm),
+                        this.dispatchAction(connector, action, capToConfirm, "agent"),
                     persona: loadSystemPrompt(),
                     allowWrites: this.agent.writesEnabled(),
                 }),
@@ -446,8 +446,10 @@ export class AcediaApiServer {
             this.syncStoreAfterAction(action);
             return json(res, 204, null);
         } catch (e) {
-            console.error("[API] action error:", (e as Error).message);
-            return json(res, 500, { error: "Action failed" });
+            // Said to Master, not hidden: the object may have changed or gone since the action was proposed.
+            const message = (e as Error).message;
+            console.error("[API] action error:", message);
+            return json(res, 502, { error: `Action failed: ${message}` });
         }
     }
 
@@ -464,11 +466,12 @@ export class AcediaApiServer {
         connectorName: string,
         action: ConnectorAction,
         capToConfirm = false,
+        origin: "agent" | "api" = "api",
     ): Promise<
         | { status: "not_found" }
         | { status: "unsupported" }
         | { status: "refused"; reason: string }
-        | { status: "pending"; id: string }
+        | { status: "pending"; id: string; expiresAt: number }
         | { status: "executed" }
         | { status: "error" }
     > {
@@ -487,8 +490,12 @@ export class AcediaApiServer {
             };
         }
         if (tier === "confirm" || (capToConfirm && tier === "auto")) {
-            const pending = this.pendingStore.create(connectorName, action);
-            return { status: "pending", id: pending.id };
+            // Durable, with its own delay (ADR-020 §5.11 M5a); capToConfirm = a third party's text came first.
+            const pending = this.pendingStore.create(connectorName, action, {
+                origin,
+                untrusted: capToConfirm,
+            });
+            return { status: "pending", id: pending.id, expiresAt: pending.expiresAt };
         }
         if (!this.cooldown.tryConsume(action.kind)) {
             return {
@@ -797,7 +804,11 @@ export class AcediaApiServer {
                 });
             if (result.status === "refused") return json(res, 403, { error: result.reason });
             if (result.status === "pending")
-                return json(res, 202, { status: "pending", id: result.id });
+                return json(res, 202, {
+                    status: "pending",
+                    id: result.id,
+                    expiresAt: result.expiresAt,
+                });
             if (result.status === "error") return json(res, 500, { error: "Action failed" });
             return json(res, 204, null);
         }
@@ -814,6 +825,15 @@ export class AcediaApiServer {
             const connector = this.connectors.find((c) => c.name === pending.connector);
             if (!connector?.executeAction)
                 return json(res, 404, { error: "Connector no longer available" });
+            // Hours may have passed (ADR-020 §5.11): the tier is read again — a kind set to manual since is refused.
+            const tier = this.tierStore.getTier(
+                pending.action.kind,
+                resolveTierScope(pending.action, this.store) ?? undefined,
+            );
+            if (tier === "manual")
+                return json(res, 403, {
+                    error: `'${pending.action.kind}' is set to manual since — nothing was done`,
+                });
             return this.executeConnectorAction(res, connector, pending.action);
         }
 

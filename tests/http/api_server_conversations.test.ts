@@ -128,7 +128,7 @@ describe("AcediaApiServer — topics (ADR-020 amendment 1, S1)", () => {
             opts.ai ?? new NullAIProvider(),
             undefined,
             tierStore,
-            new PendingActionStore(),
+            new PendingActionStore(null),
             undefined,
             undefined,
             undefined,
