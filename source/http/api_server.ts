@@ -38,6 +38,7 @@ import { ActionCooldownTracker } from "../actions/action_cooldown.js";
 import { resolveTierScope } from "../actions/resolve_tier_scope.js";
 import { resolveEventSync } from "../store/event_sync.js";
 import type { PendingActionStore } from "../actions/pending_action_store.js";
+import { summarizeAction } from "../push/pending_push.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
 import type { GoogleTokenStore } from "../auth/google_token_store.js";
@@ -851,7 +852,12 @@ export class AcediaApiServer {
 
         // GET /api/actions/pending
         if (method === "GET" && path === "/api/actions/pending") {
-            return json(res, 200, this.pendingStore.list());
+            // With what each would do, in words (ADR-020 §5.11): the phone and the panel only show it.
+            return json(
+                res,
+                200,
+                this.pendingStore.list().map((p) => ({ ...p, summary: summarizeAction(p.action) })),
+            );
         }
 
         // GET /api/config/tiers

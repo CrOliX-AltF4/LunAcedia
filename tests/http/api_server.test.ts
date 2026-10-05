@@ -796,6 +796,8 @@ describe("AcediaApiServer — pending writes (M5a)", () => {
             id: body.id,
             origin: "api",
             expiresAt: body.expiresAt,
+            // Said in words once, here — the phone, the panel and the dashboard only show it.
+            summary: "Répondre à un mail — Hi",
         });
     });
 
