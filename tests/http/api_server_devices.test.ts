@@ -11,7 +11,7 @@ import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { AgentService } from "../../source/agent/agent_service.js";
 import { DeviceRegistry } from "../../source/auth/device_registry.js";
 
-// ADR-020 M3 — end to end: pairing, a device token limited to the mobile routes, revocation; the admin secret unchanged.
+// End to end: pairing, a device token limited to the mobile routes, revocation; the admin secret unchanged.
 
 let PORT = 49_900 + Math.floor(Math.random() * 300);
 const nextPort = () => PORT++;
@@ -36,7 +36,7 @@ async function call(
     return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
-describe("AcediaApiServer — paired devices (ADR-020 M3)", () => {
+describe("AcediaApiServer — paired devices", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
     let agent: AgentService;

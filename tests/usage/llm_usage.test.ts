@@ -13,7 +13,7 @@ import {
 } from "../../source/usage/llm_usage.js";
 import { usageContextOf } from "../../source/http/api_server.js";
 
-// ADR-021 P2 — LunAcedia measures its own LLM calls; it never caps them.
+// LunAcedia measures its own LLM calls; it never caps them.
 
 const NOW = Date.parse("2026-09-30T12:00:00");
 

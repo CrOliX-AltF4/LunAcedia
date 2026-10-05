@@ -2,7 +2,7 @@ import type { AcediaEvent } from "../types/acedia_event.js";
 import type { GuardCondition, GuardRule, GuardVerdict } from "./guard_types.js";
 
 /** Neutral, connector-independent view of an event — rules are written against this, never
- *  against a connector's own types (ADR-009), so the same engine serves every source. */
+ *  against a connector's own types, so the same engine serves every source. */
 interface EventView {
     from: string;
     subject: string;

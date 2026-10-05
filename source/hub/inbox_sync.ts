@@ -1,5 +1,5 @@
 /**
- * The sync rule (ADR-018 R8, CrOliX 2026-09-25): an item never outlives its linked object. Mail archived,
+ * The sync rule (CrOliX 2026-09-25): an item never outlives its linked object. Mail archived,
  * trashed or read — in Gmail itself, from the Core's panel, the mobile app or through Natsume — the item
  * follows, and the Core is told so its notification dies too and Natsume stops mentioning it.
  *
@@ -16,7 +16,7 @@ import type { AcediaEvent } from "../types/acedia_event.js";
 export const INBOX_CHANGED = "inbox.changed" as const;
 
 export interface InboxChange {
-    /** `updated` (ADR-019 L3): the item is still there but its content changed at the source — `item` carries it. */
+    /** `updated`: the item is still there but its content changed at the source — `item` carries it. */
     op: "removed" | "read" | "unread" | "updated";
     key: string;
     source: AcediaEvent["source"];
@@ -31,7 +31,7 @@ export interface InboxSyncDeps {
     /** Drops the key from dedup so the item comes back if its object does (restored mail, new activity). */
     forget: (key: string) => void;
     /**
-     * How long a purely informational item (RSS, Home Assistant) stays in the box (ADR-019 L7): there is no
+     * How long a purely informational item (RSS, Home Assistant) stays in the box: there is no
      * source object whose life it could follow, so it expires by age. Default INBOX_INFO_TTL_HOURS (72 h).
      */
     infoTtlMs?: number;

@@ -1,5 +1,5 @@
 /**
- * Topics — "une conversation = un sujet à traiter" (ADR-020 amendment 1, S1): the pocket app's conversations with
+ * Topics — "une conversation = un sujet à traiter": the pocket app's conversations with
  * LunAcedia's default agent, kept here, server side, so they are the same from every client.
  *
  * On disk (same STORAGE_DIR convention as the other stores), under `conversations/`:

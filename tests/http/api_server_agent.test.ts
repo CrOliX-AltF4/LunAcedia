@@ -69,7 +69,7 @@ function mail(id: string): AcediaEvent {
     };
 }
 
-describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
+describe("AcediaApiServer — agent routes", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
 
@@ -225,7 +225,7 @@ describe("AcediaApiServer — agent routes (ADR-017 M5)", () => {
             expect(executed).toEqual([]);
         });
 
-        // ADR-020 amendment 1, S2a — the Core relays third-party text it got in an earlier turn: a fresh run here
+        // The Core relays third-party text it got in an earlier turn: a fresh run here
         // must not be a clean slate for it (the "read the mail, then 'vas-y'" laundering through the Core).
         it("holds an auto-tier action from the first step when the caller says its context is untrusted", async () => {
             const executed: ConnectorAction[] = [];

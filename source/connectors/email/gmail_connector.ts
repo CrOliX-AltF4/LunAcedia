@@ -52,7 +52,7 @@ interface GmailMessageMeta {
  *                — GMAIL_REFRESH_TOKEN is a fallback; ignored once GoogleTokenStore has one
  *                  for "gmail" (obtained via GET /api/oauth/google/start?connector=gmail)
  *   GMAIL_MAX_AGE_HOURS=24            — announce window: an older mail is still collected (the box is the
- *                                        whole inbox, ADR-018 D2) but flagged `meta.backlog` — stored, never
+ *                                        whole inbox) but flagged `meta.backlog` — stored, never
  *                                        announced to the Core nor pushed (live check 2026-09-28, C7)
  *   GMAIL_MAX_INBOX=500               — how many inbox mails are listed at most (paginated)
  *   GMAIL_POLL_INTERVAL_MIN=5         — poll frequency
@@ -133,7 +133,7 @@ export class GmailConnector implements IConnector {
 
         let ids: string[];
         try {
-            // The whole inbox, read and unread, like Gmail itself (ADR-018 D2): a mail leaves the box
+            // The whole inbox, read and unread, like Gmail itself: a mail leaves the box
             // when it is archived or trashed, not when it is read. Paginated — it used to stop at 50.
             ids = [...(await this.listIds(token, "label:inbox"))];
         } catch (e) {
@@ -185,7 +185,7 @@ export class GmailConnector implements IConnector {
                         from,
                         messageId: id,
                         threadId: msg.threadId,
-                        // Neutral inputs for the ingestion guards (chantier A): Gmail's labels and the presence of a
+                        // Neutral inputs for the ingestion guards: Gmail's labels and the presence of a
                         // List-Unsubscribe header (the reliable mark of bulk mail). Both come from the response this
                         // call already returns — no extra API request.
                         labels: msg.labelIds ?? [],
@@ -233,7 +233,7 @@ export class GmailConnector implements IConnector {
     }
 
     /**
-     * Where each held mail stands in Gmail (ADR-018 R8). Two bounded listings (inbox, unread inbox) settle
+     * Where each held mail stands in Gmail. Two bounded listings (inbox, unread inbox) settle
      * the recent mail; anything they did not show is checked one by one, so a mail that is merely older
      * than the listing is never mistaken for gone. null when Gmail cannot be asked: change nothing.
      */
@@ -291,7 +291,7 @@ export class GmailConnector implements IConnector {
     }
 
     /**
-     * Opens a mail like Gmail does (ADR-018 R1/R4): the whole plain-text body, and the mail is marked read
+     * Opens a mail like Gmail does: the whole plain-text body, and the mail is marked read
      * at the source. null when Gmail no longer has it.
      */
     async openMessage(id: string): Promise<{ body: string } | null> {
@@ -308,7 +308,7 @@ export class GmailConnector implements IConnector {
         return { body };
     }
 
-    /** Master's gestures on a mail, applied in Gmail (ADR-018 R1). */
+    /** Master's gestures on a mail, applied in Gmail. */
     async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
         const id = event.meta?.["messageId"];
         if (typeof id !== "string") throw new Error("[Gmail] item has no message id");

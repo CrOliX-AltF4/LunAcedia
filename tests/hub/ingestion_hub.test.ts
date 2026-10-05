@@ -292,7 +292,7 @@ describe("IngestionHub", () => {
     });
 });
 
-// ADR-018 R8 — an item removed because its source object is gone must come back if the object does
+// An item removed because its source object is gone must come back if the object does
 // (a mail restored from the trash, a GitHub thread with new activity).
 describe("IngestionHub.forget", () => {
     it("lets a forgotten key be dispatched again", async () => {
@@ -459,7 +459,7 @@ describe("IngestionHub — the first sweep without a dedup file is quiet", () =>
     });
 });
 
-describe("IngestionHub — refresh and held keys (ADR-019 L2/L3)", () => {
+describe("IngestionHub — refresh and held keys", () => {
     let hub: IngestionHub;
     let seenPath: string;
 
@@ -517,7 +517,7 @@ describe("IngestionHub — refresh and held keys (ADR-019 L2/L3)", () => {
     });
 });
 
-describe("IngestionHub.isReady (ADR-019 L10)", () => {
+describe("IngestionHub.isReady", () => {
     let hub: IngestionHub;
     afterEach(() => hub.stop());
 

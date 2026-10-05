@@ -96,14 +96,14 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  * Routes (all require Bearer auth if ACEDIA_SECRET is set, except /api/health):
  *   GET  /api/health
  *   GET  /api/identity             → { name, kind: "lunacedia", version } — who the mobile app is talking to
- *                                  (ADR-020 D2: the app shows the server's name, never a hardcoded one).
+ *                                  (the app shows the server's name, never a hardcoded one).
  *                                  Authenticated: it doubles as the app's connection test.
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
  *   POST /api/events/read-all      → 204
  *   POST /api/events/held          body: { keys: string[] } (≤ 2000) → { held: { [key]: { read } }, ready } — which of
  *                                  these keys the box still holds; a key absent from `held` is gone
- *                                  (ADR-019 L10: the Core reconciles its copies against the box; ready=false
+ *                                  (a hub reconciles its copies against the box; ready=false
  *                                  while the initial sweep runs — nothing may be removed on that answer)
  *   POST /api/events/clear-read    → 200 { removed: number } — drops every already-read event
  *   POST /api/events/:dedupeKey/read → 204
@@ -126,7 +126,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                    tier: null removes the override
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
- *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards, chantier A)
+ *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards)
  *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
  *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
  *   GET  /api/guard/journal        ?limit=  events a rule dropped, newest first (never silent, restorable)
@@ -138,7 +138,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/oauth/google/callback  Google's own redirect target — not called directly
  *   GET  /api/oauth/google/status  → { gmail: boolean, gcal: boolean, gtasks: boolean }
  *   POST /api/agent                body: { text, context?: string[], callerId?, readOnly?, untrusted? }  → the agent
- *                                  (ADR-017): reads the events, acts only through the tier gate;
+ *                                 : reads the events, acts only through the tier gate;
  *                                  versioned { version, status, summary, items, actions, steps }
  *   GET  /api/agent/journal        the last 50 agent runs (who asked, steps, actions)
  *   GET|PUT /api/agent/settings    { enabled, writes } — the agent's switch (off = no tool is ever
@@ -147,11 +147,11 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  answer; plain dialogue with no tool when the agent is off
  *   GET|POST /api/conversations, GET|PATCH|DELETE /api/conversations/:id, POST /api/conversations/:id/messages
  *                                  the pocket app's topics, answered by the agent with their earlier turns
- *                                  (ADR-020 amendment 1, S1) — contract in conversation_routes.ts
+ *                                  — contract in conversation_routes.ts
  *   GET  /api/usage?days=30        LLM usage by day, caller, purpose and model + alert settings and fired alerts
- *   GET|PUT /api/config/usage-alerts  spend alert paliers (ADR-021 P2) — information only, never a cap
+ *   GET|PUT /api/config/usage-alerts  spend alert paliers — information only, never a cap
  *   POST /api/devices/pair           { code, name } → { device, token } — no auth: the one-time code is the proof
- *   POST /api/devices/pairing-code · GET /api/devices · DELETE /api/devices/:id   admin (ADR-020 M3)
+ *   POST /api/devices/pairing-code · GET /api/devices · DELETE /api/devices/:id   admin
  *   A paired device's token opens only the mobile routes (auth/device_scope.ts); everything else needs ACEDIA_SECRET.
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
@@ -161,7 +161,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   DELETE /api/devices/push-token
  */
 /**
- * The usage context of a request (ADR-021 P2): who is asking and for what, from its route. An agent request declares
+ * The usage context of a request: who is asking and for what, from its route. An agent request declares
  * its caller too (runAgentRequest), which wins — the Core asking counts as the Core.
  */
 export function usageContextOf(url: string | undefined): UsageContext {
@@ -187,7 +187,7 @@ export class AcediaApiServer {
         private readonly fcm: FcmSender | null,
         // Not readonly — POST /api/config/ai-provider swaps this in place after a successful
         // write, so a first-time key configured from the dashboard takes effect immediately
-        // (no restart, ADR-013 I1).
+        // (no restart).
         private ai: IAIProvider,
         private readonly secret: string | undefined,
         private readonly tierStore: ActionTierStore,
@@ -196,15 +196,15 @@ export class AcediaApiServer {
         private readonly googleTokenStore?: GoogleTokenStore,
         private readonly cooldown: ActionCooldownTracker = new ActionCooldownTracker(),
         private readonly guards?: GuardServices,
-        // The agent's switch and journal (ADR-017 M5). In memory unless index.ts gives it a file.
+        // The agent's switch and journal. In memory unless index.ts gives it a file.
         private readonly agent: AgentService = new AgentService(),
-        // The box and the sync rule (ADR-018) — absent in tests that do not exercise them.
+        // The box and the sync rule — absent in tests that do not exercise them.
         inbox?: InboxSync,
-        // The pocket app's topics (ADR-020 amendment 1, S1) — absent in tests that do not exercise them.
+        // The pocket app's topics — absent in tests that do not exercise them.
         topics?: ConversationStore,
-        // LLM usage and its alerts (ADR-021 P2) — absent in tests that do not exercise them.
+        // LLM usage and its alerts — absent in tests that do not exercise them.
         usage?: { ledger: UsageLedger; alerts: UsageAlerts },
-        // Paired devices (ADR-020 M3) — absent in tests that do not exercise them.
+        // Paired devices — absent in tests that do not exercise them.
         devices?: DeviceRegistry,
     ) {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
@@ -242,7 +242,7 @@ export class AcediaApiServer {
         return { enabled: this.agent.isEnabled(), writes: this.agent.writesEnabled() };
     }
 
-    /** One agent run over this server's store, calendar and tier gate, journaled (ADR-017). */
+    /** One agent run over this server's store, calendar and tier gate, journaled. */
     private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
         // The declared caller wins over the route's default: the Core asking counts as the Core.
         return withUsageContext({ caller: callerOf(req.callerId) }, () =>
@@ -253,7 +253,7 @@ export class AcediaApiServer {
                         store: this.store,
                         busyIntervals: () => this.calendarBusyIntervals(),
                         now: () => Date.now(),
-                        // Natsume read it in full: it is read at the source, and the item follows (ADR-018 D3).
+                        // Natsume read it in full: it is read at the source, and the item follows.
                         markRead: async (event) => {
                             const connector = this.connectors.find((c) => c.slug === event.source);
                             if (!connector?.inboxGesture) return;
@@ -388,7 +388,7 @@ export class AcediaApiServer {
 
     start(port: number): void {
         this.server = http.createServer((req, res) => {
-            // ADR-021 P2: every LLM call a request makes is counted under its caller and purpose.
+            // Every LLM call a request makes is counted under its caller and purpose.
             void withUsageContext(usageContextOf(req.url), () => this.handle(req, res));
         });
         this.server.listen(port, () => {
@@ -461,7 +461,7 @@ export class AcediaApiServer {
      */
     /**
      * The tier gate. `capToConfirm` holds an auto-tier action for the user instead of executing it —
-     * the agent sets it once it has read third-party content (ADR-017 D2).
+     * the agent sets it once it has read third-party content.
      */
     private async dispatchAction(
         connectorName: string,
@@ -491,7 +491,7 @@ export class AcediaApiServer {
             };
         }
         if (tier === "confirm" || (capToConfirm && tier === "auto")) {
-            // Durable, with its own delay (ADR-020 §5.11 M5a); capToConfirm = a third party's text came first.
+            // Durable, with its own delay; capToConfirm = a third party's text came first.
             const pending = this.pendingStore.create(connectorName, action, {
                 origin,
                 untrusted: capToConfirm,
@@ -596,7 +596,7 @@ export class AcediaApiServer {
     }
 
     /**
-     * Who is calling (ADR-020 M3): the admin (the master secret — dashboard, Core), a paired device (its own token,
+     * Who is calling: the admin (the master secret — dashboard, Core), a paired device (its own token,
      * limited to the mobile routes), or nobody. Without ACEDIA_SECRET the API is open, as before (LAN-only setups).
      */
     private authorize(
@@ -653,7 +653,7 @@ export class AcediaApiServer {
             return this.handleGoogleOAuthCallback(req, res, url);
         }
 
-        // Pairing a device: the code is the proof (ADR-020 M3).
+        // Pairing a device: the code is the proof.
         if (this.deviceRoutes && (await this.deviceRoutes.handlePairing(method, path, req, res)))
             return;
 
@@ -703,14 +703,14 @@ export class AcediaApiServer {
             return json(res, 204, null);
         }
 
-        // GET /api/identity — the assistant's name the mobile app shows (ADR-020 D2): ASSISTANT_NAME, else
+        // GET /api/identity — the assistant's name the mobile app shows: ASSISTANT_NAME, else
         // "LunAcedia". Standalone is a product of its own — never "Natsume" here.
         if (method === "GET" && path === "/api/identity") {
             const name = process.env["ASSISTANT_NAME"]?.trim() || "LunAcedia";
             return json(res, 200, { name, kind: "lunacedia", version: PACKAGE_VERSION });
         }
 
-        // POST /api/events/held — which of these keys the box still holds (ADR-019 L10)
+        // POST /api/events/held — which of these keys the box still holds
         if (method === "POST" && path === "/api/events/held") {
             let body: unknown;
             try {
@@ -826,7 +826,7 @@ export class AcediaApiServer {
             const connector = this.connectors.find((c) => c.name === pending.connector);
             if (!connector?.executeAction)
                 return json(res, 404, { error: "Connector no longer available" });
-            // Hours may have passed (ADR-020 §5.11): the tier is read again — a kind set to manual since is refused.
+            // Hours may have passed: the tier is read again — a kind set to manual since is refused.
             const tier = this.tierStore.getTier(
                 pending.action.kind,
                 resolveTierScope(pending.action, this.store) ?? undefined,
@@ -852,7 +852,7 @@ export class AcediaApiServer {
 
         // GET /api/actions/pending
         if (method === "GET" && path === "/api/actions/pending") {
-            // With what each would do, in words (ADR-020 §5.11): the phone and the panel only show it.
+            // With what each would do, in words: the phone and the panel only show it.
             return json(
                 res,
                 200,
@@ -934,21 +934,21 @@ export class AcediaApiServer {
             return json(res, 200, this.emailClassificationStore.getAll());
         }
 
-        // The box: Master's gestures at the source, trash, journal (ADR-018 R1/R3)
+        // The box: Master's gestures at the source, trash, journal
         if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
 
-        // LLM usage and its alert settings (ADR-021 P2)
+        // LLM usage and its alert settings
         if (this.usageRoutes && (await this.usageRoutes.handle(method, path, url, req, res)))
             return;
 
-        // The pocket app's topics (ADR-020 amendment 1, S1)
+        // The pocket app's topics
         if (
             this.conversationRoutes &&
             (await this.conversationRoutes.handle(method, path, url, req, res))
         )
             return;
 
-        // Ingestion guards (chantier A): /api/guard/{rules,journal,journal/restore,preview}
+        // Ingestion guards: /api/guard/{rules,journal,journal/restore,preview}
         if (path.startsWith("/api/guard/")) {
             if (!this.guards) return json(res, 503, { error: "Guards not configured" });
             return this.handleGuard(method, path, url, req, res, this.guards);
@@ -981,8 +981,8 @@ export class AcediaApiServer {
             );
         }
 
-        // POST /api/config/ai-provider — first-run onboarding (ADR-013 I1): LunAcedia ships
-        // with AI_PROVIDER=none and no default key to guess at (D2, ADR-008 — LunAcedia always
+        // POST /api/config/ai-provider — first-run onboarding: LunAcedia ships
+        // with AI_PROVIDER=none and no default key to guess at (LunAcedia always
         // keeps its own LLM, the Core never picks one for it). Writes .env and swaps this.ai
         // live so the dashboard's setup screen takes effect without a restart.
         if (method === "POST" && path === "/api/config/ai-provider") {
@@ -1001,7 +1001,7 @@ export class AcediaApiServer {
             return json(res, 200, { ok: true, provider: this.ai.mode });
         }
 
-        // POST /api/agent — the agent (ADR-017): reads what LunAcedia holds, acts through the tier
+        // POST /api/agent — the agent: reads what LunAcedia holds, acts through the tier
         // gate, bounded in steps/time/actions. Versioned result: summary, items, actions, steps.
         if (method === "POST" && path === "/api/agent") {
             if (this.ai.mode === "none") {

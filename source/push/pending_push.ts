@@ -37,7 +37,7 @@ export function summarizeAction(action: ConnectorAction): string {
 }
 
 /**
- * The phone's notification for a write waiting for Master (ADR-020 §5.11 M5b): it opens "À valider". Urgent so the
+ * The phone's notification for a write waiting for Master: it opens "À valider". Urgent so the
  * priority filter lets it through — Master asked for it, or the agent proposed it on his behalf. Pushed only, never
  * put in the box.
  */

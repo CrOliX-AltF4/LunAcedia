@@ -1,10 +1,10 @@
 import type { AcediaEventPriority } from "../types/acedia_event.js";
 
 /**
- * Ingestion guards (chantier A, ADR-010): user-editable, deterministic rules evaluated on every
+ * Ingestion guards: user-editable, deterministic rules evaluated on every
  * event between a connector's poll() and dispatch. Conditions are STRUCTURED on purpose (decision
  * C-013): no free-form regex — a rule stays readable in a form and can never become a ReDoS vector.
- * No LLM anywhere in this layer (mail content is untrusted data — ADR-009 D7).
+ * No LLM anywhere in this layer (mail content is untrusted data).
  *
  * Conditions of a rule are ANDed. Everything is case-insensitive.
  */

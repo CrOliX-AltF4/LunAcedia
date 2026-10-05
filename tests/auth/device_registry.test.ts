@@ -12,7 +12,7 @@ import {
 } from "../../source/auth/device_registry.js";
 import { isDeviceRoute } from "../../source/auth/device_scope.js";
 
-// ADR-020 M3 — each phone its own token, limited, revocable; the master secret never leaves the server.
+// Each phone its own token, limited, revocable; the master secret never leaves the server.
 
 describe("DeviceRegistry", () => {
     let t: number;

@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SYSTEM_PROMPT =
     "You are a precise, formal digital butler assistant. Summarize information concisely and factually. Prioritize urgent items. Address the user directly. Do not editorialize.";
 
-/** LunAcedia's own persona (characters/butler.json) — also the agent's (ADR-017). */
+/** LunAcedia's own persona (characters/butler.json) — also the agent's. */
 export function loadSystemPrompt(): string {
     const characterPath = path.resolve(__dirname, "../../characters/butler.json");
     try {
@@ -39,13 +39,11 @@ export function createAIProvider(): IAIProvider {
             return new OllamaProvider(url, model, loadSystemPrompt());
         }
         case "natsume":
-            // Retired (ADR-008 D2, chantier I6, 2026-09-22): the Core is no longer LunAcedia's
+            // Retired (2026-09-22): the Core is no longer LunAcedia's
             // LLM backend. LunAcedia keeps its own provider (openai/ollama) for its own
             // perimeter; the Core delegates to LunAcedia's existing /api/chat and /api/intent
             // instead of LunAcedia delegating to the Core's /api/core/synthesize (now removed).
-            throw new Error(
-                "AI_PROVIDER=natsume is retired — set openai or ollama instead (see ADR-008 D2)",
-            );
+            throw new Error("AI_PROVIDER=natsume is retired — set openai or ollama instead");
         default:
             return new NullAIProvider();
     }

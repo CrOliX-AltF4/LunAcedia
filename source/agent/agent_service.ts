@@ -1,5 +1,5 @@
 /**
- * The agent's switch and journal (ADR-017 M5 — law 3, control): the agent can be turned off from
+ * The agent's switch and journal (law 3, control): the agent can be turned off from
  * the dashboard or the Core's panel (off = no tool is ever called), and every run is journaled —
  * who asked, what, the outcome, the steps and the actions — for the last 50 runs.
  *
@@ -23,7 +23,7 @@ const TEXT_CHARS = 300;
 export interface AgentJournalEntry {
     at: string;
     callerId?: string;
-    /** The topic the run answered in (ADR-020 amendment 1, S1) — absent for a one-off request. */
+    /** The topic the run answered in — absent for a one-off request. */
     conversationId?: string;
     text: string;
     status: AgentResult["status"];

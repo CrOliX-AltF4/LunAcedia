@@ -398,7 +398,7 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
     });
 });
 
-describe("TasksConnector — lifecycle at the source (ADR-019 L5)", () => {
+describe("TasksConnector — lifecycle at the source", () => {
     const held = (key: string) => ({
         type: "tasks.due" as const,
         ts: 1,
@@ -456,7 +456,7 @@ describe("TasksConnector — lifecycle at the source (ADR-019 L5)", () => {
     });
 });
 
-// ADR-020 §5.10 M4d (Q1) — "Fait" on a task, from the box: Master's own hand (ADR-018 D1), never the agent's writes.
+// "Fait" on a task, from the box: Master's own hand, never the agent's writes.
 describe("TasksConnector.inboxGesture", () => {
     const item = {
         type: "tasks.due" as const,

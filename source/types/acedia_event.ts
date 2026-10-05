@@ -14,13 +14,13 @@ export type AcediaEventType =
     | "ha.state_changed"
     | "tasks.due"
     | "system.heartbeat"
-    /** A spend alert on LunAcedia's own LLM (ADR-021 P2) — pushed to the phone, never put in the box. */
+    /** A spend alert on LunAcedia's own LLM — pushed to the phone, never put in the box. */
     | "system.llm_spend"
-    /** A write waiting for Master (ADR-020 §5.11 M5b) — pushed to the phone, opens « À valider », never put in the box. */
+    /** A write waiting for Master — pushed to the phone, opens « À valider », never put in the box. */
     | "system.action_pending"
     /**
-     * Sync message (ADR-018 R8): an item changed or died with its source object — meta { op, key }, op one of
-     * removed | read | unread | updated — `updated` (ADR-019 L3) also carries meta.item { title, body, priority,
+     * Sync message: an item changed or died with its source object — meta { op, key }, op one of
+     * removed | read | unread | updated — `updated` also carries meta.item { title, body, priority,
      * ts } — a refresh of what the client holds, never news.
      */
     | "inbox.changed";
@@ -46,7 +46,7 @@ export interface AcediaEvent {
     dedupeKey: string;
     meta?: Record<string, unknown>;
     read?: boolean;
-    /** Labels set by the user's guard rules (ADR-006 D3, decision C-014). Facts about the classification the
+    /** Labels set by the user's guard rules (decision C-014). Facts about the classification the
      *  user configured, not model output. Additive and optional: consumers that ignore it are unaffected. */
     tags?: string[];
     /** The guard rule that set `tags` / a priority on this event, so the user can trace it back. */

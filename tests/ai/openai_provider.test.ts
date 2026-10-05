@@ -67,7 +67,7 @@ describe("OpenAIProvider", () => {
     });
 });
 
-// ADR-021 P2 — every call is measured, with the tokens OpenAI reports.
+// Every call is measured, with the tokens OpenAI reports.
 describe("OpenAIProvider — usage", () => {
     it("records the tokens of each call in the usage ledger", async () => {
         const { usageLedger } = await import("../../source/usage/llm_usage");

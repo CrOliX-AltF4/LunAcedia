@@ -1,5 +1,5 @@
 /**
- * Alerts on LunAcedia's LLM spend (ADR-021 P2) — they INFORM, they never cut (D2). LunAcedia decides them against its
+ * Alerts on LunAcedia's LLM spend — they INFORM, they never cut (D2). LunAcedia decides them against its
  * own settings; the phone is told directly in standalone, and the Core relays them when wired (it reads them from
  * GET /api/usage — the hub carries, it does not recompute).
  *

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
 import { pendingActionEvent, summarizeAction } from "../../source/push/pending_push.js";
 
-// ADR-020 §5.11 M5b — a write waiting for Master rings the phone, which opens "À valider"; nothing goes in the box.
+// A write waiting for Master rings the phone, which opens "À valider"; nothing goes in the box.
 describe("pending action notification", () => {
     it("says what waits, in words, with what it would write", () => {
         expect(

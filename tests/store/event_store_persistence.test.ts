@@ -5,7 +5,7 @@ import * as path from "path";
 import { EventStore } from "../../source/store/event_store.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// Live NAS check 2026-09-28: the box (ADR-018) lived only in memory while dedup was on disk, so every
+// Live NAS check 2026-09-28: the box lived only in memory while dedup was on disk, so every
 // restart emptied it for good — the mail was "already seen" and never collected again.
 
 function mail(id: string, ts: number, read = false): AcediaEvent {

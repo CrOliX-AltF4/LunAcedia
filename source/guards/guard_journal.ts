@@ -25,7 +25,7 @@ function resolvePath(): string {
 }
 
 /**
- * Append-only journal of every event a guard rule dropped — "never silent" (ADR-006 D3): a dropped
+ * Append-only journal of every event a guard rule dropped — "never silent": a dropped
  * event is always visible and restorable. Deliberately its OWN file, never piggybacking on the hub's
  * `dedup_seen.json` (7-day TTL, rewritten whole on every event). Retention is independent
  * (default 30 days, GUARD_JOURNAL_RETENTION_DAYS). Writes are serialised so the file never interleaves.

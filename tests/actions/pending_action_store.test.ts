@@ -44,7 +44,7 @@ describe("PendingActionStore", () => {
         expect(ids).toEqual([a.id, b.id].sort());
     });
 
-    // ADR-020 §5.11 M5a (Q2) — each kind its own delay: a reply goes stale fast, an event to create does not.
+    // Each kind its own delay: a reply goes stale fast, an event to create does not.
     it("gives each kind its own delay and says when it expires", () => {
         expect(pendingTtlMs("reply")).toBe(2 * HOUR);
         expect(pendingTtlMs("comment_issue")).toBe(2 * HOUR);
@@ -85,7 +85,7 @@ describe("PendingActionStore", () => {
     });
 });
 
-// ADR-020 §5.11 M5a — a pending write survives a restart: it is a list Master comes back to, not a 5-minute window.
+// A pending write survives a restart: it is a list Master comes back to, not a 5-minute window.
 describe("PendingActionStore — durable", () => {
     let dir: string;
     let file: string;

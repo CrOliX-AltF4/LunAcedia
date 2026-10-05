@@ -3,13 +3,13 @@ import type { ConnectorAction } from "../types/connector_action.js";
 import type { ConnectorSlug } from "./connector_registry.js";
 
 /**
- * Where an item we hold stands at its source (ADR-018 R8): still in the inbox unread or read, or gone
+ * Where an item we hold stands at its source: still in the inbox unread or read, or gone
  * (archived, trashed, deleted, marked done — elsewhere or by us). Drives the sync rule: an item never
  * outlives its linked object.
  */
 export type SourceState = "unread" | "read" | "gone";
 
-/** Master's own gestures on an item of the box (ADR-018 R1) — never offered to the agent as tools. */
+/** Master's own gestures on an item of the box — never offered to the agent as tools. */
 export type InboxGesture = "open" | "read" | "unread" | "archive" | "trash" | "done";
 
 /** What the gesture changed at the source (null: nothing), and the full text for "open". */
@@ -33,13 +33,13 @@ export interface IConnector {
     /** Optional write operations. Only connectors that support actions implement this. */
     executeAction?(action: ConnectorAction): Promise<void>;
     /**
-     * Optional (ADR-018 R8): the source state of the given events this connector can judge. Events it
+     * Optional: the source state of the given events this connector can judge. Events it
      * cannot judge are simply absent from the map; null means the source could not be asked — the caller
      * must then change nothing (never remove on uncertainty).
      */
     sourceState?(events: AcediaEvent[]): Promise<Map<string, SourceState> | null>;
     /**
-     * Optional (ADR-018 R1): applies one of Master's gestures at the source. Throws for a gesture that has
+     * Optional: applies one of Master's gestures at the source. Throws for a gesture that has
      * no meaning for this connector, or an item it cannot address.
      */
     inboxGesture?(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult>;

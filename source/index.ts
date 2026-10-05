@@ -52,7 +52,7 @@ if (connectors.length === 0) {
     );
 }
 
-// Ingestion guards (chantier A, ADR-010): user rules + journal of dropped events + per-rule counters. With no
+// Ingestion guards: user rules + journal of dropped events + per-rule counters. With no
 // rule configured nothing is ever dropped or tagged — installing this changes no existing behaviour.
 const guardRules = new GuardRulesStore();
 const guardJournal = new GuardJournal();
@@ -66,34 +66,34 @@ const guardPipeline = new GuardPipeline({
     vipSenders: () => emailClassificationStore.getAll().vipSenders,
 });
 
-// The box (ADR-018) is persisted next to dedup — both must survive a restart together.
+// The box is persisted next to dedup — both must survive a restart together.
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
 const ai = createAIProvider();
 const hub = new IngestionHub(connectors, undefined, guardPipeline, (key) => store.has(key));
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
-// Durable since M5 (ADR-020 §5.11): the writes waiting for Master survive a restart.
+// Durable since M5: the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
 await pendingStore.load();
 // A write waiting for Master rings the phone: directly when standalone, through the Core when wired (it reads the
-// stream; ADR-020 §5.11 M5c). Never put in the box.
+// stream). Never put in the box.
 pendingStore.onCreate((p) => {
     const event = pendingActionEvent(p);
     ws.broadcast(event);
     void fcm?.send(event);
 });
-// The agent's switch (ADR-017 M5) — loaded before the API serves anything.
+// The agent's switch — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
-// The pocket app's topics (ADR-020 amendment 1, S1) — kept server side, the same from every client.
+// The pocket app's topics — kept server side, the same from every client.
 const topics = new ConversationStore(defaultConversationDir());
 await topics.load();
-// LLM usage (ADR-021 P2): measured and alerted on, never capped — the owner manages spend at the provider.
+// LLM usage: measured and alerted on, never capped — the owner manages spend at the provider.
 await usageLedger.load(defaultUsagePath());
 const usageAlerts = new UsageAlerts(defaultAlertsPath());
 await usageAlerts.load();
-// Paired phones (ADR-020 M3): each has its own token; the master secret never leaves the server.
+// Paired phones: each has its own token; the master secret never leaves the server.
 const devices = new DeviceRegistry(defaultDevicesPath());
 await devices.load();
 const sweepDevices = async (): Promise<void> => {
@@ -102,7 +102,7 @@ const sweepDevices = async (): Promise<void> => {
 };
 await sweepDevices();
 setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
-// The sync rule (ADR-018 R8): every item follows its source object; changes go to the Core on the wire.
+// The sync rule: every item follows its source object; changes go to the Core on the wire.
 const inboxSync = new InboxSync({
     connectors,
     store,
@@ -131,7 +131,7 @@ const api = new AcediaApiServer(
 );
 
 if (fcm) await fcm.load();
-// Spend alerts (ADR-021 P2): logged, and pushed to the phone within its priority filter; the Core relays them when wired.
+// Spend alerts: logged, and pushed to the phone within its priority filter; the Core relays them when wired.
 usageAlerts.watch(usageLedger, (alert) => {
     console.warn(`[Usage] ${alert.title} — ${alert.body}`);
     return fcm?.send({
@@ -161,11 +161,11 @@ hub.onEvent((event, meta) => {
     // A recovered item is back in the box only: the Core already holds it and the phone must not ring.
     if (meta?.recovered) return;
     ws.broadcast(event);
-    // The inbox now holds read mail too (ADR-018 D2): only something new and unread is pushed.
+    // The inbox now holds read mail too: only something new and unread is pushed.
     if (!event.read) void fcm?.send(event);
 });
 
-// A known item whose content changed at the source (moved event, new due date — ADR-019 L3): the box is
+// A known item whose content changed at the source (moved event, new due date): the box is
 // updated and the Core refreshes its copy by key through an "updated" sync message — never the event itself,
 // which the Core would announce as news. A backlog item was never sent to the Core, so its refresh is not either.
 hub.onRefresh((event) => {

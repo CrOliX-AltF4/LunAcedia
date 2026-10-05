@@ -1,5 +1,5 @@
 /**
- * The agent loop (ADR-017 M4): the model reads with the read tools and acts with the action tools,
+ * The agent loop: the model reads with the read tools and acts with the action tools,
  * turn after turn, until it answers — bounded in steps, time and actions (D5).
  *
  * Every write goes through `dispatch`, i.e. the same tier gate as POST /api/actions — the loop can
@@ -68,7 +68,7 @@ export interface AgentRequest {
      */
     readOnly?: boolean;
     /**
-     * Earlier turns of the same topic (ADR-020 amendment 1, S1): the user's messages and the agent's answers,
+     * Earlier turns of the same topic: the user's messages and the agent's answers,
      * oldest first — never raw tool results. Sent between the system prompt and the request.
      */
     history?: { role: "user" | "assistant"; content: string }[];
@@ -90,7 +90,7 @@ export interface AgentAction {
     status: ActionStatus;
     id?: string;
     reason?: string;
-    /** A pending action's deadline — after it nothing is done (ADR-020 §5.11). */
+    /** A pending action's deadline — after it nothing is done. */
     expiresAt?: number;
 }
 

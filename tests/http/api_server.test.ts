@@ -775,7 +775,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
     });
 });
 
-// ADR-020 §5.11 M5a — a durable list Master comes back to: when it expires, where it came from, and the tier and the
+// A durable list Master comes back to: when it expires, where it came from, and the tier and the
 // source checked again at the moment of confirming.
 describe("AcediaApiServer — pending writes (M5a)", () => {
     it("says when a pending action expires and where it came from", async () => {
@@ -1774,7 +1774,7 @@ describe("AcediaApiServer — POST /api/events/clear-read", () => {
     });
 });
 
-describe("AcediaApiServer — POST /api/events/held (ADR-019 L10)", () => {
+describe("AcediaApiServer — POST /api/events/held", () => {
     it("reports which keys the box still holds, with their read state", async () => {
         const port = nextPort();
         const store = new EventStore();
@@ -1864,7 +1864,7 @@ describe("AcediaApiServer — GET /api/events?unread=true", () => {
     });
 });
 
-describe("AcediaApiServer — POST /api/config/ai-provider (ADR-013 I1)", () => {
+describe("AcediaApiServer — POST /api/config/ai-provider", () => {
     let tmpDir: string;
     let cwdSpy: ReturnType<typeof vi.spyOn>;
 
@@ -1927,7 +1927,7 @@ describe("AcediaApiServer — POST /api/config/ai-provider (ADR-013 I1)", () => 
     });
 });
 
-describe("AcediaApiServer — GET /api/identity (ADR-020 D2)", () => {
+describe("AcediaApiServer — GET /api/identity", () => {
     afterEach(() => {
         delete process.env["ASSISTANT_NAME"];
     });

@@ -56,7 +56,7 @@ export function formatThread(thread: GitHubThread): AcediaEvent | null {
         url: htmlUrl,
         priority,
         dedupeKey: `gh-${reason}-${thread.id}`,
-        // The notification thread this item lives in — its source object (ADR-018 R8).
+        // The notification thread this item lives in — its source object.
         meta: { threadId: String(thread.id) },
     };
 }
@@ -71,7 +71,7 @@ export function formatFailedCheckRun(run: CheckRun, repo: string, threadId?: str
         url: run.html_url,
         priority: "urgent",
         dedupeKey: `gh-ci-run-${run.id}`,
-        // threadId: the notification this failure was found through — it dies with it (ADR-018 R8).
+        // threadId: the notification this failure was found through — it dies with it.
         meta: { repo, checkSuiteId: run.check_suite.id, ...(threadId && { threadId }) },
     };
 }

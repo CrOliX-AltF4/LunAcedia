@@ -1,5 +1,5 @@
 /**
- * Provider-neutral shapes of a tool-calling conversation (ADR-017 M3). Each provider maps them to
+ * Provider-neutral shapes of a tool-calling conversation. Each provider maps them to
  * its own wire format; the agent loop only ever sees these.
  */
 

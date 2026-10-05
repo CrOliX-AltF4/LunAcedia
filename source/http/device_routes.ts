@@ -1,5 +1,5 @@
 /**
- * Paired devices (ADR-020 M3).
+ * Paired devices.
  *
  *   POST   /api/devices/pair            { code, name } → 201 { device, token }   — NO auth (the code is the proof);
  *                                        rate-limited per address; the token is shown once

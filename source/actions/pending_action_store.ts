@@ -13,7 +13,7 @@ export interface PendingAction {
     expiresAt: number;
     /** Who asked: the agent (on Master's request) or a direct API call. */
     origin?: "agent" | "api";
-    /** A third party's text (a mail, an issue) was read before this action was proposed (ADR-017 D2). */
+    /** A third party's text (a mail, an issue) was read before this action was proposed. */
     untrusted?: boolean;
 }
 
@@ -25,7 +25,7 @@ export interface PendingMeta {
 const HOUR = 60 * 60 * 1000;
 
 /**
- * Each kind its own delay (ADR-020 §5.11 Q2): what goes stale fast (a reply, a comment) or undoes something (a
+ * Each kind its own delay: what goes stale fast (a reply, a comment) or undoes something (a
  * deletion, a closing) waits 2 hours; what creates or plans (an event, a task, an issue) waits a day.
  */
 const LONG_LIVED = new Set<string>(["create_event", "update_event", "create_task", "create_issue"]);
@@ -63,7 +63,7 @@ function revive(raw: unknown, now: number): PendingAction | null {
 }
 
 /**
- * The writes waiting for Master (ADR-020 §5.11 M5a). Durable since M5: a pending action is a list Master comes back to
+ * The writes waiting for Master. Durable since M5: a pending action is a list Master comes back to
  * — from the phone, the panel or the dashboard, hours later — so it survives a restart. Each kind expires on its own
  * delay; at confirmation the caller still re-checks the tier (api_server.ts), and nothing read from the disk is
  * executed unless the catalogue knows its kind (merge_pr never). A `null` path keeps it in memory only (tests).
@@ -130,7 +130,7 @@ export class PendingActionStore {
         return [...this.pending.values()];
     }
 
-    /** Told of each new pending action — the phone's notification (ADR-020 §5.11 M5b). */
+    /** Told of each new pending action — the phone's notification. */
     onCreate(listener: (p: PendingAction) => void): void {
         this.created.push(listener);
     }

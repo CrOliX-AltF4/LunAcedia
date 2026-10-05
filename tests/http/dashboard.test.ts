@@ -127,7 +127,7 @@ describe("dashboard toggle()", () => {
     });
 });
 
-describe("dashboard AI provider onboarding (ADR-013 I1)", () => {
+describe("dashboard AI provider onboarding", () => {
     it("checks /api/health's ai field to decide whether to show the onboarding banner", () => {
         expect(DASHBOARD_HTML).toContain("function checkAiProvider");
         const block = DASHBOARD_HTML.slice(
@@ -158,8 +158,8 @@ describe("dashboard AI provider onboarding (ADR-013 I1)", () => {
     });
 });
 
-// ADR-018 R5 — the standalone dashboard is LunAcedia's own panel: the same box as the Core's.
-describe("dashboard box (ADR-018 R5)", () => {
+// The standalone dashboard is LunAcedia's own panel: the same box as the Core's.
+describe("dashboard box", () => {
     const script = DASHBOARD_HTML;
 
     it("loads the box from /api/inbox, not the raw event stream", () => {
@@ -189,7 +189,7 @@ describe("dashboard box (ADR-018 R5)", () => {
         expect(cardBlock).toContain('data-g="trash"');
         expect(cardBlock).toContain('data-g="unread"');
         expect(cardBlock).toContain('data-g="done"');
-        // "Fait" on a task (ADR-020 §5.10 M4d) — same gesture as GitHub's, its own label.
+        // "Fait" on a task — same gesture as GitHub's, its own label.
         expect(cardBlock).toContain(
             "e.source==='tasks'?'<button data-g=\"done\" onclick=\"gesture(this,event)\">Fait</button>'",
         );
@@ -222,7 +222,7 @@ describe("dashboard box (ADR-018 R5)", () => {
     });
 });
 
-// ADR-020 amendment 1, S1 — parity: the pocket app's topics are visible from the dashboard, read-only.
+// Parity: the pocket app's topics are visible from the dashboard, read-only.
 describe("dashboard topics (read-only)", () => {
     const html = DASHBOARD_HTML;
 
@@ -243,7 +243,7 @@ describe("dashboard topics (read-only)", () => {
     });
 });
 
-// ADR-021 P2 — LLM spend on the dashboard: figures, fired alerts, and the paliers (information only).
+// LLM spend on the dashboard: figures, fired alerts, and the paliers (information only).
 describe("dashboard LLM spend", () => {
     const html = DASHBOARD_HTML;
 
@@ -267,7 +267,7 @@ describe("dashboard LLM spend", () => {
     });
 });
 
-// ADR-020 M3 — paired devices on the dashboard.
+// Paired devices on the dashboard.
 describe("dashboard devices", () => {
     const html = DASHBOARD_HTML;
 
@@ -275,7 +275,7 @@ describe("dashboard devices", () => {
         expect(html).toContain('onclick="openDevices()"');
         const block = html.slice(
             html.indexOf("async function openDevices"),
-            html.indexOf("// LLM spend (ADR-021 P2)"),
+            html.indexOf("// LLM spend"),
         );
         expect(block).toContain("req('/api/devices')");
         expect(block).toContain('data-id="${esc(x.id)}"');
@@ -287,7 +287,7 @@ describe("dashboard devices", () => {
     });
 });
 
-// ADR-020 §5.11 M5b (law 3) — the agent's switch and its writes, set from the dashboard; pending writes say when they
+// Law 3 — the agent's switch and its writes, set from the dashboard; pending writes say when they
 // expire and why a confirmation failed.
 describe("dashboard agent and pending writes", () => {
     const html = DASHBOARD_HTML;

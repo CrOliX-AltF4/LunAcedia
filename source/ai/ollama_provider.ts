@@ -38,7 +38,7 @@ export class OllamaProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`Ollama error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OllamaResponse;
-        // ADR-021 P2: measured like any call — a local model is free, its volume still counts.
+        // Measured like any call — a local model is free, its volume still counts.
         usageLedger.record(
             `${LOCAL_MODEL_PREFIX}${this.model}`,
             data.prompt_eval_count ?? 0,
@@ -77,7 +77,7 @@ export class OllamaProvider implements IAIProvider {
         });
         if (!res.ok) throw new Error(`Ollama error: ${res.status} ${res.statusText}`);
         const data = (await res.json()) as OllamaResponse;
-        // ADR-021 P2: measured like any call — a local model is free, its volume still counts.
+        // Measured like any call — a local model is free, its volume still counts.
         usageLedger.record(
             `${LOCAL_MODEL_PREFIX}${this.model}`,
             data.prompt_eval_count ?? 0,

@@ -100,7 +100,7 @@ export class GitHubConnector implements IConnector {
         const lm = resp.headers.get("Last-Modified");
         if (lm) this.lastModified = lm;
 
-        // Paginated (ADR-019 L6): the listing used to stop at the first 50 threads.
+        // Paginated: the listing used to stop at the first 50 threads.
         let threads = (await resp.json()) as GitHubThread[];
         try {
             threads = threads.concat(await this.nextPages<GitHubThread>(resp));
@@ -205,7 +205,7 @@ export class GitHubConnector implements IConnector {
     }
 
     /**
-     * Where each held item stands at GitHub (ADR-018 R8). v1 rule: the box holds unread notifications —
+     * Where each held item stands at GitHub. v1 rule: the box holds unread notifications —
      * a thread read or done at GitHub leaves it. A thread missing from the unread listing is checked one
      * by one; an item without its thread is not judged. null when GitHub cannot be asked.
      */
@@ -260,7 +260,7 @@ export class GitHubConnector implements IConnector {
     }
 
     /**
-     * Master's gestures on a notification (ADR-018 R1). v1 rule: the box holds unread notifications, so
+     * Master's gestures on a notification. v1 rule: the box holds unread notifications, so
      * read and done both take the item out; open changes nothing (the link opens the thread).
      */
     async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
@@ -285,7 +285,7 @@ export class GitHubConnector implements IConnector {
         throw new Error(`[GitHub] "${gesture}" does not apply to a notification`);
     }
 
-    /** "Done" at GitHub: takes the thread out of the GitHub inbox (ADR-018 R1). */
+    /** "Done" at GitHub: takes the thread out of the GitHub inbox. */
     async markThreadDone(threadId: string): Promise<void> {
         const resp = await fetch(
             `${GITHUB_API}/notifications/threads/${encodeURIComponent(threadId)}`,

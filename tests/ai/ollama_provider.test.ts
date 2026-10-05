@@ -68,7 +68,7 @@ describe("OllamaProvider", () => {
     });
 });
 
-// ADR-021 P2 — a local model is free, but its volume still counts.
+// A local model is free, but its volume still counts.
 describe("OllamaProvider — usage", () => {
     it("records the tokens Ollama reports, at no cost", async () => {
         const { usageLedger } = await import("../../source/usage/llm_usage");
