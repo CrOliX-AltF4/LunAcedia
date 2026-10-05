@@ -51,7 +51,7 @@
         "@commitlint/cli": "^19.0.0",
         "@commitlint/config-conventional": "^19.0.0",
         "@types/node": "^22.20.4",
-        "@types/ws": "^8.5.14",
+        "@types/ws": "^8.18.2",
         "@vitest/coverage-v8": "^4.1.11",
         "eslint": "^9.39.5",
         "eslint-config-prettier": "^9.0.0",
@@ -67,6 +67,6 @@
     "dependencies": {
         "dotenv": "^17.0.0",
         "firebase-admin": "^14.4.0",
-        "ws": "^8.21.3"
+        "ws": "^8.22.0"
     }
 }
