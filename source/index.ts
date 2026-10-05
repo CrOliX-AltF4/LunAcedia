@@ -76,8 +76,13 @@ const tierStore = new ActionTierStore();
 // Durable since M5 (ADR-020 §5.11): the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
 await pendingStore.load();
-// A write waiting for Master rings the phone (standalone; the Core relays it when wired).
-pendingStore.onCreate((p) => void fcm?.send(pendingActionEvent(p)));
+// A write waiting for Master rings the phone: directly when standalone, through the Core when wired (it reads the
+// stream; ADR-020 §5.11 M5c). Never put in the box.
+pendingStore.onCreate((p) => {
+    const event = pendingActionEvent(p);
+    ws.broadcast(event);
+    void fcm?.send(event);
+});
 // The agent's switch (ADR-017 M5) — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
