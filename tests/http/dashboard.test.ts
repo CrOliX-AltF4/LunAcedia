@@ -286,3 +286,40 @@ describe("dashboard devices", () => {
         expect(block).toContain("esc(c.code)");
     });
 });
+
+// ADR-020 §5.11 M5b (law 3) — the agent's switch and its writes, set from the dashboard; pending writes say when they
+// expire and why a confirmation failed.
+describe("dashboard agent and pending writes", () => {
+    const html = DASHBOARD_HTML;
+
+    it("reads and sets the agent's switch and its writes with PUT /api/agent/settings", () => {
+        expect(html).toContain('onclick="openAgent()"');
+        const block = html.slice(
+            html.indexOf("async function openAgent"),
+            html.indexOf("// End of the agent section"),
+        );
+        expect(block).toContain("req('/api/agent/settings')");
+        expect(block).toContain("req('/api/agent/settings',{method:'PUT'");
+        expect(block).toContain("toujours avec ta confirmation");
+    });
+
+    it("says when a pending write expires, flags a third party's text, and says why a confirmation failed", () => {
+        const render = html.slice(
+            html.indexOf("function renderPending"),
+            html.indexOf("async function confirmPending"),
+        );
+        expect(render).toContain("p.expiresAt");
+        expect(render).toContain("p.untrusted");
+        const confirm = html.slice(
+            html.indexOf("async function confirmPending"),
+            html.indexOf("async function cancelPending"),
+        );
+        expect(confirm).toContain("if(!r.ok)");
+        expect(confirm).toContain("esc(");
+    });
+
+    it("ships a script the browser can parse", () => {
+        const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+        for (const s of scripts) expect(() => new Function(s)).not.toThrow();
+    });
+});

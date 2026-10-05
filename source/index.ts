@@ -14,6 +14,7 @@ import { FcmSender } from "./push/fcm_sender.js";
 import { createAIProvider } from "./ai/create_ai_provider.js";
 import { ActionTierStore } from "./actions/action_tier_store.js";
 import { PendingActionStore } from "./actions/pending_action_store.js";
+import { pendingActionEvent } from "./push/pending_push.js";
 import { EmailClassificationStore } from "./connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "./auth/google_token_store.js";
 import { GuardRulesStore } from "./guards/guard_rules_store.js";
@@ -75,6 +76,8 @@ const tierStore = new ActionTierStore();
 // Durable since M5 (ADR-020 §5.11): the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
 await pendingStore.load();
+// A write waiting for Master rings the phone (standalone; the Core relays it when wired).
+pendingStore.onCreate((p) => void fcm?.send(pendingActionEvent(p)));
 // The agent's switch (ADR-017 M5) — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();

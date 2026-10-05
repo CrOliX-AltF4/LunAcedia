@@ -174,6 +174,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <button onclick="openTopics()">Sujets</button>
   <button onclick="openUsage()">Dépense LLM</button>
   <button onclick="openDevices()">Appareils</button>
+  <button onclick="openAgent()">Agent</button>
 </header>
 
 <div id="ai-banner">
@@ -548,17 +549,28 @@ function renderPending(pending){
   el.className='';
   // id passed via data-id + this, never interpolated straight into onclick as a JS string
   // argument — see dashboard.test.ts's toggle()/dedupeKey regression guard for why.
+  // A durable list since M5 (ADR-020 §5.11): each write says when it expires, and if a third party's text led to it.
   el.innerHTML=pending.map(p=>\`
 <div class="pending-row" data-id="\${esc(p.id)}">
-  <span>\${describeAction(p)}</span>
+  <span>\${describeAction(p)} <small>— expire à \${esc(new Date(p.expiresAt).toLocaleTimeString())}\${p.untrusted?" · après un texte d'un tiers":''}</small></span>
   <button class="confirm" onclick="confirmPending(this)">Confirmer</button>
   <button class="cancel" onclick="cancelPending(this)">Annuler</button>
 </div>\`).join('');
 }
 
 async function confirmPending(btn){
-  const id=btn.closest('.pending-row').dataset.id;
-  await req('/api/actions/'+encodeURIComponent(id)+'/confirm',{method:'POST'}).catch(()=>{});
+  const row=btn.closest('.pending-row');
+  const id=row.dataset.id;
+  btn.disabled=true;
+  try{
+    const r=await req('/api/actions/'+encodeURIComponent(id)+'/confirm',{method:'POST'});
+    // Hours may have passed: the source or the tier may say no — said, never swallowed.
+    if(!r.ok){
+      const e=await r.json().catch(()=>({}));
+      row.querySelector('span').innerHTML='<strong>Rien n’a été fait</strong> — '+esc(e.error||('HTTP '+r.status));
+      return;
+    }
+  }catch(e){row.querySelector('span').textContent='Erreur : '+e.message;return;}
   loadPending();
 }
 async function cancelPending(btn){
@@ -566,6 +578,31 @@ async function cancelPending(btn){
   await req('/api/actions/'+encodeURIComponent(id)+'/cancel',{method:'POST'}).catch(()=>{});
   loadPending();
 }
+
+// The agent (ADR-017, ADR-020 §5.11 — law 3): its switch, and its writes. Writes always wait for Master's confirmation
+// (tiers), merging a PR stays manual; the phone can only turn the agent off.
+async function openAgent(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Agent';
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const r=await req('/api/agent/settings');
+    const s=await r.json();
+    box.innerHTML=\`<label style="display:block;margin-bottom:10px"><input type="checkbox" id="agent-enabled" \${s.enabled?'checked':''} onchange="setAgent('enabled',this.checked)"> Agent actif <small>— coupé, aucun outil n'est jamais appelé</small></label>
+<label style="display:block;margin-bottom:10px"><input type="checkbox" id="agent-writes" \${s.writes?'checked':''} onchange="setAgent('writes',this.checked)"> Écritures <small>— répondre, créer, modifier, supprimer : toujours avec ta confirmation ; fusionner une PR reste manuel</small></label>
+<p id="agent-msg"><small></small></p>\`;
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function setAgent(key,value){
+  const msg=document.getElementById('agent-msg');
+  try{
+    const r=await req('/api/agent/settings',{method:'PUT',body:JSON.stringify({[key]:value})});
+    msg.innerHTML=r.ok?'<small>Enregistré.</small>':'<small>Refusé ('+esc(String(r.status))+').</small>';
+  }catch(e){msg.textContent='Erreur : '+e.message;}
+}
+// End of the agent section
 
 // ── Settings (sources / tiers / email rules) ─────────────────────────────────
 const GOOGLE_SOURCES=[{key:'gmail',label:'Gmail'},{key:'gcal',label:'Google Calendar'},{key:'gtasks',label:'Google Tasks'}];

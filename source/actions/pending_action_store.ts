@@ -71,6 +71,7 @@ function revive(raw: unknown, now: number): PendingAction | null {
 export class PendingActionStore {
     private readonly pending = new Map<string, PendingAction>();
     private writes: Promise<void> = Promise.resolve();
+    private readonly created: Array<(p: PendingAction) => void> = [];
 
     constructor(
         private readonly filePath: string | null = defaultPendingActionsPath(),
@@ -105,6 +106,7 @@ export class PendingActionStore {
         };
         this.pending.set(entry.id, entry);
         this.persist();
+        for (const listener of this.created) listener(entry);
         return entry;
     }
 
@@ -126,6 +128,11 @@ export class PendingActionStore {
     list(): PendingAction[] {
         this.purgeExpired();
         return [...this.pending.values()];
+    }
+
+    /** Told of each new pending action — the phone's notification (ADR-020 §5.11 M5b). */
+    onCreate(listener: (p: PendingAction) => void): void {
+        this.created.push(listener);
     }
 
     /** Resolves once every change so far is on disk. */

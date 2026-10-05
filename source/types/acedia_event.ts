@@ -16,6 +16,8 @@ export type AcediaEventType =
     | "system.heartbeat"
     /** A spend alert on LunAcedia's own LLM (ADR-021 P2) — pushed to the phone, never put in the box. */
     | "system.llm_spend"
+    /** A write waiting for Master (ADR-020 §5.11 M5b) — pushed to the phone, opens « À valider », never put in the box. */
+    | "system.action_pending"
     /**
      * Sync message (ADR-018 R8): an item changed or died with its source object — meta { op, key }, op one of
      * removed | read | unread | updated — `updated` (ADR-019 L3) also carries meta.item { title, body, priority,
