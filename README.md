@@ -1,6 +1,6 @@
 <div align="center">
 
-# ◆ LunAcedia
+# ◆ Lun'Acedia
 
 [![Version](https://img.shields.io/github/v/release/CrOliX-AltF4/LunAcedia?style=flat-square&color=C8A415)](https://github.com/CrOliX-AltF4/LunAcedia/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/CrOliX-AltF4/LunAcedia/ci.yml?style=flat-square&label=CI)](https://github.com/CrOliX-AltF4/LunAcedia/actions)
@@ -9,23 +9,23 @@
 
 **sources → facts → actions → clients**
 
-_A headless information infrastructure server. Polls GitHub, Gmail, Calendar, Tasks, RSS and Home Assistant — deduplicates events, broadcasts them over WebSocket and REST, executes actions back on the sources._
+_A headless server for your inbox and your day. It gathers GitHub, Gmail, Calendar, Tasks, RSS and Home Assistant into one box, lets you act on each item at its source, and runs an agent that sorts, answers and proposes — never writing anything without your confirmation._
 
 </div>
 
 > [!NOTE]
-> **Fully standalone** — no Natsume or LunAvaritia required. LunAcedia is a headless backend; any HTTP or WebSocket client can consume it. Official clients: [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) (Android) and the Natsume admin panel (desktop). Part of the [Lun' ecosystem](https://github.com/CrOliX-AltF4).
->
-> **Doctrine** — the ecosystem's constitution and standards (UX, security/auth, satellite readiness bar) live in LunAnima's `docs/constitution.md` and `docs/standards/` (private repo). Rewritten 2026-09-15 — see LunAnima's `docs/adr/ADR-003-refonte-doctrine-2026-09.md` for what changed and why, in particular `04-securite-auth.md` which covers this repo's Google OAuth token storage.
+> **Status: in development.** Fully standalone: a REST API, a WebSocket stream and a built-in web dashboard, nothing
+> else required. Official clients: [Lun'Avaritia](https://github.com/CrOliX-AltF4/LunAvaritia) (Android) and the
+> dashboard; it can also be wired to an optional hub. Part of the [Lun' ecosystem](https://github.com/CrOliX-AltF4).
 
 ---
 
 ## Quick start
 
 ```bash
-# Docker (recommended)
+# Docker (recommended) — the image keeps its data in /data: mount a volume there
 docker run -d --name lunacedia -p 4000:4000 -p 4001:4001 \
-  --env-file .env ghcr.io/crolix-altf4/lunacedia:latest
+  -v lunacedia-data:/data --env-file .env ghcr.io/crolix-altf4/lunacedia:latest
 
 # From source
 git clone https://github.com/CrOliX-AltF4/LunAcedia.git
@@ -34,64 +34,88 @@ cp .env.example .env   # fill in credentials
 npm run build && npm start
 ```
 
-Once running, open `http://localhost:4001` in your browser — the built-in dashboard lists live events, unread count, and lets you trigger actions without any additional client.
+Open `http://localhost:4001`: the dashboard shows the box, lets you act on it, pair a phone and set the agent. The box,
+the topics, the pending actions and the paired devices live in `STORAGE_DIR` — keep it on a volume.
 
-> See [`.env.example`](.env.example) for the full configuration reference.
+> [`.env.example`](.env.example) is the full configuration reference.
 
 ---
 
 ## What it does
 
 ```
-GitHub ──┐
-Gmail  ──┤                            ┌── Browser          built-in dashboard  :4001
-GCal   ──┼──► IngestionHub ──────►   ├── LunAvaritia       Android client (official)
-Tasks  ──┤    + EventStore            ├── Natsume           AI companion — WS + butler bridge
-RSS    ──┤    + Web dashboard         └── Any WS/HTTP client
-HA     ──┘
-
-              Actions back: 17 kinds across Gmail/Calendar/Tasks/GitHub, gated by autonomy tier
-              AI butler: openai / ollama (standalone) or delegate to Natsume
-              Agent: reads your events, acts through the tier gate (/api/agent)
+GitHub ──┐                                  ┌── Dashboard        built-in, :4001
+Gmail  ──┤                                  ├── Lun'Avaritia     Android app
+GCal   ──┼──► guards ──► the box ──► API ───┼── an optional hub  WebSocket + REST
+Tasks  ──┤               + agent            └── any HTTP/WS client
+RSS    ──┤
+HA     ──┘          gestures and actions go back to the sources
 ```
 
-**Headless by design** — LunAcedia exposes a REST API and a WebSocket stream. Clients are independent: the Android app, the Natsume bridge, and the built-in dashboard all talk to the same API. No client is required for LunAcedia to run.
+**The box** — what is in your inbox at the source, read and unread: `GET /api/inbox`. Your gestures act **at the
+source** and the box follows: open (the full text, marked read in Gmail), read / unread, archive, trash, restore from
+Gmail's trash, done (a GitHub notification, a Google task) — `POST /api/inbox/:key/:gesture`, `GET /api/inbox/trash`,
+`POST /api/inbox/trash/:id/restore`. The box is reconciled with the sources every minute and clients are told what
+changed. Gestures are your own hand: they run directly, and are journaled (`GET /api/inbox/journal`).
 
-**Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant — enabled individually via env flags, classified by rules, never by LLM
+**Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
+enabled one by one, classified by rules, never by a model.
 
-**Events** — Structured `AcediaEvent` objects: type, source, priority, dedupeKey, body — 7-day dedup TTL
+**Actions** — 18 kinds through `POST /api/actions`: Gmail (reply, archive, delete, mark read/unread), Calendar
+(create/update/delete an event), Tasks (create/complete/delete), GitHub (comment, label, create/close an issue, open a
+PR, merge a PR, mark a notification read). Each kind has a tier (`GET/PATCH /api/config/tiers`):
 
-**Actions** — 17 kinds via `POST /api/actions`: Gmail (reply, archive, delete, mark read/unread), Calendar (create/update/delete event), Tasks (create/complete/delete), GitHub (comment, label, create/close issue, open PR, merge PR). Each kind has an autonomy tier, `GET/PATCH /api/config/tiers`:
+- **auto** — runs at once;
+- **confirm** — waits for you (the default for everything);
+- **manual** — never runs through the API. `merge_pr` is manual for good.
 
-- **auto** — the butler acts with no human signal at all
-- **confirm** — needs a human signal first, either an explicit request or a proposal it made and is waiting on a "yes" (`POST /api/actions` queues it, `POST /api/actions/:id/confirm` executes it)
-- **manual** — never executable through the API no matter how explicitly it's requested (the butler may only suggest it as text)
+**Pending actions** — what waits for your confirmation is kept on disk and survives a restart. Each kind has its own
+delay: 2 hours for what goes stale or undoes something (a reply, a comment, a deletion, a closing, a PR), a day for what
+plans (an event, a task, an issue). `GET /api/actions/pending` lists them with a summary in words, their deadline, who
+proposed them and whether a third party's text came first; `POST /api/actions/:id/confirm|cancel` decides. At
+confirmation the tier is read again, and a failure at the source says why. A new pending action is pushed to the phone.
 
-`merge_pr` is hardcoded to `manual` and cannot be relaxed — merging is always a human action.
+**Agent** — `POST /api/agent` answers a request in natural language ("what urgent mail haven't I read?", "archive the
+first one") with native tool calling: it searches the box, reads an item in full, finds free slots, and acts **only**
+through the tier gate. Every tool argument is checked against the capability manifest (`source/capabilities/`);
+`merge_pr` is never built from model output; once it has read a third party's text (a mail body…), every action it
+proposes waits for your confirmation, whatever its tier. Bounded to 6 steps, 20 s and 3 actions per request.
+**Two switches** (`GET|PUT /api/agent/settings`, also on the dashboard): the agent itself (off = no tool is ever
+called) and its **writes** (off = it only reads and sorts; on = it may propose writes, always confirmed). A phone can
+only turn the agent off. `GET /api/agent/journal` lists the last runs. Needs a model with tool calling (OpenAI, or
+Ollama with a tool-capable model).
 
-**Agent** — `POST /api/agent` answers a request in natural language ("quels mails urgents je n'ai pas lus ?", "archive le premier") with native tool calling: it searches the events LunAcedia holds (unread mail and everything received since it started), reads one in full, finds free slots, and acts **only** through the same tier gate as `POST /api/actions`. Every tool argument is re-validated against the capability manifest (`source/capabilities/`); `merge_pr` is never built from model output; once the agent has read third-party text (a mail body…), every action it proposes is held for confirmation even if its tier is `auto`. Bounded to 6 steps, 20 s and 3 actions per request. The switch is `GET|PUT /api/agent/settings` (off = no tool is ever called) and `GET /api/agent/journal` lists the last 50 runs. `POST /api/chat` (LunAvaritia) and `POST /api/intent` (one action) are answered by the same agent. Requires `AI_PROVIDER != none` and a model with tool calling (OpenAI; Ollama with a tool-capable model).
+**Topics** — the pocket app's conversations, kept server side: one conversation is one topic to deal with.
+`POST /api/conversations` opens one (optionally about a box item), `POST /api/conversations/:id/messages` follows up,
+`GET` lists and pages, `PATCH` renames or archives, `DELETE` removes (journaled). Each turn is answered by the agent
+with the earlier turns, so a follow-up makes sense; older turns are summarised, never silently dropped.
 
-**Topics** — the pocket app's conversations, kept server side so they are the same from every client: one conversation is one topic to deal with. `POST /api/conversations` opens one (optionally `about` a box item — a notification's "Traiter"), `POST /api/conversations/:id/messages` follows up, `GET /api/conversations[/:id]` lists and pages, `PATCH` renames or archives, `DELETE` removes (journaled). Each turn is answered by the agent with the topic's earlier turns, so a follow-up ("et le deuxième ?") makes sense; older turns are folded into a summary, never silently dropped. Third-party text read in an earlier turn — or the item the topic is about — keeps every later action held for confirmation. With the agent off, answers are plain dialogue with no tool. Stored under `STORAGE_DIR/conversations/` (one append-only file per topic); 4000 characters per message, 500 messages per topic, no automatic purge. The dashboard lists them read-only (**Sujets**).
+**Paired devices** — a phone never holds the server's secret. From the dashboard (**Appareils**), ask for a pairing
+code (8 characters, one use, 10 minutes) and type it in the app; the phone gets its own token (only its SHA-256 is
+kept), which opens the mobile routes only. Revoke a device and its token is refused at once; a device silent for 90
+days is revoked automatically.
 
-**Paired devices** — a phone never holds `ACEDIA_SECRET`: from the dashboard (**Appareils**), ask for a pairing code (8 characters, one use, 10 minutes) and type it in the app with the server's address; the phone receives its own token (only its SHA-256 is kept), which opens the mobile routes only (the box, topics, pending actions, digest, its notifications, turning the agent off). Revoke a device and its token is refused at once; a device silent for 90 days is revoked automatically. Five wrong codes invalidate every open code; pairing attempts are rate-limited.
+**Ingestion guards** — deterministic rules that drop, tag or re-prioritise the noise before it reaches the box (see
+below).
 
-**LLM spend** — every call of LunAcedia's own model is measured by day, caller (the Core, the phone's topics, a direct API client, a background pass), purpose and model, with an estimated cost in dollars (`LLM_PRICES` overrides the price table; a local model is free). `GET /api/usage` reports it; the dashboard shows it (**Dépense LLM**) with **alert paliers** per day and per caller and an unusual-spend alert (`GET|PUT /api/config/usage-alerts`; defaults from `LLM_ALERT_DAILY_USD`, `LLM_ALERT_CALLER_USD`, `LLM_ALERT_SPIKE_FACTOR`, `LLM_ALERT_SPIKE_MIN_USD`). Alerts are pushed to the phone within its priority filter, and relayed by the Core when wired. **Nothing is ever cut for a cost** — spend is managed at the provider.
+**Calendar conflicts** — overlapping events emit `calendar.conflict`; `GET /api/calendar/free-slots` computes open
+gaps without a model; `GET /api/proposals` names a real free slot when proposing a fix.
 
-**Calendar conflict detection & rescheduling** — overlapping timed events emit a `calendar.conflict` entry automatically; `GET /api/calendar/free-slots` computes open gaps deterministically (no LLM); `GET /api/proposals` names an actual free slot when proposing a fix for a conflict.
+**AI butler** — Lun'Acedia's own model (`openai` or `ollama`), set from the dashboard's onboarding screen. It powers
+the agent, `GET /api/digest` and `GET /api/proposals`.
 
-**AI butler** — LunAcedia's own LLM (`openai` or `ollama`), configured from the dashboard's onboarding screen. It powers the agent above, `GET /api/digest` and `GET /api/proposals` (suggests next actions for urgent/conflict items). Natsume's Core never acts as LunAcedia's LLM: it delegates requests to the agent instead (ADR-008 D2).
+**LLM spend** — every call of its model is measured by day, caller, purpose and model, with an estimated cost
+(`GET /api/usage`, dashboard **Dépense LLM**), alert thresholds per day and per caller, and an unusual-spend alert.
+Nothing is ever cut for a cost.
 
-**Push notifications** — FCM: register Android tokens, filter by priority, deliver via Firebase
-
-**Clients** — WebSocket `:4000` (live event stream), HTTP REST `:4001` (query + actions), all routes bearer-protected (disable with empty `ACEDIA_SECRET` for LAN-only)
-
-> "Acedia" — the sin of sloth, of letting information pile up unread. Part of the [Lun ecosystem](https://github.com/CrOliX-AltF4).
+**Push notifications** — FCM: a paired phone registers its token; new items within its priority filter, and pending
+actions, are pushed to it.
 
 ---
 
-## Standalone usage (no Natsume, no mobile app)
+## Configuration
 
-A minimal `.env` to get started with GitHub and RSS only:
+### Minimal start (GitHub and RSS, no model)
 
 ```bash
 GITHUB_ENABLED=true
@@ -101,138 +125,110 @@ GITHUB_WATCHED_REPOS=*
 RSS_ENABLED=true
 RSS_FEEDS='["https://hnrss.org/frontpage"]'
 
-AI_PROVIDER=none   # events and actions work — /api/agent, /api/chat, /api/conversations and /api/digest return 503
+AI_PROVIDER=none
 ```
 
-```bash
-npm start
-# → WebSocket on :4000  — connect any WS client for live events
-# → REST on     :4001   — GET /api/events, /api/stats, /api/health
-# → Dashboard   :4001   — open in browser for visual event feed
-```
-
-`AI_PROVIDER=none` (default) means all connectors, REST, WebSocket, actions, and the dashboard work normally — only the `/api/agent`, `/api/chat`, `/api/intent` and `/api/digest` endpoints return `503 AI not configured`. Set `AI_PROVIDER=openai` or `AI_PROVIDER=ollama` to enable those without Natsume.
+With `AI_PROVIDER=none` (the default), the box, the gestures, the actions, the API and the dashboard all work; only the
+agent, the topics, the digest and the proposals answer `503 AI not configured`.
 
 ### Clients
 
-| Client                                                     | How to connect                        | Best for                                      |
-| ---------------------------------------------------------- | ------------------------------------- | --------------------------------------------- |
-| Built-in dashboard                                         | Open `http://host:4001`               | Quick visual check, standalone users          |
-| [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Set server URL in Settings            | Mobile — notifications, read/action on the go |
-| Natsume admin panel                                        | Set `ACEDIA_WS_URL` in Natsume `.env` | Desktop — TTS alerts + manual triage panel    |
-| `curl` / any HTTP client                                   | `GET http://host:4001/api/events`     | Dev, scripts, automation                      |
+| Client                                                      | How to connect                   | Best for                                     |
+| ----------------------------------------------------------- | -------------------------------- | -------------------------------------------- |
+| Built-in dashboard                                          | Open `http://host:4001`          | Everything, from a browser                   |
+| [Lun'Avaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Server address + pairing code    | The box, topics and confirmations, on the go |
+| An optional hub                                             | WebSocket `:4000` + REST, secret | A personal assistant on top of the box       |
+| `curl` / any HTTP client                                    | `GET http://host:4001/api/inbox` | Scripts, automation                          |
 
----
+All routes are bearer-protected (`ACEDIA_SECRET`); a paired device's token opens only the mobile routes.
 
-## Google OAuth setup (Gmail · Calendar · Tasks)
+### Google OAuth (Gmail · Calendar · Tasks)
 
-LunAcedia uses **refresh tokens** — no browser interaction at runtime once connected. Steps 1-2 (create the app, enable the APIs) are shared by both connection methods below; pick one for step 3.
+Lun'Acedia uses **refresh tokens** — no browser interaction at runtime once connected.
 
-**1. Create an OAuth 2.0 app**
+**1. Create an OAuth 2.0 app** — [console.cloud.google.com](https://console.cloud.google.com) → your project →
+**OAuth consent screen** (User type: **External**, add your account under **Audience**) → **Credentials → OAuth client
+ID** (type **Web application**). Note the **Client ID** and **Client Secret**.
 
-- Go to [console.cloud.google.com](https://console.cloud.google.com) → select your project
-- **APIs & Services → OAuth consent screen** — set User type: **External**
-- Under **Audience** (or "Test users" in older UI) → **+ Add users** → add your Google account
-- **APIs & Services → Credentials → + Create credentials → OAuth client ID** → Application type: **Web application**
-- Note your **Client ID** and **Client Secret**
+**2. Enable the APIs** — Gmail API, Google Calendar API, Google Tasks API.
 
-**2. Enable the required APIs**
+**3a. Connect from the dashboard (recommended)**
 
-In **APIs & Services → Library**, enable:
+- Add `http://<your-host>:<HTTP_PORT>/api/oauth/google/callback` as an authorized redirect URI.
+- Fill in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+- Dashboard → **⚙ Réglages** → **Connecter** next to Gmail / Google Calendar / Google Tasks: each refresh token is
+  stored automatically, no restart (`GET /api/oauth/google/status`).
+- `GMAIL_ENABLED` / `GCAL_ENABLED` / `GTASKS_ENABLED` must still be `true` at start for the connector to exist.
 
-- Gmail API
-- Google Calendar API
-- Google Tasks API
+**3b. Manual, via the OAuth Playground**
 
-**3a. Connect in-app (recommended)** — one click per connector from the dashboard, no manual token copying:
+- Add `https://developers.google.com/oauthplayground` as a redirect URI, open the
+  [OAuth Playground](https://developers.google.com/oauthplayground), ⚙️ → **Use your own OAuth credentials**.
+- Scopes — the same as the dashboard asks for: `gmail.readonly`, `gmail.send`, `gmail.modify`, `calendar.readonly`,
+  `calendar.events`, `tasks` (all under `https://www.googleapis.com/auth/`).
+- **Authorize APIs** → **Exchange authorization code for tokens** → copy the `refresh_token`.
+- The same Client ID, Client Secret and refresh token go into `GMAIL_*`, `GCAL_*` and `GTASKS_*`.
 
-- Add `http://<your-host>:<HTTP_PORT>/api/oauth/google/callback` as an authorized redirect URI on the OAuth client (e.g. `http://localhost:4001/api/oauth/google/callback`) — this is a _different_ redirect URI from the OAuth Playground one in 3b, register both if you might use either method
-- Fill in `.env`:
-    ```bash
-    GOOGLE_CLIENT_ID=...
-    GOOGLE_CLIENT_SECRET=...
-    ```
-- Start LunAcedia, open the dashboard → **⚙ Réglages** → click **Connecter** next to Gmail / Google Calendar / Google Tasks — each opens Google's consent screen and stores the refresh token automatically (`GoogleTokenStore`, no restart needed, `GET /api/oauth/google/status` reports connection state)
-- `GMAIL_ENABLED` / `GCAL_ENABLED` / `GTASKS_ENABLED` still need to be `true` at process start for the connector to exist at all — this flow fixes "enabled but missing/expired token", not "never enabled"
+### Ingestion guards
 
-**3b. Manual, via OAuth Playground (alternative)** — no dashboard access, or you'd rather not expose a callback endpoint:
+A deterministic stage between a connector's poll and the box. You write **rules**; each has structured
+**conditions** (ANDed) and **actions**. No free-form regex and no model here — mail content is untrusted data, so the
+guard only compares text and reads metadata.
 
-- Add `https://developers.google.com/oauthplayground` as an authorized redirect URI on the OAuth client
-- Go to [developers.google.com/oauthplayground](https://developers.google.com/oauthplayground)
-- Click ⚙️ → check **"Use your own OAuth credentials"** → enter your Client ID + Secret
-- Select these scopes:
-    - `https://www.googleapis.com/auth/gmail.readonly`
-    - `https://www.googleapis.com/auth/calendar.readonly`
-    - `https://www.googleapis.com/auth/tasks.readonly`
-- **Authorize APIs** → sign in → accept (you will see "This app isn't verified" — click **Continue**, you are a test user)
-- **Step 2 → Exchange authorization code for tokens** → copy the `refresh_token`
-- Fill in `.env` — the same Client ID, Client Secret, and refresh token work for all three Google connectors:
-    ```bash
-    GMAIL_CLIENT_ID=...
-    GMAIL_CLIENT_SECRET=...
-    GMAIL_REFRESH_TOKEN=<token from OAuth Playground>
+| Conditions                                                                                                                                                                                                                            | Actions                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, not the body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** · **set_priority** |
 
-    GCAL_CLIENT_ID=...        # same values
-    GCAL_CLIENT_SECRET=...
-    GCAL_REFRESH_TOKEN=<same token>
-
-    GTASKS_CLIENT_ID=...
-    GTASKS_CLIENT_SECRET=...
-    GTASKS_REFRESH_TOKEN=<same token>
-    ```
-
----
-
-## Ingestion guards (drop the noise before it reaches you)
-
-A deterministic stage between a connector's poll and dispatch. You write **rules**; each rule has structured
-**conditions** (ANDed) and **actions**. There is no free-form regex and no LLM in this layer — mail content is
-untrusted data, so the guard only compares text and reads metadata.
-
-| Conditions                                                                                                                                                                                                                                   | Actions                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, _not_ the full body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** (adds a label to `AcediaEvent.tags`) · **set_priority** |
-
-- **Nothing is dropped by default**: with no rule configured, behaviour is unchanged.
-- **Never silent**: every dropped event is written to a journal (`guard_filtered.jsonl`, 30 days by default,
-  `GUARD_JOURNAL_RETENTION_DAYS`) and can be **restored**. Per-rule hit counters show dead or over-eager rules.
-- **The VIP list always wins over a drop** (the existing `vipSenders`).
-- **Preview before you commit**: `POST /api/guard/preview` runs candidate rules against recent events and the
-  journal and changes nothing.
-- **No repeated fetching**: an unread mail stays in the inbox, so LunAcedia remembers what it already decided
-  (dispatched, or dropped under the current rules) and does not re-fetch its metadata on every poll.
-- Events that pass carry `tags` and `ruleId` (both optional) so you can see which rule touched them; filter with
-  `GET /api/events?tag=…`.
+- **Nothing is dropped by default.**
+- **Never silent**: every dropped event is journaled (`guard_filtered.jsonl`, 30 days, `GUARD_JOURNAL_RETENTION_DAYS`)
+  and can be **restored**; per-rule counters show dead or over-eager rules.
+- **The VIP list always wins over a drop.**
+- **Preview before you commit**: `POST /api/guard/preview` runs candidate rules against recent events and changes
+  nothing.
 
 Routes: `GET/PUT /api/guard/rules` · `GET /api/guard/journal` · `POST /api/guard/journal/restore` ·
-`POST /api/guard/preview`. Design: `docs/adr/ADR-010` in the Lun'Anima repository.
-
-## Design rules
-
-- Connectors classify by **rules only** — no LLM inside the connector layer
-- `AcediaEvent` carries **facts**: title, source, priority — no interpretation
-- Interpretation belongs to the consumer (Natsume) or the optional AI butler
-- **Asymmetry**: Natsume knows LunAcedia; LunAcedia does not know Natsume
-- **Client independence**: no client is privileged — the REST/WS API is the only contract
+`POST /api/guard/preview`.
 
 ---
 
-## Lun ecosystem
+## Architecture
 
-| Project                                                    | Role                                                      |
-| ---------------------------------------------------------- | --------------------------------------------------------- |
-| [LunIra](https://github.com/CrOliX-AltF4/LunIra)           | AI dev pipeline — intent → code                           |
-| **LunAcedia**                                              | Information infrastructure — events · actions · AI butler |
-| [LunAvaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Mobile companion — Android                                |
-| [LunGula](https://github.com/CrOliX-AltF4/LunGula)         | Imitation learning — gameplay → ONNX policy               |
-| LunAnima                                                   | AI companion core — private                               |
+- Connectors classify by **rules only** — no model inside the connector layer.
+- Events carry **facts** — title, source, priority — never an interpretation; interpreting belongs to the client or
+  the agent.
+- **No privileged client**: the REST/WebSocket API is the only contract, and Lun'Acedia knows nothing of who consumes
+  it.
+- **A write is always confirmed by a human**; a gesture is the human's own hand.
+
+---
+
+## Development
+
+```bash
+npm run typecheck    # tsc --noEmit
+npm run lint         # eslint
+npm run format:check # prettier
+npm test             # vitest
+npm run build
+```
+
+Releases are tagged from the version in `package.json`; the Docker image is published to GHCR.
+
+---
+
+## Lun' ecosystem
+
+| Project                                                     | Role                                             | Status         |
+| ----------------------------------------------------------- | ------------------------------------------------ | -------------- |
+| [Lun'Ira](https://github.com/CrOliX-AltF4/LunIra)           | AI dev pipeline — intent → code                  | Active         |
+| **Lun'Acedia**                                              | Your box and your day — events · actions · agent | In development |
+| [Lun'Avaritia](https://github.com/CrOliX-AltF4/LunAvaritia) | Lun'Acedia in your pocket — Android              | In development |
+| [Lun'Gula](https://github.com/CrOliX-AltF4/LunGula)         | Imitation learning — replays → ONNX model        | Paused         |
 
 ---
 
 <div align="center">
 
 Built by **[CrOliX-AltF4](https://github.com/CrOliX-AltF4)** · MIT License · © 2026
-
-_Part of the [Lun' ecosystem](https://github.com/CrOliX-AltF4)._
 
 </div>
