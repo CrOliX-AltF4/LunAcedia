@@ -211,6 +211,27 @@ describe("evaluateGuard — actions and precedence", () => {
     });
 });
 
+describe("evaluateGuard — actions at the source (ADR-023 T3)", () => {
+    it("collects what the matching rules do at the source, once each, with the rule that asks", () => {
+        const rules = [
+            rule({ id: "a", actions: [{ type: "source", action: "mark_spam" }] }),
+            rule({ id: "b", actions: [{ type: "source", action: "mark_spam" }, { type: "source", action: "label_email", label: "Pubs" }] }),
+        ];
+        expect(evaluateGuard(mail(), rules, noVip).source).toEqual([
+            { ruleId: "a", action: "mark_spam" },
+            { ruleId: "b", action: "label_email", label: "Pubs" },
+        ]);
+    });
+
+    it("a VIP is never archived, trashed or reported by a rule — a label still applies", () => {
+        const isVip = makeVipMatcher(["deals@mail.aliexpress.com"]);
+        const rules = [rule({ actions: [{ type: "source", action: "delete_email" }, { type: "source", action: "star_email" }] })];
+        const v = evaluateGuard(mail(), rules, isVip);
+        expect(v.source).toEqual([{ ruleId: "r1", action: "star_email" }]);
+        expect(v.vipProtected).toBe(true);
+    });
+});
+
 describe("makeVipMatcher", () => {
     it("keeps the legacy semantics: case-insensitive substring on from + subject, ignoring blank patterns", () => {
         const isVip = makeVipMatcher(["BOSS@corp.com", "  "]);

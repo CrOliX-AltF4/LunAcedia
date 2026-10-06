@@ -61,8 +61,9 @@ changed. Gestures are your own hand: they run directly, and are journaled (`GET 
 **Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
 enabled one by one, classified by rules, never by a model.
 
-**Actions** — 24 kinds through `POST /api/actions`: Gmail (reply, archive, trash, mark read/unread, spam / not spam,
-star / unstar, add / remove a label by name), Calendar
+**Actions** — 26 kinds through `POST /api/actions`: Gmail (reply, archive, trash, mark read/unread, spam / not spam,
+star / unstar, add / remove a label by name, a **batch** on every mail of the box that matches, a **rule** for the mails
+to come), Calendar
 (create/update/delete an event), Tasks (create/complete/delete), GitHub (comment, label, create/close an issue, open a
 PR, merge a PR, mark a notification read). Each kind has a tier (`GET/PATCH /api/config/tiers`):
 
@@ -96,8 +97,13 @@ code (8 characters, one use, 10 minutes) and type it in the app; the phone gets 
 kept), which opens the mobile routes only. Revoke a device and its token is refused at once; a device silent for 90
 days is revoked automatically.
 
-**Ingestion guards** — deterministic rules that drop, tag or re-prioritise the noise before it reaches the box (see
-below).
+**Ingestion guards** — deterministic rules that drop, tag or re-prioritise the noise before it reaches the box, or act
+on it in Gmail itself (see below).
+
+**Batches** — `bulk_email` applies one sorting action to every mail of the box that matches structured criteria
+(exact sender, sender containing, domain, subject containing — ANDed, never empty). LunAcedia computes and freezes the
+selection when the batch is proposed — at most 200 mails, with how many matched — and a batch always waits for your
+confirmation, whatever its tier. `POST /api/inbox/select` previews a selection without acting.
 
 **Calendar conflicts** — overlapping events emit `calendar.conflict`; `GET /api/calendar/free-slots` computes open
 gaps without a model; `GET /api/proposals` names a real free slot when proposing a fix.
@@ -178,17 +184,22 @@ guard only compares text and reads metadata.
 
 | Conditions                                                                                                                                                                                                                            | Actions                               |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, not the body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** · **set_priority** |
+| `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, not the body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** · **set_priority** · **at the source**: archive, trash, spam, mark read, star, label |
 
 - **Nothing is dropped by default.**
 - **Never silent**: every dropped event is journaled (`guard_filtered.jsonl`, 30 days, `GUARD_JOURNAL_RETENTION_DAYS`)
   and can be **restored**; per-rule counters show dead or over-eager rules.
-- **The VIP list always wins over a drop.**
+- **The VIP list always wins over a drop** — and a VIP is never archived, trashed or reported by a rule.
+- **At the source**: a rule acts in Gmail on each new mail it matches, without asking again — a mail taken out of the
+  inbox is neither stored nor announced. Every mail touched is journaled (`GET /api/guard/actions`); a refusal at the
+  source leaves the mail in the box. One switch turns every rule's source actions off
+  (`PUT /api/guard/source-actions`). The agent may propose a rule (`create_rule`): it always waits for your
+  confirmation.
 - **Preview before you commit**: `POST /api/guard/preview` runs candidate rules against recent events and changes
   nothing.
 
 Routes: `GET/PUT /api/guard/rules` · `GET /api/guard/journal` · `POST /api/guard/journal/restore` ·
-`POST /api/guard/preview`.
+`POST /api/guard/preview` · `GET /api/guard/actions` · `PUT /api/guard/source-actions`.
 
 ---
 

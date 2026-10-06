@@ -11,6 +11,7 @@ import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { GuardJournal } from "../../source/guards/guard_journal.js";
 import { GuardPipeline } from "../../source/guards/guard_pipeline.js";
 import { GuardRulesStore } from "../../source/guards/guard_rules_store.js";
+import { RuleActionJournal } from "../../source/guards/rule_actor.js";
 import { GuardStats } from "../../source/guards/guard_stats.js";
 import type { GuardServices } from "../../source/guards/guard_services.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
@@ -76,7 +77,8 @@ describe("AcediaApiServer — ingestion guard routes", () => {
             () => stats.flush(),
         );
         const pipeline = new GuardPipeline({ rules, journal, stats, vipSenders: () => [] });
-        const guards: GuardServices = { pipeline, rules, journal, stats };
+        const ruleActions = new RuleActionJournal(path.join(dir, "guard_actions.jsonl"));
+        const guards: GuardServices = { pipeline, rules, journal, stats, ruleActions };
         const store = new EventStore();
         const hub = new IngestionHub([], path.join(dir, "seen.json"), pipeline);
         const received: AcediaEvent[] = [];
@@ -103,6 +105,24 @@ describe("AcediaApiServer — ingestion guard routes", () => {
     it("answers 503 when the guards are not configured", async () => {
         const { base } = await start(false);
         expect((await call("GET", `${base}/api/guard/rules`)).status).toBe(503);
+    });
+
+    // ADR-023 T3 — what rules do at the source: one switch (law 3), and every mail touched shown.
+    it("turns every rule's actions at the source off and on, and says so with the rules", async () => {
+        const { base } = await start();
+        expect((await call("GET", `${base}/api/guard/rules`)).body.sourceActions).toBe(true);
+        const off = await call("PUT", `${base}/api/guard/source-actions`, { enabled: false });
+        expect(off).toEqual({ status: 200, body: { enabled: false } });
+        expect((await call("GET", `${base}/api/guard/rules`)).body.sourceActions).toBe(false);
+        expect((await call("PUT", `${base}/api/guard/source-actions`, { enabled: "no" })).status).toBe(400);
+    });
+
+    it("lists what rules did at the source, newest first", async () => {
+        const { base, guards } = await start();
+        guards.ruleActions!.record({ ts: 1, ruleId: "r", action: "mark_spam", key: "email-1", title: "Soldes", from: "x@ali.com", ok: true });
+        const r = await call("GET", `${base}/api/guard/actions`);
+        expect(r.status).toBe(200);
+        expect(r.body.entries).toEqual([expect.objectContaining({ ruleId: "r", action: "mark_spam", ok: true })]);
     });
 
     it("starts with no rule and version 0", async () => {

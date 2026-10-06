@@ -63,3 +63,19 @@ export function describeMatch(match: MailMatch): string {
     if (clean(match.subjectContains)) parts.push(`sujet contenant « ${clean(match.subjectContains)} »`);
     return parts.join(", ");
 }
+
+/** The guard rule a confirmed create_rule becomes: the criteria as conditions, one action at the source. */
+export function ruleFromAction(action: Extract<ConnectorAction, { kind: "create_rule" }>): unknown {
+    return {
+        name: action.name,
+        enabled: true,
+        conditions: matchConditions(action.match ?? {}),
+        actions: [
+            {
+                type: "source",
+                action: action.action,
+                ...(action.label !== undefined && { label: action.label }),
+            },
+        ],
+    };
+}

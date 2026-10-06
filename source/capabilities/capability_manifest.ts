@@ -7,7 +7,7 @@
  * DEFAULT_ACTION_TIERS / ACTION_RISK (derived in action_tier.ts). The configuration half of the
  * manifest (instances, config schema, generated forms — K1b) comes with the Discord migration.
  */
-import type { BulkEmailKind, ConnectorAction } from "../types/connector_action.js";
+import type { BulkEmailKind, ConnectorAction, RuleSourceKind } from "../types/connector_action.js";
 import type { ActionKind, ActionRisk, ActionTier } from "../types/action_tier.js";
 import { CONNECTOR_REGISTRY, type ConnectorSlug } from "../connectors/connector_registry.js";
 import { validateArgs, type ObjectSchema } from "./json_schema.js";
@@ -72,6 +72,24 @@ const BULK_EMAIL_KINDS: readonly BulkEmailKind[] = [
     "mark_email_read",
     "mark_email_unread",
     "mark_spam",
+    "star_email",
+    "label_email",
+];
+const MAIL_MATCH: ObjectSchema = {
+    type: "object",
+    description: "Which mails: at least one criterion, all of them must hold.",
+    properties: {
+        from: { type: "string", description: "Exact sender address." },
+        fromContains: { type: "string", description: 'Text the sender contains, e.g. "aliexpress".' },
+        fromDomain: { type: "string", description: 'Sender domain, subdomains included, e.g. "aliexpress.com".' },
+        subjectContains: { type: "string", description: "Text the subject contains." },
+    },
+};
+const RULE_SOURCE_KINDS: readonly RuleSourceKind[] = [
+    "archive_email",
+    "delete_email",
+    "mark_spam",
+    "mark_email_read",
     "star_email",
     "label_email",
 ];
@@ -215,25 +233,32 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                             enum: BULK_EMAIL_KINDS,
                             description: "The sorting to apply to each matching mail.",
                         },
-                        match: {
-                            type: "object",
-                            description: "Which mails: at least one criterion, all of them must hold.",
-                            properties: {
-                                from: { type: "string", description: "Exact sender address." },
-                                fromContains: {
-                                    type: "string",
-                                    description: 'Text the sender contains, e.g. "aliexpress".',
-                                },
-                                fromDomain: {
-                                    type: "string",
-                                    description: 'Sender domain, subdomains included, e.g. "aliexpress.com".',
-                                },
-                                subjectContains: { type: "string", description: "Text the subject contains." },
-                            },
-                        },
+                        match: MAIL_MATCH,
                         label: { type: "string", description: "Label name — only with action label_email." },
                     },
                     required: ["action", "match"],
+                },
+                defaultTier: "confirm",
+                risk: "medium",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "create_rule",
+                label: "Créer une règle de tri",
+                description:
+                    "Propose a sorting rule for the mails TO COME: at each collection, every new mail that matches gets the " +
+                    "action, in Gmail, without asking again. Use it when the user says « à l'avenir », « toujours », « dorénavant ». " +
+                    "For the mails already in the box, propose bulk_email as well. It always waits for the user's confirmation.",
+                params: {
+                    type: "object",
+                    properties: {
+                        name: { type: "string", minLength: 1, description: 'A short name, e.g. "AliExpress en indésirable".' },
+                        match: MAIL_MATCH,
+                        action: { type: "string", enum: RULE_SOURCE_KINDS, description: "What to do to each matching mail." },
+                        label: { type: "string", description: "Label name — only with action label_email." },
+                    },
+                    required: ["name", "match", "action"],
                 },
                 defaultTier: "confirm",
                 risk: "medium",

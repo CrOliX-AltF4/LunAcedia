@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
-import type { GuardPipeline } from "../guards/guard_pipeline.js";
+import type { GuardOutcome, GuardPipeline } from "../guards/guard_pipeline.js";
 
 const DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const URGENT_POLL_MS = 60_000;
@@ -60,6 +60,8 @@ export class IngestionHub {
     private started = false;
     /** The initial sweep finished: the box reflects the sources (see isReady). */
     private initialSweepDone = false;
+    /** Mails a rule already acted on at the source (ADR-023 T3). */
+    private readonly ruleActed = new Set<string>();
 
     constructor(
         private readonly connectors: IConnector[],
@@ -71,6 +73,14 @@ export class IngestionHub {
          * next restart.
          */
         private readonly isHeld: (key: string) => boolean = () => false,
+        /**
+         * Carries out what a rule does at the source (ADR-023 T3) and says what came of it: `removed` = the mail left the
+         * inbox (it is then neither stored nor announced), `read` = it was marked read. Absent: rules only sort the box.
+         */
+        private readonly ruleActor?: (
+            event: AcediaEvent,
+            actions: NonNullable<GuardOutcome["source"]>,
+        ) => Promise<{ removed: boolean; read: boolean }>,
     ) {
         this.seenPath = seenPath ?? resolveSeenPath();
         for (const c of connectors) {
@@ -90,13 +100,30 @@ export class IngestionHub {
      * `set_priority` can promote an event even on the urgent path. Settled keys are skipped without being
      * re-evaluated (or re-counted).
      */
-    private applyGuard(events: AcediaEvent[]): AcediaEvent[] {
+    private async applyGuard(events: AcediaEvent[]): Promise<AcediaEvent[]> {
         if (!this.guard) return events;
         const out: AcediaEvent[] = [];
         for (const event of events) {
             if (this.isSettled(event.dedupeKey)) continue;
             const outcome = this.guard.process(event);
-            if (!outcome.dropped) out.push(outcome.event);
+            if (outcome.dropped) continue;
+            if (outcome.source && this.ruleActor && !this.ruleActed.has(event.dedupeKey)) {
+                // Once per mail: the urgent pass sees it again every minute until it is announced, and a refusal
+                // at the source is journaled, not retried in a loop.
+                this.ruleActed.add(event.dedupeKey);
+                const done = await this.ruleActor(outcome.event, outcome.source);
+                if (done.removed) {
+                    // Out of the inbox at the source: settled, never stored nor announced.
+                    this.seen.set(event.dedupeKey, event.ts);
+                    void this.saveSeen();
+                    continue;
+                }
+                if (done.read) {
+                    out.push({ ...outcome.event, read: true });
+                    continue;
+                }
+            }
+            out.push(outcome.event);
         }
         return out;
     }
@@ -254,7 +281,7 @@ export class IngestionHub {
             try {
                 const events = await connector.poll();
                 this.recordSuccess(connector);
-                for (const e of this.applyGuard(events).filter((e) => e.priority === "urgent")) {
+                for (const e of (await this.applyGuard(events)).filter((e) => e.priority === "urgent")) {
                     this.dispatch(e);
                 }
             } catch (err) {
@@ -269,7 +296,7 @@ export class IngestionHub {
             const events = await connector.poll();
             this.recordSuccess(connector);
             for (const e of events) if (this.seen.has(e.dedupeKey)) this.refresh(e);
-            for (const e of this.applyGuard(events)) this.dispatch(e);
+            for (const e of await this.applyGuard(events)) this.dispatch(e);
         } catch (err) {
             this.recordError(connector, (err as Error).message);
             console.error(`[Hub] ${connector.name} poll error:`, (err as Error).message);

@@ -15,6 +15,15 @@ export type BulkEmailKind =
     | "star_email"
     | "label_email";
 
+/** What a rule may do at the source, on each mail it matches at collection — the Core mirrors this list as is. */
+export type RuleSourceKind =
+    | "archive_email"
+    | "delete_email"
+    | "mark_spam"
+    | "mark_email_read"
+    | "star_email"
+    | "label_email";
+
 export type ConnectorAction =
     // Gmail
     | { kind: "reply"; sourceId: string; body: string }
@@ -38,6 +47,14 @@ export type ConnectorAction =
           label?: string;
           sourceIds?: string[];
           matched?: number;
+      }
+    // A sorting rule for the mails to come (a guard rule acting at the source), added once Master confirms.
+    | {
+          kind: "create_rule";
+          name: string;
+          match: { from?: string; fromContains?: string; fromDomain?: string; subjectContains?: string };
+          action: RuleSourceKind;
+          label?: string;
       }
     // Google Calendar
     | {

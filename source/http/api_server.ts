@@ -50,7 +50,7 @@ import {
     exchangeGoogleCode,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
-import { BULK_LIMIT, selectMail, type MailMatch } from "../actions/mail_selection.js";
+import { BULK_LIMIT, selectMail, ruleFromAction, type MailMatch } from "../actions/mail_selection.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
@@ -132,6 +132,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
  *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
  *   GET  /api/guard/journal        ?limit=  events a rule dropped, newest first (never silent, restorable)
+ *   GET  /api/guard/actions        ?limit=  what rules did at the source, mail by mail, newest first
+ *   PUT  /api/guard/source-actions body: { enabled }  the one switch over every rule's actions at the source
  *   POST /api/guard/journal/restore body: { dedupeKey }  re-dispatches a dropped event, bypassing dedup + guard
  *   POST /api/guard/preview        body: { rules? }  what-if against the store + journal, changes nothing
  *   GET  /api/events               also accepts ?tag=  (guard tag, case-insensitive)
@@ -321,6 +323,7 @@ export class AcediaApiServer {
             version: g.rules.getVersion(),
             rules: g.rules.getRules(),
             stats: g.stats.getAll(),
+            sourceActions: g.rules.sourceActionsEnabled(),
         });
 
         if (method === "GET" && path === "/api/guard/rules") return json(res, 200, rulesPayload());
@@ -337,6 +340,26 @@ export class AcediaApiServer {
             if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
             return json(res, 200, rulesPayload());
+        }
+
+        if (method === "PUT" && path === "/api/guard/source-actions") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const enabled = (body as { enabled?: unknown } | null)?.enabled;
+            if (typeof enabled !== "boolean") return json(res, 400, { error: "Body must be { enabled: boolean }" });
+            await g.rules.setSourceActionsEnabled(enabled);
+            return json(res, 200, { enabled: g.rules.sourceActionsEnabled() });
+        }
+
+        if (method === "GET" && path === "/api/guard/actions") {
+            const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
+            return json(res, 200, {
+                entries: g.ruleActions?.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)) ?? [],
+            });
         }
 
         if (method === "GET" && path === "/api/guard/journal") {
@@ -457,6 +480,11 @@ export class AcediaApiServer {
             });
         }
         try {
+            if (action.kind === "create_rule") {
+                const added = this.guards ? await this.guards.rules.add(ruleFromAction(action)) : null;
+                if (!added?.ok) return json(res, 409, { error: `Rule not added: ${added ? added.error : "no rules here"}` });
+                return json(res, 204, null);
+            }
             await connector.executeAction!(action);
             this.syncStoreAfterAction(action);
             return json(res, 204, null);
@@ -505,7 +533,14 @@ export class AcediaApiServer {
             };
         }
         // A batch: the selection is LunAcedia's own, frozen now (a caller's ids are dropped), and it always waits.
+        // A rule for the mails to come always waits too, and must already be a valid rule.
         let batch = false;
+        if (action.kind === "create_rule") {
+            if (!this.guards) return { status: "refused", reason: "rules are not available on this deployment" };
+            const check = validateRules([...this.guards.rules.getRules(), ruleFromAction(action)]);
+            if (!check.ok) return { status: "refused", reason: `not a valid rule — ${check.error}` };
+            batch = true;
+        }
         if (action.kind === "bulk_email") {
             const selection = selectMail(this.store, (action.match ?? {}) as MailMatch);
             if (selection.sourceIds.length === 0)

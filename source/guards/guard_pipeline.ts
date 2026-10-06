@@ -3,12 +3,14 @@ import { evaluateGuard, makeVipMatcher } from "./guard_engine.js";
 import type { GuardJournal } from "./guard_journal.js";
 import type { GuardRulesStore } from "./guard_rules_store.js";
 import type { GuardStats } from "./guard_stats.js";
-import type { GuardRule } from "./guard_types.js";
+import type { GuardRule, GuardVerdict } from "./guard_types.js";
 
 export interface GuardOutcome {
     dropped: boolean;
     /** The event to dispatch when not dropped (tags / priority / ruleId applied, input never mutated). */
     event: AcediaEvent;
+    /** What the rules do at the source on this mail — absent when nothing, or when that switch is off. */
+    source?: NonNullable<GuardVerdict["source"]>;
 }
 
 export interface GuardPreview {
@@ -85,14 +87,18 @@ export class GuardPipeline {
         this.dropped.delete(key);
         if (this.deps.journal.isFiltered(key)) this.deps.journal.release(key);
 
+        const source =
+            verdict.source && event.source === "email" && this.deps.rules.sourceActionsEnabled()
+                ? { source: verdict.source }
+                : {};
         if (verdict.tags.length === 0 && verdict.priority === undefined)
-            return { dropped: false, event };
+            return { dropped: false, event, ...source };
         const out: AcediaEvent = { ...event };
         if (verdict.priority !== undefined) out.priority = verdict.priority;
         if (verdict.tags.length > 0)
             out.tags = [...new Set([...(event.tags ?? []), ...verdict.tags])];
         if (verdict.ruleId !== undefined) out.ruleId = verdict.ruleId;
-        return { dropped: false, event: out };
+        return { dropped: false, event: out, ...source };
     }
 
     /** User restore: takes the event back out of the journal so the caller can re-dispatch it (bypassing dedup and guard). */

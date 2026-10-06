@@ -11,6 +11,10 @@ const MAX = 130;
 
 /** « Répondre à un mail — C'est noté pour jeudi. » — the label, then what it would write or touch. */
 export function summarizeAction(action: ConnectorAction): string {
+    if (action.kind === "create_rule") {
+        const label = action.action === "label_email" && action.label ? ` « ${action.label} »` : "";
+        return `Créer une règle « ${action.name} » : ${LABELS[action.action] ?? action.action}${label} à chaque collecte — ${describeMatch(action.match ?? {})}`;
+    }
     if (action.kind === "bulk_email") {
         const n = action.sourceIds?.length ?? 0;
         const of = action.matched !== undefined && action.matched > n ? ` (sur ${action.matched})` : "";

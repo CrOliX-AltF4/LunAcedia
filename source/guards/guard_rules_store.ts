@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import type { AcediaEventPriority } from "../types/acedia_event.js";
-import type { GuardAction, GuardCondition, GuardRule } from "./guard_types.js";
+import type { GuardAction, GuardCondition, GuardRule, RuleSourceKind } from "./guard_types.js";
 
 const MAX_RULES = 200;
 const MAX_CONDITIONS = 10;
@@ -13,6 +13,14 @@ const MAX_NAME = 80;
 const MAX_TAG = 40;
 const PRIORITIES: readonly AcediaEventPriority[] = ["urgent", "normal", "info"];
 const HEADER_NAME = /^[A-Za-z0-9-]{1,80}$/;
+const SOURCE_KINDS: readonly RuleSourceKind[] = [
+    "archive_email",
+    "delete_email",
+    "mark_spam",
+    "mark_email_read",
+    "star_email",
+    "label_email",
+];
 
 /**
  * Where a rule list is wrong, in a form a client can translate and point at (live check C21: the panel showed the
@@ -33,6 +41,7 @@ export interface RuleProblem {
         | "header_name_invalid"
         | "invalid_action"
         | "tag_required"
+        | "label_required"
         | "duplicate_id";
     rule?: number;
     part?: "name" | "conditions" | "actions";
@@ -127,8 +136,20 @@ function parseAction(raw: unknown, where: string): GuardAction | Fail {
             ? { type: "set_priority", priority: priority as AcediaEventPriority }
             : fail(`${where}: priority must be urgent, normal or info`, "invalid_action");
     }
+    if (raw["type"] === "source") {
+        const action = raw["action"];
+        if (!SOURCE_KINDS.includes(action as RuleSourceKind))
+            return fail(`${where}: source.action must be one of ${SOURCE_KINDS.join(", ")}`, "invalid_action");
+        if (action === "label_email") {
+            const label = str(raw["label"], MAX_TAG);
+            return label
+                ? { type: "source", action, label }
+                : fail(`${where}: label is required (max ${MAX_TAG} characters)`, "label_required");
+        }
+        return { type: "source", action: action as RuleSourceKind };
+    }
     return fail(
-        `${where}: unknown action type (allowed: drop, tag, set_priority)`,
+        `${where}: unknown action type (allowed: drop, tag, set_priority, source)`,
         "invalid_action",
     );
 }
@@ -231,6 +252,8 @@ interface PersistedRules {
     v: 1;
     version: number;
     rules: GuardRule[];
+    /** Rules may act at the source (ADR-023 T3) — absent = on. */
+    sourceActions?: boolean;
 }
 
 /**
@@ -241,6 +264,7 @@ interface PersistedRules {
 export class GuardRulesStore {
     private rules: GuardRule[] = [];
     private version = 0;
+    private sourceActions = true;
     private readonly filePath: string;
 
     constructor(filePath?: string) {
@@ -257,6 +281,7 @@ export class GuardRulesStore {
                 this.rules = parsed.rules;
                 this.version =
                     typeof raw.version === "number" && raw.version >= 0 ? raw.version : 0;
+                if (typeof raw.sourceActions === "boolean") this.sourceActions = raw.sourceActions;
             } else {
                 console.error(
                     "[Guards] guard_rules.json is invalid, starting with no rules:",
@@ -295,8 +320,33 @@ export class GuardRulesStore {
         return { ok: true, version: this.version };
     }
 
+    /** The one switch over every rule's actions at the source (law 3) — off, rules only sort the box. */
+    sourceActionsEnabled(): boolean {
+        return this.sourceActions;
+    }
+
+    async setSourceActionsEnabled(enabled: boolean): Promise<void> {
+        this.sourceActions = enabled;
+        await this.save();
+    }
+
+    /** Adds one rule (a confirmed proposal) at the end of the list, validated like the rest. */
+    async add(input: unknown): Promise<{ ok: true; version: number; id: string } | { ok: false; error: string }> {
+        const parsed = validateRules([...this.rules, input]);
+        if (!parsed.ok) return parsed;
+        this.rules = parsed.rules;
+        this.version += 1;
+        await this.save();
+        return { ok: true, version: this.version, id: this.rules[this.rules.length - 1]!.id };
+    }
+
     private async save(): Promise<void> {
-        const payload: PersistedRules = { v: 1, version: this.version, rules: this.rules };
+        const payload: PersistedRules = {
+            v: 1,
+            version: this.version,
+            rules: this.rules,
+            sourceActions: this.sourceActions,
+        };
         try {
             await fs.mkdir(path.dirname(this.filePath), { recursive: true });
             await fs.writeFile(this.filePath, JSON.stringify(payload, null, 2), "utf-8");

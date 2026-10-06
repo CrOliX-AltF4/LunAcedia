@@ -11,6 +11,29 @@ const goodRule = {
 };
 
 describe("validateRules", () => {
+    // ADR-023 T3: a rule may act at the source, on every mail it matches at collection.
+    it("accepts actions at the source, a label only with its name", () => {
+        const res = validateRules([
+            {
+                name: "AliExpress en indésirable",
+                conditions: [{ field: "from", op: "contains", value: "aliexpress" }],
+                actions: [{ type: "source", action: "mark_spam" }, { type: "source", action: "label_email", label: " Pubs " }],
+            },
+        ]);
+        expect(res.ok && res.rules[0]!.actions).toEqual([
+            { type: "source", action: "mark_spam" },
+            { type: "source", action: "label_email", label: "Pubs" },
+        ]);
+    });
+
+    it("refuses an unknown source action, and a label action without its label", () => {
+        const base = { name: "x", conditions: [{ field: "from", op: "contains", value: "x" }] };
+        const unknown = validateRules([{ ...base, actions: [{ type: "source", action: "reply" }] }]);
+        expect(unknown.ok === false && unknown.problem.code).toBe("invalid_action");
+        const noLabel = validateRules([{ ...base, actions: [{ type: "source", action: "label_email" }] }]);
+        expect(noLabel.ok === false && noLabel.problem.code).toBe("label_required");
+    });
+
     it("accepts a valid rule, normalises it and generates an id", () => {
         const res = validateRules([goodRule]);
         expect(res.ok).toBe(true);
@@ -142,6 +165,16 @@ describe("GuardRulesStore", () => {
         const store = new GuardRulesStore(file);
         await store.load();
         expect(store.getRules()).toEqual([]);
+    });
+    it("actions at the source are on by default, and the switch is kept across a reload (law 3)", async () => {
+        const file = await freshPath();
+        const store = new GuardRulesStore(file);
+        await store.load();
+        expect(store.sourceActionsEnabled()).toBe(true);
+        await store.setSourceActionsEnabled(false);
+        const reloaded = new GuardRulesStore(file);
+        await reloaded.load();
+        expect(reloaded.sourceActionsEnabled()).toBe(false);
     });
 });
 
