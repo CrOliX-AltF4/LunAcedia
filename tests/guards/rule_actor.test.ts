@@ -66,13 +66,23 @@ describe("createRuleActor", () => {
 
     it("a refusal at the source keeps the mail in the box and is journaled with why", async () => {
         const { act, journal } = await setup(true);
-        expect(await act(mail, [{ ruleId: "spam-ali", action: "mark_spam" }])).toEqual({ removed: false, read: false });
-        expect(journal.list()[0]).toMatchObject({ ok: false, error: "Gmail said no", title: "Soldes" });
+        expect(await act(mail, [{ ruleId: "spam-ali", action: "mark_spam" }])).toEqual({
+            removed: false,
+            read: false,
+        });
+        expect(journal.list()[0]).toMatchObject({
+            ok: false,
+            error: "Gmail said no",
+            title: "Soldes",
+        });
     });
 
     it("marks read", async () => {
         const { act } = await setup();
-        expect(await act(mail, [{ ruleId: "r", action: "mark_email_read" }])).toEqual({ removed: false, read: true });
+        expect(await act(mail, [{ ruleId: "r", action: "mark_email_read" }])).toEqual({
+            removed: false,
+            read: true,
+        });
     });
 
     it("the journal survives a restart", async () => {

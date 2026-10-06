@@ -94,7 +94,8 @@ describe("DASHBOARD_HTML renderPending() sink", () => {
     });
 
     it("lists every action kind of the manifest in the tiers, with its label", () => {
-        for (const a of actionCapabilities()) expect(DASHBOARD_HTML, a.kind).toContain(`"${a.kind}":${JSON.stringify(a.label)}`);
+        for (const a of actionCapabilities())
+            expect(DASHBOARD_HTML, a.kind).toContain(`"${a.kind}":${JSON.stringify(a.label)}`);
     });
 
     it("wraps every interpolated pending-action field in esc(...) — label and detail alike", () => {

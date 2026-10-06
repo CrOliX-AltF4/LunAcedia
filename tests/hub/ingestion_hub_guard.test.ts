@@ -79,7 +79,13 @@ describe("IngestionHub — guard stage", () => {
             poll: vi.fn().mockResolvedValue(events),
             setSettledFilter: settledFilter,
         };
-        hub = new IngestionHub([connector], path.join(dir, "seen.json"), pipeline, undefined, ruleActor);
+        hub = new IngestionHub(
+            [connector],
+            path.join(dir, "seen.json"),
+            pipeline,
+            undefined,
+            ruleActor,
+        );
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
         return { hub, received, journal, pipeline, rulesStore, connector, settledFilter };
@@ -206,7 +212,12 @@ describe("IngestionHub — guard stage", () => {
 
         it("when the source refuses, the mail stays in the box — a failed rule is never a lost mail", async () => {
             const actor = vi.fn().mockResolvedValue({ removed: false, read: false });
-            const { hub, received } = await setup([mail("1", "promo@aliexpress.com")], [spamAli], [], actor);
+            const { hub, received } = await setup(
+                [mail("1", "promo@aliexpress.com")],
+                [spamAli],
+                [],
+                actor,
+            );
             await hub.pollOne("email");
             expect(received.map((e) => e.dedupeKey)).toEqual(["email-1"]);
         });
@@ -223,7 +234,12 @@ describe("IngestionHub — guard stage", () => {
 
         it("a label is applied and the mail still arrives", async () => {
             const actor = vi.fn().mockResolvedValue({ removed: false, read: false });
-            const { hub, received } = await setup([mail("3", "info@banque.fr")], [labelBank], [], actor);
+            const { hub, received } = await setup(
+                [mail("3", "info@banque.fr")],
+                [labelBank],
+                [],
+                actor,
+            );
             await hub.pollOne("email");
             expect(actor).toHaveBeenCalledOnce();
             expect(received).toHaveLength(1);
@@ -231,7 +247,12 @@ describe("IngestionHub — guard stage", () => {
 
         it("with the switch off, rules only sort the box: nothing is done at the source (law 3)", async () => {
             const actor = vi.fn();
-            const { hub, received, rulesStore } = await setup([mail("1", "promo@aliexpress.com")], [spamAli], [], actor);
+            const { hub, received, rulesStore } = await setup(
+                [mail("1", "promo@aliexpress.com")],
+                [spamAli],
+                [],
+                actor,
+            );
             await rulesStore.setSourceActionsEnabled(false);
             await hub.pollOne("email");
             expect(actor).not.toHaveBeenCalled();

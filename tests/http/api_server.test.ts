@@ -965,7 +965,10 @@ describe("AcediaApiServer — GET /api/config/actions", () => {
             category: "triage",
             locked: false,
         });
-        expect(list.find((a) => a.kind === "merge_pr")).toMatchObject({ tier: "manual", locked: true });
+        expect(list.find((a) => a.kind === "merge_pr")).toMatchObject({
+            tier: "manual",
+            locked: true,
+        });
     });
 });
 

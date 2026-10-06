@@ -17,7 +17,10 @@ describe("validateRules", () => {
             {
                 name: "AliExpress en indésirable",
                 conditions: [{ field: "from", op: "contains", value: "aliexpress" }],
-                actions: [{ type: "source", action: "mark_spam" }, { type: "source", action: "label_email", label: " Pubs " }],
+                actions: [
+                    { type: "source", action: "mark_spam" },
+                    { type: "source", action: "label_email", label: " Pubs " },
+                ],
             },
         ]);
         expect(res.ok && res.rules[0]!.actions).toEqual([
@@ -28,9 +31,13 @@ describe("validateRules", () => {
 
     it("refuses an unknown source action, and a label action without its label", () => {
         const base = { name: "x", conditions: [{ field: "from", op: "contains", value: "x" }] };
-        const unknown = validateRules([{ ...base, actions: [{ type: "source", action: "reply" }] }]);
+        const unknown = validateRules([
+            { ...base, actions: [{ type: "source", action: "reply" }] },
+        ]);
         expect(unknown.ok === false && unknown.problem.code).toBe("invalid_action");
-        const noLabel = validateRules([{ ...base, actions: [{ type: "source", action: "label_email" }] }]);
+        const noLabel = validateRules([
+            { ...base, actions: [{ type: "source", action: "label_email" }] },
+        ]);
         expect(noLabel.ok === false && noLabel.problem.code).toBe("label_required");
     });
 

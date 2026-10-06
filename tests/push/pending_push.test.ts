@@ -5,7 +5,9 @@ import { pendingActionEvent, summarizeAction } from "../../source/push/pending_p
 // A write waiting for Master rings the phone, which opens "À valider"; nothing goes in the box.
 describe("pending action notification", () => {
     it("names the sorting actions added on 2026-10-06 from the manifest", () => {
-        expect(summarizeAction({ kind: "mark_spam", sourceId: "m1" })).toBe("Mettre un mail en indésirable — m1");
+        expect(summarizeAction({ kind: "mark_spam", sourceId: "m1" })).toBe(
+            "Mettre un mail en indésirable — m1",
+        );
         expect(summarizeAction({ kind: "label_email", sourceId: "m1", label: "Pubs" })).toBe(
             "Ajouter un libellé Gmail — Pubs",
         );

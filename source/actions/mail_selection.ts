@@ -26,10 +26,16 @@ const clean = (v: string | undefined): string => (v ?? "").trim();
 
 export function matchConditions(match: MailMatch): GuardCondition[] {
     const out: GuardCondition[] = [];
-    if (clean(match.from)) out.push({ field: "from", op: "equals", value: clean(match.from).toLowerCase() });
-    if (clean(match.fromContains)) out.push({ field: "from", op: "contains", value: clean(match.fromContains) });
+    if (clean(match.from))
+        out.push({ field: "from", op: "equals", value: clean(match.from).toLowerCase() });
+    if (clean(match.fromContains))
+        out.push({ field: "from", op: "contains", value: clean(match.fromContains) });
     if (clean(match.fromDomain))
-        out.push({ field: "from", op: "domain", value: clean(match.fromDomain).toLowerCase().replace(/^@/, "") });
+        out.push({
+            field: "from",
+            op: "domain",
+            value: clean(match.fromDomain).toLowerCase().replace(/^@/, ""),
+        });
     if (clean(match.subjectContains))
         out.push({ field: "subject", op: "contains", value: clean(match.subjectContains) });
     return out;
@@ -58,9 +64,11 @@ export function selectMail(store: EventStore, match: MailMatch): MailSelection {
 export function describeMatch(match: MailMatch): string {
     const parts: string[] = [];
     if (clean(match.from)) parts.push(`expéditeur « ${clean(match.from)} »`);
-    if (clean(match.fromContains)) parts.push(`expéditeur contenant « ${clean(match.fromContains)} »`);
+    if (clean(match.fromContains))
+        parts.push(`expéditeur contenant « ${clean(match.fromContains)} »`);
     if (clean(match.fromDomain)) parts.push(`domaine « ${clean(match.fromDomain)} »`);
-    if (clean(match.subjectContains)) parts.push(`sujet contenant « ${clean(match.subjectContains)} »`);
+    if (clean(match.subjectContains))
+        parts.push(`sujet contenant « ${clean(match.subjectContains)} »`);
     return parts.join(", ");
 }
 

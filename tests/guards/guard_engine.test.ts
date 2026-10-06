@@ -215,7 +215,13 @@ describe("evaluateGuard — actions at the source", () => {
     it("collects what the matching rules do at the source, once each, with the rule that asks", () => {
         const rules = [
             rule({ id: "a", actions: [{ type: "source", action: "mark_spam" }] }),
-            rule({ id: "b", actions: [{ type: "source", action: "mark_spam" }, { type: "source", action: "label_email", label: "Pubs" }] }),
+            rule({
+                id: "b",
+                actions: [
+                    { type: "source", action: "mark_spam" },
+                    { type: "source", action: "label_email", label: "Pubs" },
+                ],
+            }),
         ];
         expect(evaluateGuard(mail(), rules, noVip).source).toEqual([
             { ruleId: "a", action: "mark_spam" },
@@ -225,7 +231,14 @@ describe("evaluateGuard — actions at the source", () => {
 
     it("a VIP is never archived, trashed or reported by a rule — a label still applies", () => {
         const isVip = makeVipMatcher(["deals@mail.aliexpress.com"]);
-        const rules = [rule({ actions: [{ type: "source", action: "delete_email" }, { type: "source", action: "star_email" }] })];
+        const rules = [
+            rule({
+                actions: [
+                    { type: "source", action: "delete_email" },
+                    { type: "source", action: "star_email" },
+                ],
+            }),
+        ];
         const v = evaluateGuard(mail(), rules, isVip);
         expect(v.source).toEqual([{ ruleId: "r1", action: "star_email" }]);
         expect(v.vipProtected).toBe(true);

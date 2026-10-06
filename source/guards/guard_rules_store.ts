@@ -139,7 +139,10 @@ function parseAction(raw: unknown, where: string): GuardAction | Fail {
     if (raw["type"] === "source") {
         const action = raw["action"];
         if (!SOURCE_KINDS.includes(action as RuleSourceKind))
-            return fail(`${where}: source.action must be one of ${SOURCE_KINDS.join(", ")}`, "invalid_action");
+            return fail(
+                `${where}: source.action must be one of ${SOURCE_KINDS.join(", ")}`,
+                "invalid_action",
+            );
         if (action === "label_email") {
             const label = str(raw["label"], MAX_TAG);
             return label
@@ -331,7 +334,9 @@ export class GuardRulesStore {
     }
 
     /** Adds one rule (a confirmed proposal) at the end of the list, validated like the rest. */
-    async add(input: unknown): Promise<{ ok: true; version: number; id: string } | { ok: false; error: string }> {
+    async add(
+        input: unknown,
+    ): Promise<{ ok: true; version: number; id: string } | { ok: false; error: string }> {
         const parsed = validateRules([...this.rules, input]);
         if (!parsed.ok) return parsed;
         this.rules = parsed.rules;

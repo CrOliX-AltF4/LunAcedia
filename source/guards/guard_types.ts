@@ -24,7 +24,11 @@ export type GuardCondition =
 export type { RuleSourceKind };
 
 /** The source actions that take a mail out of the inbox — never applied to a VIP. */
-export const REMOVING_SOURCE_KINDS: ReadonlySet<RuleSourceKind> = new Set(["archive_email", "delete_email", "mark_spam"]);
+export const REMOVING_SOURCE_KINDS: ReadonlySet<RuleSourceKind> = new Set([
+    "archive_email",
+    "delete_email",
+    "mark_spam",
+]);
 
 export type GuardAction =
     | { type: "drop" }

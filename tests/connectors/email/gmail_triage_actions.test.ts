@@ -30,7 +30,8 @@ function gmail(labels: Array<{ id: string; name: string }> = []): { calls: Call[
             if (u.endsWith("/labels") && method === "POST")
                 return Promise.resolve({
                     ok: true,
-                    json: () => Promise.resolve({ id: "Label_new", name: (body as { name: string }).name }),
+                    json: () =>
+                        Promise.resolve({ id: "Label_new", name: (body as { name: string }).name }),
                 });
             return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
         }),
@@ -63,7 +64,10 @@ describe("GmailConnector — spam, star and labels", () => {
     it("unmark_spam brings it back to the inbox", async () => {
         const { calls } = gmail();
         await new GmailConnector().executeAction({ kind: "unmark_spam", sourceId: "m1" });
-        expect(modifies(calls)[0]!.body).toEqual({ addLabelIds: ["INBOX"], removeLabelIds: ["SPAM"] });
+        expect(modifies(calls)[0]!.body).toEqual({
+            addLabelIds: ["INBOX"],
+            removeLabelIds: ["SPAM"],
+        });
     });
 
     it("star_email and unstar_email set and clear the star", async () => {
@@ -79,14 +83,22 @@ describe("GmailConnector — spam, star and labels", () => {
 
     it("label_email uses an existing label, matched by name whatever the case", async () => {
         const { calls } = gmail([{ id: "Label_7", name: "Factures" }]);
-        await new GmailConnector().executeAction({ kind: "label_email", sourceId: "m1", label: "factures" });
+        await new GmailConnector().executeAction({
+            kind: "label_email",
+            sourceId: "m1",
+            label: "factures",
+        });
         expect(calls.some((c) => c.url.endsWith("/labels") && c.method === "POST")).toBe(false);
         expect(modifies(calls)[0]!.body).toEqual({ addLabelIds: ["Label_7"] });
     });
 
     it("label_email creates the label when Gmail has none by that name", async () => {
         const { calls } = gmail();
-        await new GmailConnector().executeAction({ kind: "label_email", sourceId: "m1", label: "Pubs" });
+        await new GmailConnector().executeAction({
+            kind: "label_email",
+            sourceId: "m1",
+            label: "Pubs",
+        });
         const created = calls.find((c) => c.url.endsWith("/labels") && c.method === "POST");
         expect(created?.body).toEqual({ name: "Pubs" });
         expect(modifies(calls)[0]!.body).toEqual({ addLabelIds: ["Label_new"] });
@@ -103,9 +115,15 @@ describe("GmailConnector — spam, star and labels", () => {
 
     it("the « spam » gesture moves the mail to spam and takes it out of the box", async () => {
         const { calls } = gmail();
-        const event = { dedupeKey: "email-m1", meta: { messageId: "m1" } } as unknown as AcediaEvent;
+        const event = {
+            dedupeKey: "email-m1",
+            meta: { messageId: "m1" },
+        } as unknown as AcediaEvent;
         const result = await new GmailConnector().inboxGesture("spam", event);
         expect(result).toEqual({ change: "removed" });
-        expect(modifies(calls)[0]!.body).toEqual({ addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] });
+        expect(modifies(calls)[0]!.body).toEqual({
+            addLabelIds: ["SPAM"],
+            removeLabelIds: ["INBOX"],
+        });
     });
 });

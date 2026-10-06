@@ -71,7 +71,9 @@ const HISTORICAL_RISK = {
 describe("capability manifests", () => {
     it("names every action once, in Master's words — the one label push, dashboard and Core show", () => {
         for (const a of actionCapabilities()) expect(a.label, a.kind).toMatch(/^[A-ZÀ-Ý]/);
-        expect(new Set(actionCapabilities().map((a) => a.label)).size).toBe(actionCapabilities().length);
+        expect(new Set(actionCapabilities().map((a) => a.label)).size).toBe(
+            actionCapabilities().length,
+        );
     });
 
     it("declares every action kind exactly once", () => {

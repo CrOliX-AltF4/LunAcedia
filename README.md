@@ -182,8 +182,8 @@ A deterministic stage between a connector's poll and the box. You write **rules*
 **conditions** (ANDed) and **actions**. No free-form regex and no model here — mail content is untrusted data, so the
 guard only compares text and reads metadata.
 
-| Conditions                                                                                                                                                                                                                            | Actions                               |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Conditions                                                                                                                                                                                                                            | Actions                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `from` equals / contains / **domain** (subdomains included) · `subject` contains · `snippet` contains (Gmail's 200-character preview, not the body) · `label` equals (`CATEGORY_PROMOTIONS`…) · `header` present (`List-Unsubscribe`) | **drop** · **tag** · **set_priority** · **at the source**: archive, trash, spam, mark read, star, label |
 
 - **Nothing is dropped by default.**

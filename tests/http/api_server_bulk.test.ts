@@ -72,7 +72,10 @@ describe("AcediaApiServer — bulk_email", () => {
             mail("3", "info@banque.fr"),
         ])
             store.push(e);
-        const tierStore = new ActionTierStore(path.join(dir, "tiers.json"), path.join(dir, "overrides.json"));
+        const tierStore = new ActionTierStore(
+            path.join(dir, "tiers.json"),
+            path.join(dir, "overrides.json"),
+        );
         if (tiers) await tierStore.patch(tiers);
         const executed: ConnectorAction[] = [];
         const gmail: IConnector = {
@@ -112,7 +115,12 @@ describe("AcediaApiServer — bulk_email", () => {
     const spamAli = {
         connector: "Gmail",
         // ids slipped in by a caller are never kept: the selection is LunAcedia's own
-        action: { kind: "bulk_email", action: "mark_spam", match: { fromContains: "aliexpress" }, sourceIds: ["3"] },
+        action: {
+            kind: "bulk_email",
+            action: "mark_spam",
+            match: { fromContains: "aliexpress" },
+            sourceIds: ["3"],
+        },
     };
 
     it("freezes the matching mails and waits, even with the tier on auto", async () => {
@@ -123,7 +131,9 @@ describe("AcediaApiServer — bulk_email", () => {
         const [pending] = (await call("GET", `${base}/api/actions/pending`)).body;
         expect(pending.action.sourceIds).toEqual(["2", "1"]);
         expect(pending.action.matched).toBe(2);
-        expect(pending.summary).toBe("Mettre un mail en indésirable × 2 — expéditeur contenant « aliexpress »");
+        expect(pending.summary).toBe(
+            "Mettre un mail en indésirable × 2 — expéditeur contenant « aliexpress »",
+        );
     });
 
     it("confirmed, it acts on the frozen mails and they leave the box", async () => {
@@ -148,7 +158,11 @@ describe("AcediaApiServer — bulk_email", () => {
         const { base } = await start();
         const r = await call("POST", `${base}/api/actions`, {
             connector: "Gmail",
-            action: { kind: "bulk_email", action: "archive_email", match: { fromContains: "nobody" } },
+            action: {
+                kind: "bulk_email",
+                action: "archive_email",
+                match: { fromContains: "nobody" },
+            },
         });
         expect(r.status).toBe(403);
         expect(r.body.error).toMatch(/no mail of the box matches/);
@@ -156,7 +170,9 @@ describe("AcediaApiServer — bulk_email", () => {
 
     it("previews a selection without acting: how many, and a sample", async () => {
         const { base, executed } = await start();
-        const r = await call("POST", `${base}/api/inbox/select`, { match: { fromContains: "aliexpress" } });
+        const r = await call("POST", `${base}/api/inbox/select`, {
+            match: { fromContains: "aliexpress" },
+        });
         expect(r.status).toBe(200);
         expect(r.body).toMatchObject({ matched: 2, limit: 200 });
         expect(r.body.sample.map((s: { key: string }) => s.key)).toEqual(["email-2", "email-1"]);
@@ -167,7 +183,12 @@ describe("AcediaApiServer — bulk_email", () => {
     describe("create_rule", () => {
         const ruleAli = {
             connector: "Gmail",
-            action: { kind: "create_rule", name: "AliExpress", match: { fromContains: "aliexpress" }, action: "mark_spam" },
+            action: {
+                kind: "create_rule",
+                name: "AliExpress",
+                match: { fromContains: "aliexpress" },
+                action: "mark_spam",
+            },
         };
 
         it("is held for Master whatever its tier, said in words, and changes no rule until confirmed", async () => {
@@ -204,7 +225,12 @@ describe("AcediaApiServer — bulk_email", () => {
             expect(none.status).toBe(403);
             const noLabel = await call("POST", `${base}/api/actions`, {
                 connector: "Gmail",
-                action: { kind: "create_rule", name: "L", match: { fromDomain: "x.com" }, action: "label_email" },
+                action: {
+                    kind: "create_rule",
+                    name: "L",
+                    match: { fromDomain: "x.com" },
+                    action: "label_email",
+                },
             });
             expect(noLabel.status).toBe(403);
         });

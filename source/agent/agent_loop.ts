@@ -149,7 +149,12 @@ function whyUnavailable(req: AgentRequest, allowWrites: boolean): string[] {
     return [];
 }
 
-function systemPrompt(persona: string, now: number, unavailable: string[], why: string[] = []): string {
+function systemPrompt(
+    persona: string,
+    now: number,
+    unavailable: string[],
+    why: string[] = [],
+): string {
     return [
         persona,
         "",
@@ -373,10 +378,15 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         content = JSON.stringify({ status: "refused", reason });
                     } else {
                         actionAttempts++;
-                        const dispatched = await deps.dispatch(built.connector, built.action, external);
+                        const dispatched = await deps.dispatch(
+                            built.connector,
+                            built.action,
+                            external,
+                        );
                         const outcome = toActionStatus(dispatched);
                         const kept =
-                            (dispatched.status === "pending" || dispatched.status === "executed") && dispatched.action
+                            (dispatched.status === "pending" || dispatched.status === "executed") &&
+                            dispatched.action
                                 ? dispatched.action
                                 : built.action;
                         const summary = summarizeAction(kept);

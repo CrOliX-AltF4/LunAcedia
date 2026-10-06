@@ -311,12 +311,19 @@ describe("runAgent — bounded tool loop", () => {
 
     it("offers reply while writes are off — the first write opened (CrOliX, 2026-10-06)", async () => {
         const { provider } = scripted([
-            { content: null, toolCalls: [call("c1", "reply", { sourceId: "1", body: "Merci, c'est noté." })] },
+            {
+                content: null,
+                toolCalls: [call("c1", "reply", { sourceId: "1", body: "Merci, c'est noté." })],
+            },
             { content: "Réponse prête, à confirmer.", toolCalls: [] },
         ]);
         const d = { ...deps(provider), allowWrites: false };
         await runAgent({ text: "réponds-lui que c'est noté", untrusted: true }, d);
-        expect(d.dispatch).toHaveBeenCalledWith("Gmail", { kind: "reply", sourceId: "1", body: "Merci, c'est noté." }, true);
+        expect(d.dispatch).toHaveBeenCalledWith(
+            "Gmail",
+            { kind: "reply", sourceId: "1", body: "Merci, c'est noté." },
+            true,
+        );
     });
 
     it("passes the caller's context to the model as context, not as the request", async () => {

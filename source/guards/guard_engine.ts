@@ -1,5 +1,10 @@
 import type { AcediaEvent } from "../types/acedia_event.js";
-import { REMOVING_SOURCE_KINDS, type GuardCondition, type GuardRule, type GuardVerdict } from "./guard_types.js";
+import {
+    REMOVING_SOURCE_KINDS,
+    type GuardCondition,
+    type GuardRule,
+    type GuardVerdict,
+} from "./guard_types.js";
 
 /** Neutral, connector-independent view of an event — rules are written against this, never
  *  against a connector's own types, so the same engine serves every source. */
@@ -71,7 +76,10 @@ function conditionMatches(c: GuardCondition, view: EventView): boolean {
 }
 
 /** Every condition holds (and there is at least one) — the matcher a guard rule and a selection share. */
-export function conditionsMatch(conditions: readonly GuardCondition[], event: AcediaEvent): boolean {
+export function conditionsMatch(
+    conditions: readonly GuardCondition[],
+    event: AcediaEvent,
+): boolean {
     const view = viewOf(event);
     return conditions.length > 0 && conditions.every((c) => conditionMatches(c, view));
 }

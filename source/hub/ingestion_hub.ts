@@ -281,7 +281,9 @@ export class IngestionHub {
             try {
                 const events = await connector.poll();
                 this.recordSuccess(connector);
-                for (const e of (await this.applyGuard(events)).filter((e) => e.priority === "urgent")) {
+                for (const e of (await this.applyGuard(events)).filter(
+                    (e) => e.priority === "urgent",
+                )) {
                     this.dispatch(e);
                 }
             } catch (err) {

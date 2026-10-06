@@ -22,7 +22,11 @@ function gmail(): Call[] {
                     json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
                 });
             const method = opts?.method ?? "GET";
-            calls.push({ url: u, method, body: opts?.body ? JSON.parse(String(opts.body)) : undefined });
+            calls.push({
+                url: u,
+                method,
+                body: opts?.body ? JSON.parse(String(opts.body)) : undefined,
+            });
             if (u.endsWith("/labels") && method === "GET")
                 return Promise.resolve({
                     ok: true,
@@ -83,7 +87,12 @@ describe("GmailConnector — bulk_email", () => {
             match: { fromContains: "x" },
             sourceIds: ["1", "2"],
         });
-        expect(calls.filter((c) => c.url.endsWith("/trash")).map((c) => c.url).sort()).toEqual([
+        expect(
+            calls
+                .filter((c) => c.url.endsWith("/trash"))
+                .map((c) => c.url)
+                .sort(),
+        ).toEqual([
             expect.stringContaining("/messages/1/trash"),
             expect.stringContaining("/messages/2/trash"),
         ]);
@@ -92,7 +101,11 @@ describe("GmailConnector — bulk_email", () => {
     it("refuses a batch whose ids were never frozen", async () => {
         gmail();
         await expect(
-            new GmailConnector().executeAction({ kind: "bulk_email", action: "archive_email", match: { fromContains: "x" } }),
+            new GmailConnector().executeAction({
+                kind: "bulk_email",
+                action: "archive_email",
+                match: { fromContains: "x" },
+            }),
         ).rejects.toThrow(/no mail/);
     });
 });

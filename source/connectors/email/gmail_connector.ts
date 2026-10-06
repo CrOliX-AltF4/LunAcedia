@@ -76,7 +76,11 @@ const LABEL_CHANGES: Record<
 };
 
 function isLabelMutation(action: ConnectorAction): action is LabelMutation {
-    return action.kind in LABEL_CHANGES || action.kind === "label_email" || action.kind === "unlabel_email";
+    return (
+        action.kind in LABEL_CHANGES ||
+        action.kind === "label_email" ||
+        action.kind === "unlabel_email"
+    );
 }
 
 /**
@@ -420,7 +424,8 @@ export class GmailConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "reply" && action.kind !== "bulk_email" && !isLabelMutation(action)) return;
+        if (action.kind !== "reply" && action.kind !== "bulk_email" && !isLabelMutation(action))
+            return;
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
@@ -506,7 +511,10 @@ export class GmailConnector implements IConnector {
         if (action.kind === "label_email" || action.kind === "unlabel_email") {
             const labelId = await this.labelId(token, action.label, action.kind === "label_email");
             if (!labelId) return; // removing a label Gmail does not have: nothing to do
-            body = action.kind === "label_email" ? { addLabelIds: [labelId] } : { removeLabelIds: [labelId] };
+            body =
+                action.kind === "label_email"
+                    ? { addLabelIds: [labelId] }
+                    : { removeLabelIds: [labelId] };
         } else {
             body = LABEL_CHANGES[action.kind];
         }
@@ -545,12 +553,15 @@ export class GmailConnector implements IConnector {
                     await this.modifyMessage(token, { kind: "delete_email", sourceId: id });
                 }
             };
-            await Promise.all(Array.from({ length: Math.min(TRASH_READ_CONCURRENCY, ids.length) }, worker));
+            await Promise.all(
+                Array.from({ length: Math.min(TRASH_READ_CONCURRENCY, ids.length) }, worker),
+            );
             return;
         }
         let change: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined;
         if (action.action === "label_email") {
-            if (!action.label?.trim()) throw new Error("[Gmail] bulk_email: label_email needs a label");
+            if (!action.label?.trim())
+                throw new Error("[Gmail] bulk_email: label_email needs a label");
             const labelId = await this.labelId(token, action.label, true);
             change = { addLabelIds: [labelId!] };
         } else {
@@ -569,7 +580,9 @@ export class GmailConnector implements IConnector {
         const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
         const list = await fetch(`${GMAIL_API}/labels`, { headers });
         await assertHttpOk(list, "[Gmail] list labels");
-        const { labels = [] } = (await list.json()) as { labels?: Array<{ id: string; name: string }> };
+        const { labels = [] } = (await list.json()) as {
+            labels?: Array<{ id: string; name: string }>;
+        };
         const wanted = name.trim().toLowerCase();
         const found = labels.find((l) => l.name.toLowerCase() === wanted);
         if (found) return found.id;

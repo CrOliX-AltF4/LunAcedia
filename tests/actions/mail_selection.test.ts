@@ -6,7 +6,12 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 // « Tous les mails qui viennent d'aliexpress »: the box's mails that match, the same structured conditions
 // as the guards — never a regex, never a model.
 
-function mail(id: string, from: string, title = `Mail ${id}`, ts = 1_000 + Number(id)): AcediaEvent {
+function mail(
+    id: string,
+    from: string,
+    title = `Mail ${id}`,
+    ts = 1_000 + Number(id),
+): AcediaEvent {
     return {
         type: "email.received",
         ts,
@@ -49,7 +54,9 @@ describe("selectMail", () => {
     });
 
     it("ANDs the criteria", () => {
-        expect(selectMail(store, { fromContains: "aliexpress", subjectContains: "soldes" }).sourceIds).toEqual(["1"]);
+        expect(
+            selectMail(store, { fromContains: "aliexpress", subjectContains: "soldes" }).sourceIds,
+        ).toEqual(["1"]);
     });
 
     it("selects nothing without a criterion — never the whole box", () => {
@@ -58,7 +65,9 @@ describe("selectMail", () => {
     });
 
     it(`stops at ${BULK_LIMIT} mails and says how many matched`, () => {
-        const many = box(Array.from({ length: BULK_LIMIT + 5 }, (_, i) => mail(String(i + 1), "spam@pub.com")));
+        const many = box(
+            Array.from({ length: BULK_LIMIT + 5 }, (_, i) => mail(String(i + 1), "spam@pub.com")),
+        );
         const s = selectMail(many, { fromDomain: "pub.com" });
         expect(s.sourceIds).toHaveLength(BULK_LIMIT);
         expect(s.matched).toBe(BULK_LIMIT + 5);
@@ -68,7 +77,9 @@ describe("selectMail", () => {
 
 describe("describeMatch", () => {
     it("says the criteria in words", () => {
-        expect(describeMatch({ fromContains: "aliexpress" })).toBe("expéditeur contenant « aliexpress »");
+        expect(describeMatch({ fromContains: "aliexpress" })).toBe(
+            "expéditeur contenant « aliexpress »",
+        );
         expect(describeMatch({ fromDomain: "pub.com", subjectContains: "promo" })).toBe(
             "domaine « pub.com », sujet contenant « promo »",
         );

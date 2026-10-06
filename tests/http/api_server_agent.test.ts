@@ -171,18 +171,30 @@ describe("AcediaApiServer — agent routes", () => {
 
         it("proposes a batch on the box's matching mails, with what it would touch in words", async () => {
             const executed: ConnectorAction[] = [];
-            const ali = (id: string): AcediaEvent => ({ ...mail(id), meta: { messageId: id, from: "promo@aliexpress.com" } });
+            const ali = (id: string): AcediaEvent => ({
+                ...mail(id),
+                meta: { messageId: id, from: "promo@aliexpress.com" },
+            });
             const ai = scripted([
                 {
                     content: null,
                     toolCalls: [
-                        toolCall("bulk_email", { action: "mark_spam", match: { fromContains: "aliexpress" } }),
+                        toolCall("bulk_email", {
+                            action: "mark_spam",
+                            match: { fromContains: "aliexpress" },
+                        }),
                     ],
                 },
                 { content: "2 mails à confirmer.", toolCalls: [] },
             ]);
-            const base = await start({ ai, events: [ali("1"), ali("2"), mail("3")], connectors: [connector("Gmail", executed)] });
-            const r = await call("POST", `${base}/api/agent`, { text: "tout aliexpress en indésirable" });
+            const base = await start({
+                ai,
+                events: [ali("1"), ali("2"), mail("3")],
+                connectors: [connector("Gmail", executed)],
+            });
+            const r = await call("POST", `${base}/api/agent`, {
+                text: "tout aliexpress en indésirable",
+            });
             expect(executed).toEqual([]);
             expect(r.body.actions[0]).toMatchObject({
                 kind: "bulk_email",

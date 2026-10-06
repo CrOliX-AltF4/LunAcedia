@@ -51,7 +51,12 @@ import {
     exchangeGoogleCode,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
-import { BULK_LIMIT, selectMail, ruleFromAction, type MailMatch } from "../actions/mail_selection.js";
+import {
+    BULK_LIMIT,
+    selectMail,
+    ruleFromAction,
+    type MailMatch,
+} from "../actions/mail_selection.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
@@ -352,7 +357,8 @@ export class AcediaApiServer {
                 return json(res, 400, { error: "Invalid JSON" });
             }
             const enabled = (body as { enabled?: unknown } | null)?.enabled;
-            if (typeof enabled !== "boolean") return json(res, 400, { error: "Body must be { enabled: boolean }" });
+            if (typeof enabled !== "boolean")
+                return json(res, 400, { error: "Body must be { enabled: boolean }" });
             await g.rules.setSourceActionsEnabled(enabled);
             return json(res, 200, { enabled: g.rules.sourceActionsEnabled() });
         }
@@ -360,7 +366,8 @@ export class AcediaApiServer {
         if (method === "GET" && path === "/api/guard/actions") {
             const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
             return json(res, 200, {
-                entries: g.ruleActions?.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)) ?? [],
+                entries:
+                    g.ruleActions?.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)) ?? [],
             });
         }
 
@@ -483,8 +490,13 @@ export class AcediaApiServer {
         }
         try {
             if (action.kind === "create_rule") {
-                const added = this.guards ? await this.guards.rules.add(ruleFromAction(action)) : null;
-                if (!added?.ok) return json(res, 409, { error: `Rule not added: ${added ? added.error : "no rules here"}` });
+                const added = this.guards
+                    ? await this.guards.rules.add(ruleFromAction(action))
+                    : null;
+                if (!added?.ok)
+                    return json(res, 409, {
+                        error: `Rule not added: ${added ? added.error : "no rules here"}`,
+                    });
                 return json(res, 204, null);
             }
             await connector.executeAction!(action);
@@ -538,9 +550,11 @@ export class AcediaApiServer {
         // A rule for the mails to come always waits too, and must already be a valid rule.
         let batch = false;
         if (action.kind === "create_rule") {
-            if (!this.guards) return { status: "refused", reason: "rules are not available on this deployment" };
+            if (!this.guards)
+                return { status: "refused", reason: "rules are not available on this deployment" };
             const check = validateRules([...this.guards.rules.getRules(), ruleFromAction(action)]);
-            if (!check.ok) return { status: "refused", reason: `not a valid rule — ${check.error}` };
+            if (!check.ok)
+                return { status: "refused", reason: `not a valid rule — ${check.error}` };
             batch = true;
         }
         if (action.kind === "bulk_email") {
@@ -920,9 +934,15 @@ export class AcediaApiServer {
             }
             const match = (body as Record<string, unknown> | null)?.["match"];
             if (typeof match !== "object" || match === null)
-                return json(res, 400, { error: "Body must be { match: { from?, fromContains?, fromDomain?, subjectContains? } }" });
+                return json(res, 400, {
+                    error: "Body must be { match: { from?, fromContains?, fromDomain?, subjectContains? } }",
+                });
             const selection = selectMail(this.store, match as MailMatch);
-            return json(res, 200, { matched: selection.matched, limit: BULK_LIMIT, sample: selection.sample });
+            return json(res, 200, {
+                matched: selection.matched,
+                limit: BULK_LIMIT,
+                sample: selection.sample,
+            });
         }
 
         // GET /api/actions/pending

@@ -62,7 +62,9 @@ export class RuleActionJournal {
                 await fs.mkdir(path.dirname(this.filePath), { recursive: true });
                 await fs.appendFile(this.filePath, `${JSON.stringify(entry)}\n`, "utf-8");
             })
-            .catch((e: unknown) => console.error("[Rules] journal write failed:", (e as Error).message));
+            .catch((e: unknown) =>
+                console.error("[Rules] journal write failed:", (e as Error).message),
+            );
     }
 
     list(limit = 100): RuleActionEntry[] {
@@ -97,7 +99,9 @@ export function createRuleActor(deps: RuleActorDeps) {
         const from = typeof event.meta?.["from"] === "string" ? (event.meta["from"] as string) : "";
         // What keeps the mail (a label, a star, read) before what takes it out of the inbox.
         const ordered = [...actions].sort(
-            (x, y) => Number(REMOVING_SOURCE_KINDS.has(x.action)) - Number(REMOVING_SOURCE_KINDS.has(y.action)),
+            (x, y) =>
+                Number(REMOVING_SOURCE_KINDS.has(x.action)) -
+                Number(REMOVING_SOURCE_KINDS.has(y.action)),
         );
         for (const a of ordered) {
             const action = (
@@ -123,7 +127,9 @@ export function createRuleActor(deps: RuleActorDeps) {
                 if (result.removed) break;
             } catch (e) {
                 const error = (e as Error).message;
-                console.error(`[Rules] ${a.ruleId}: ${a.action} on ${event.dedupeKey} failed — ${error}`);
+                console.error(
+                    `[Rules] ${a.ruleId}: ${a.action} on ${event.dedupeKey} failed — ${error}`,
+                );
                 deps.journal.record({ ...base, ok: false, error });
             }
         }

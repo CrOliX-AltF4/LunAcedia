@@ -43,7 +43,12 @@ export type ConnectorAction =
     | {
           kind: "bulk_email";
           action: BulkEmailKind;
-          match: { from?: string; fromContains?: string; fromDomain?: string; subjectContains?: string };
+          match: {
+              from?: string;
+              fromContains?: string;
+              fromDomain?: string;
+              subjectContains?: string;
+          };
           label?: string;
           sourceIds?: string[];
           matched?: number;
@@ -52,7 +57,12 @@ export type ConnectorAction =
     | {
           kind: "create_rule";
           name: string;
-          match: { from?: string; fromContains?: string; fromDomain?: string; subjectContains?: string };
+          match: {
+              from?: string;
+              fromContains?: string;
+              fromDomain?: string;
+              subjectContains?: string;
+          };
           action: RuleSourceKind;
           label?: string;
       }

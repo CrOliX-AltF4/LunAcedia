@@ -114,15 +114,27 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         const off = await call("PUT", `${base}/api/guard/source-actions`, { enabled: false });
         expect(off).toEqual({ status: 200, body: { enabled: false } });
         expect((await call("GET", `${base}/api/guard/rules`)).body.sourceActions).toBe(false);
-        expect((await call("PUT", `${base}/api/guard/source-actions`, { enabled: "no" })).status).toBe(400);
+        expect(
+            (await call("PUT", `${base}/api/guard/source-actions`, { enabled: "no" })).status,
+        ).toBe(400);
     });
 
     it("lists what rules did at the source, newest first", async () => {
         const { base, guards } = await start();
-        guards.ruleActions!.record({ ts: 1, ruleId: "r", action: "mark_spam", key: "email-1", title: "Soldes", from: "x@ali.com", ok: true });
+        guards.ruleActions!.record({
+            ts: 1,
+            ruleId: "r",
+            action: "mark_spam",
+            key: "email-1",
+            title: "Soldes",
+            from: "x@ali.com",
+            ok: true,
+        });
         const r = await call("GET", `${base}/api/guard/actions`);
         expect(r.status).toBe(200);
-        expect(r.body.entries).toEqual([expect.objectContaining({ ruleId: "r", action: "mark_spam", ok: true })]);
+        expect(r.body.entries).toEqual([
+            expect.objectContaining({ ruleId: "r", action: "mark_spam", ok: true }),
+        ]);
     });
 
     it("starts with no rule and version 0", async () => {

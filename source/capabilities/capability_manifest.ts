@@ -80,8 +80,14 @@ const MAIL_MATCH: ObjectSchema = {
     description: "Which mails: at least one criterion, all of them must hold.",
     properties: {
         from: { type: "string", description: "Exact sender address." },
-        fromContains: { type: "string", description: 'Text the sender contains, e.g. "aliexpress".' },
-        fromDomain: { type: "string", description: 'Sender domain, subdomains included, e.g. "aliexpress.com".' },
+        fromContains: {
+            type: "string",
+            description: 'Text the sender contains, e.g. "aliexpress".',
+        },
+        fromDomain: {
+            type: "string",
+            description: 'Sender domain, subdomains included, e.g. "aliexpress.com".',
+        },
         subjectContains: { type: "string", description: "Text the subject contains." },
     },
 };
@@ -201,7 +207,8 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             {
                 kind: "label_email",
                 label: "Ajouter un libellé Gmail",
-                description: "Add a Gmail label to an email, by the label's name (created if it does not exist).",
+                description:
+                    "Add a Gmail label to an email, by the label's name (created if it does not exist).",
                 params: labelParams('Label name, e.g. "Factures".'),
                 defaultTier: "confirm",
                 risk: "low",
@@ -223,7 +230,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 label: "Traiter un lot de mails",
                 description:
                     "Apply one sorting action to EVERY mail of the box that matches the criteria (ANDed, at least one) — " +
-                    "e.g. all mails whose sender contains \"aliexpress\" to spam. Prefer it over repeating a single action. " +
+                    'e.g. all mails whose sender contains "aliexpress" to spam. Prefer it over repeating a single action. ' +
                     "It always waits for the user's confirmation, with the number of mails it would touch.",
                 params: {
                     type: "object",
@@ -234,7 +241,10 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                             description: "The sorting to apply to each matching mail.",
                         },
                         match: MAIL_MATCH,
-                        label: { type: "string", description: "Label name — only with action label_email." },
+                        label: {
+                            type: "string",
+                            description: "Label name — only with action label_email.",
+                        },
                     },
                     required: ["action", "match"],
                 },
@@ -253,10 +263,21 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 params: {
                     type: "object",
                     properties: {
-                        name: { type: "string", minLength: 1, description: 'A short name, e.g. "AliExpress en indésirable".' },
+                        name: {
+                            type: "string",
+                            minLength: 1,
+                            description: 'A short name, e.g. "AliExpress en indésirable".',
+                        },
                         match: MAIL_MATCH,
-                        action: { type: "string", enum: RULE_SOURCE_KINDS, description: "What to do to each matching mail." },
-                        label: { type: "string", description: "Label name — only with action label_email." },
+                        action: {
+                            type: "string",
+                            enum: RULE_SOURCE_KINDS,
+                            description: "What to do to each matching mail.",
+                        },
+                        label: {
+                            type: "string",
+                            description: "Label name — only with action label_email.",
+                        },
                     },
                     required: ["name", "match", "action"],
                 },
