@@ -120,6 +120,7 @@ describe("runAgent — bounded tool loop", () => {
                 action: { kind: "create_task", fields: { title: "Appeler Paul" } },
                 status: "pending",
                 id: "p1",
+                summary: "Créer une tâche — Appeler Paul",
             },
         ]);
     });

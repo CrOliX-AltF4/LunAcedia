@@ -10,7 +10,7 @@ import { DEFAULT_ACTION_TIERS, ACTION_RISK } from "../../source/types/action_tie
 // The values in force before the manifest existed (v0.9.0) — deriving them from the manifest must
 // change nothing for an existing install. Deliberate changes since, each with its decision:
 //   delete_email manual → confirm, high → medium: it is Gmail's trash, kept 30 days (CrOliX, 2026-10-06);
-//   mark_spam, unmark_spam, star_email, unstar_email, label_email, unlabel_email: added the same day.
+//   mark_spam, unmark_spam, star_email, unstar_email, label_email, unlabel_email, bulk_email: added the same day.
 const HISTORICAL_TIERS = {
     reply: "confirm",
     archive_email: "confirm",
@@ -21,6 +21,7 @@ const HISTORICAL_TIERS = {
     unstar_email: "confirm",
     label_email: "confirm",
     unlabel_email: "confirm",
+    bulk_email: "confirm",
     mark_email_read: "confirm",
     mark_email_unread: "confirm",
     create_event: "confirm",
@@ -50,6 +51,7 @@ const HISTORICAL_RISK = {
     label_email: "low",
     unlabel_email: "low",
     delete_email: "medium",
+    bulk_email: "medium",
     reply: "medium",
     comment_issue: "medium",
     add_label: "medium",
@@ -171,6 +173,7 @@ describe("triage vs write actions", () => {
         "unstar_email",
         "label_email",
         "unlabel_email",
+        "bulk_email",
         "mark_notification_read",
     ];
 

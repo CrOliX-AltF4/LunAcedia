@@ -22,10 +22,12 @@ import {
     runReadTool,
     type ReadToolDeps,
 } from "../capabilities/read_tools.js";
+import { summarizeAction } from "../push/pending_push.js";
 
+/** `action`: the action as the gate kept it — a batch with its frozen selection. */
 export type DispatchOutcome =
-    | { status: "executed" }
-    | { status: "pending"; id: string; expiresAt: number }
+    | { status: "executed"; action?: ConnectorAction }
+    | { status: "pending"; id: string; expiresAt: number; action?: ConnectorAction }
     | { status: "refused"; reason: string }
     | { status: "error"; reason?: string }
     | { status: "not_found" }
@@ -93,6 +95,8 @@ export interface AgentAction {
     reason?: string;
     /** A pending action's deadline — after it nothing is done. */
     expiresAt?: number;
+    /** What it does or would do, in Master's words — what a client shows (« … × 37 — expéditeur contenant … »). */
+    summary?: string;
 }
 
 export interface AgentStep {
@@ -353,18 +357,23 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         content = JSON.stringify({ status: "refused", reason });
                     } else {
                         actionAttempts++;
-                        const outcome = toActionStatus(
-                            await deps.dispatch(built.connector, built.action, external),
-                        );
+                        const dispatched = await deps.dispatch(built.connector, built.action, external);
+                        const outcome = toActionStatus(dispatched);
+                        const kept =
+                            (dispatched.status === "pending" || dispatched.status === "executed") && dispatched.action
+                                ? dispatched.action
+                                : built.action;
+                        const summary = summarizeAction(kept);
                         step.ok = outcome.status !== "error";
                         if (outcome.reason) step.error = outcome.reason;
                         result.actions.push({
                             kind: built.action.kind,
                             connector: built.connector,
-                            action: built.action,
+                            action: kept,
                             ...outcome,
+                            summary,
                         });
-                        content = JSON.stringify(outcome);
+                        content = JSON.stringify({ ...outcome, summary });
                     }
                 } else {
                     step.error = `unknown tool '${call.name}'`;

@@ -70,6 +70,12 @@ function conditionMatches(c: GuardCondition, view: EventView): boolean {
     }
 }
 
+/** Every condition holds (and there is at least one) — the matcher a guard rule and a selection share. */
+export function conditionsMatch(conditions: readonly GuardCondition[], event: AcediaEvent): boolean {
+    const view = viewOf(event);
+    return conditions.length > 0 && conditions.every((c) => conditionMatches(c, view));
+}
+
 function ruleMatches(rule: GuardRule, view: EventView): boolean {
     // A rule without conditions would match everything — refuse it here as well as at validation.
     return (

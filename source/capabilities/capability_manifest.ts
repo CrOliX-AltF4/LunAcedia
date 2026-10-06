@@ -7,7 +7,7 @@
  * DEFAULT_ACTION_TIERS / ACTION_RISK (derived in action_tier.ts). The configuration half of the
  * manifest (instances, config schema, generated forms — K1b) comes with the Discord migration.
  */
-import type { ConnectorAction } from "../types/connector_action.js";
+import type { BulkEmailKind, ConnectorAction } from "../types/connector_action.js";
 import type { ActionKind, ActionRisk, ActionTier } from "../types/action_tier.js";
 import { CONNECTOR_REGISTRY, type ConnectorSlug } from "../connectors/connector_registry.js";
 import { validateArgs, type ObjectSchema } from "./json_schema.js";
@@ -66,6 +66,15 @@ const labelParams = (description: string): ObjectSchema => ({
     properties: { sourceId: id(MAIL_ID), label: id(description) },
     required: ["sourceId", "label"],
 });
+const BULK_EMAIL_KINDS: readonly BulkEmailKind[] = [
+    "archive_email",
+    "delete_email",
+    "mark_email_read",
+    "mark_email_unread",
+    "mark_spam",
+    "star_email",
+    "label_email",
+];
 const ISSUE_REF = '"owner/repo#number" of an existing issue or pull request.';
 
 export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
@@ -188,6 +197,46 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 params: labelParams("Label name, as shown in Gmail."),
                 defaultTier: "confirm",
                 risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "bulk_email",
+                label: "Traiter un lot de mails",
+                description:
+                    "Apply one sorting action to EVERY mail of the box that matches the criteria (ANDed, at least one) — " +
+                    "e.g. all mails whose sender contains \"aliexpress\" to spam. Prefer it over repeating a single action. " +
+                    "It always waits for the user's confirmation, with the number of mails it would touch.",
+                params: {
+                    type: "object",
+                    properties: {
+                        action: {
+                            type: "string",
+                            enum: BULK_EMAIL_KINDS,
+                            description: "The sorting to apply to each matching mail.",
+                        },
+                        match: {
+                            type: "object",
+                            description: "Which mails: at least one criterion, all of them must hold.",
+                            properties: {
+                                from: { type: "string", description: "Exact sender address." },
+                                fromContains: {
+                                    type: "string",
+                                    description: 'Text the sender contains, e.g. "aliexpress".',
+                                },
+                                fromDomain: {
+                                    type: "string",
+                                    description: 'Sender domain, subdomains included, e.g. "aliexpress.com".',
+                                },
+                                subjectContains: { type: "string", description: "Text the subject contains." },
+                            },
+                        },
+                        label: { type: "string", description: "Label name — only with action label_email." },
+                    },
+                    required: ["action", "match"],
+                },
+                defaultTier: "confirm",
+                risk: "medium",
                 agentAllowed: true,
                 category: "triage",
             },

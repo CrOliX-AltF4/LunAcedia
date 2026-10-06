@@ -50,6 +50,7 @@ import {
     exchangeGoogleCode,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
+import { BULK_LIMIT, selectMail, type MailMatch } from "../actions/mail_selection.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
@@ -117,6 +118,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  | 429 if the kind is on cooldown (see ActionCooldownTracker)
  *   POST /api/actions/:id/cancel   → 204, discards a pending action
  *   GET  /api/actions/pending      → PendingAction[]
+ *   POST /api/inbox/select         body: { match } → { matched, limit, sample } — what a bulk_email would touch
  *   GET  /api/config/tiers         → ActionTierConfig
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
  *   GET  /api/config/risk          → Record<ActionKind, ActionRisk> — static, not configurable
@@ -425,6 +427,18 @@ export class AcediaApiServer {
      *  /api/events actually serves) never heard about it. Best-effort: a no-op for actions
      *  with no derivable mapping (create_*, GitHub, reply) or no matching buffered event. */
     private syncStoreAfterAction(action: ConnectorAction): void {
+        if (action.kind === "bulk_email") {
+            // Each mail of the batch follows, as if acted on alone.
+            for (const sourceId of action.sourceIds ?? []) {
+                const one = (
+                    action.action === "label_email"
+                        ? { kind: "label_email", sourceId, label: action.label ?? "" }
+                        : { kind: action.action, sourceId }
+                ) as ConnectorAction;
+                this.syncStoreAfterAction(one);
+            }
+            return;
+        }
         const sync = resolveEventSync(action);
         if (!sync) return;
         if (sync.effect === "remove") this.store.remove(sync.dedupeKey);
@@ -472,8 +486,8 @@ export class AcediaApiServer {
         | { status: "not_found" }
         | { status: "unsupported" }
         | { status: "refused"; reason: string }
-        | { status: "pending"; id: string; expiresAt: number }
-        | { status: "executed" }
+        | { status: "pending"; id: string; expiresAt: number; action: ConnectorAction }
+        | { status: "executed"; action: ConnectorAction }
         | { status: "error" }
     > {
         const connector = this.connectors.find((c) => c.name === connectorName);
@@ -490,13 +504,22 @@ export class AcediaApiServer {
                 reason: `'${action.kind}' is set to manual — not executable via this endpoint`,
             };
         }
-        if (tier === "confirm" || (capToConfirm && tier === "auto")) {
+        // A batch: the selection is LunAcedia's own, frozen now (a caller's ids are dropped), and it always waits.
+        let batch = false;
+        if (action.kind === "bulk_email") {
+            const selection = selectMail(this.store, (action.match ?? {}) as MailMatch);
+            if (selection.sourceIds.length === 0)
+                return { status: "refused", reason: "no mail of the box matches these criteria" };
+            action = { ...action, sourceIds: selection.sourceIds, matched: selection.matched };
+            batch = true;
+        }
+        if (tier === "confirm" || batch || (capToConfirm && tier === "auto")) {
             // Durable, with its own delay; capToConfirm = a third party's text came first.
             const pending = this.pendingStore.create(connectorName, action, {
                 origin,
                 untrusted: capToConfirm,
             });
-            return { status: "pending", id: pending.id, expiresAt: pending.expiresAt };
+            return { status: "pending", id: pending.id, expiresAt: pending.expiresAt, action };
         }
         if (!this.cooldown.tryConsume(action.kind)) {
             return {
@@ -507,7 +530,7 @@ export class AcediaApiServer {
         try {
             await connector.executeAction(action);
             this.syncStoreAfterAction(action);
-            return { status: "executed" };
+            return { status: "executed", action };
         } catch (e) {
             console.error("[API] action error:", (e as Error).message);
             return { status: "error" };
@@ -848,6 +871,21 @@ export class AcediaApiServer {
                     error: "No such pending action (expired or already resolved)",
                 });
             return json(res, 204, null);
+        }
+
+        // POST /api/inbox/select — what a batch would touch, without acting (ADR-023 T2)
+        if (method === "POST" && path === "/api/inbox/select") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const match = (body as Record<string, unknown> | null)?.["match"];
+            if (typeof match !== "object" || match === null)
+                return json(res, 400, { error: "Body must be { match: { from?, fromContains?, fromDomain?, subjectContains? } }" });
+            const selection = selectMail(this.store, match as MailMatch);
+            return json(res, 200, { matched: selection.matched, limit: BULK_LIMIT, sample: selection.sample });
         }
 
         // GET /api/actions/pending

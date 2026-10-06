@@ -420,7 +420,7 @@ export class GmailConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (action.kind !== "reply" && !isLabelMutation(action)) return;
+        if (action.kind !== "reply" && action.kind !== "bulk_email" && !isLabelMutation(action)) return;
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
@@ -434,6 +434,10 @@ export class GmailConnector implements IConnector {
 
         if (isLabelMutation(action)) {
             await this.modifyMessage(token, action);
+            return;
+        }
+        if (action.kind === "bulk_email") {
+            await this.modifyBatch(token, action);
             return;
         }
 
@@ -524,6 +528,40 @@ export class GmailConnector implements IConnector {
             console.error(`[Gmail] ${action.kind} error:`, (e as Error).message);
             throw e;
         }
+    }
+
+    /** A frozen batch: one batchModify for label changes (Gmail takes up to 1000 ids), the trash mail by mail. */
+    private async modifyBatch(
+        token: string,
+        action: Extract<ConnectorAction, { kind: "bulk_email" }>,
+    ): Promise<void> {
+        const ids = action.sourceIds ?? [];
+        if (ids.length === 0) throw new Error("[Gmail] bulk_email: no mail was selected");
+        if (action.action === "delete_email") {
+            let next = 0;
+            const worker = async (): Promise<void> => {
+                while (next < ids.length) {
+                    const id = ids[next++]!;
+                    await this.modifyMessage(token, { kind: "delete_email", sourceId: id });
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(TRASH_READ_CONCURRENCY, ids.length) }, worker));
+            return;
+        }
+        let change: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined;
+        if (action.action === "label_email") {
+            if (!action.label?.trim()) throw new Error("[Gmail] bulk_email: label_email needs a label");
+            const labelId = await this.labelId(token, action.label, true);
+            change = { addLabelIds: [labelId!] };
+        } else {
+            change = LABEL_CHANGES[action.action];
+        }
+        const resp = await fetch(`${GMAIL_API}/messages/batchModify`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ ids, ...change }),
+        });
+        await assertHttpOk(resp, `[Gmail] bulk ${action.action} (${ids.length})`);
     }
 
     /** A user label's id, by name (case-insensitive); created when [create] and Gmail has none by that name. */
