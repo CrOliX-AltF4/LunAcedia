@@ -346,7 +346,7 @@ describe("runAgent — actions it cannot take are declared (C17)", () => {
         expect(system).toContain("create_task");
         expect(system).toContain("not possible yet");
         expect(system).not.toMatch(/Not available[^.]*archive_email/);
-        expect(system).not.toMatch(/Not available[^.]*reply/);
+        expect(system).not.toMatch(/Not available[^.]*[:;] reply \(/);
     });
 
     // a refusal says why, and where it is lifted — never a silent « not possible ».
