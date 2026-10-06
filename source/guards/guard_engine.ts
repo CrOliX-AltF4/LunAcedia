@@ -148,7 +148,10 @@ export function evaluateGuard(
                 }
                 firstEffectRuleId ??= rule.id;
             } else if (action.type === "set_priority") {
-                if (verdict.priority === undefined) verdict.priority = action.priority;
+                if (verdict.priority === undefined) {
+                    verdict.priority = action.priority;
+                    verdict.priorityRuleId = rule.id;
+                }
                 firstEffectRuleId ??= rule.id;
             } else if (action.type === "source") {
                 const key = `${action.action}:${action.label?.toLowerCase() ?? ""}`;

@@ -51,4 +51,7 @@ export interface AcediaEvent {
     tags?: string[];
     /** The guard rule that set `tags` / a priority on this event, so the user can trace it back. */
     ruleId?: string;
+    /** Why it has its priority, in words (« Gmail : important », « VIP », « règle « … » », « CI rouge sur main ») — what a
+     *  client shows. Absent: the source's plain default. */
+    priorityReason?: string;
 }

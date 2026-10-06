@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect } from "vitest";
-import { parseRules, classifyEmail } from "../../../source/connectors/email/email_rules.js";
+import { parseRules } from "../../../source/connectors/email/email_rules.js";
 
 describe("parseRules", () => {
     it("should parse a valid rules array", () => {
@@ -34,37 +34,5 @@ describe("parseRules", () => {
         ]);
         const rules = parseRules(raw);
         expect(rules[0]!.label).toBe("Work");
-    });
-});
-
-describe("classifyEmail", () => {
-    const rules = [
-        { senderPattern: "boss@corp.com", priority: "urgent" as const },
-        { senderPattern: "@corp.com", priority: "normal" as const },
-        { senderPattern: "newsletter", priority: "info" as const },
-    ];
-
-    it("should match first rule (boss@corp.com → urgent)", () => {
-        expect(classifyEmail("Boss <boss@corp.com>", "Hello", rules)).toBe("urgent");
-    });
-
-    it("should match second rule (@corp.com → normal)", () => {
-        expect(classifyEmail("team@corp.com", "Update", rules)).toBe("normal");
-    });
-
-    it("should match by subject (newsletter → info)", () => {
-        expect(classifyEmail("promo@store.com", "Weekly Newsletter", rules)).toBe("info");
-    });
-
-    it("should fall back to info when no rule matches", () => {
-        expect(classifyEmail("unknown@somewhere.com", "Hi", rules)).toBe("info");
-    });
-
-    it("should be case-insensitive", () => {
-        expect(classifyEmail("BOSS@CORP.COM", "URGENT", rules)).toBe("urgent");
-    });
-
-    it("should return info when rules list is empty", () => {
-        expect(classifyEmail("anyone@anywhere.com", "Anything", [])).toBe("info");
     });
 });

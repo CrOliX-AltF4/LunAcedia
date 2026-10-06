@@ -273,6 +273,25 @@ describe("EventStore.refresh — a known item whose content changed at the sourc
         expect(store.refresh(makeEvent({ dedupeKey: "k", ts: 5, priority: "info" }))).toBeNull();
     });
 
+    it("keeps a VIP's priority and its reason — the VIP list wins over the source", () => {
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "k",
+                ts: 5,
+                title: "a",
+                priority: "urgent",
+                priorityReason: "VIP",
+            }),
+        );
+        store.refresh(makeEvent({ dedupeKey: "k", ts: 5, title: "b", priority: "info" }));
+        expect(store.get("k")).toMatchObject({
+            title: "b",
+            priority: "urgent",
+            priorityReason: "VIP",
+        });
+    });
+
     it("returns null for a key the box does not hold", () => {
         expect(new EventStore().refresh(makeEvent({ dedupeKey: "nope" }))).toBeNull();
     });

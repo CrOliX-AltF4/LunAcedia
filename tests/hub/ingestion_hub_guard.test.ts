@@ -259,4 +259,15 @@ describe("IngestionHub — guard stage", () => {
             expect(received).toHaveLength(1);
         });
     });
+
+    // A mail already in the box, refreshed from the source: its priority goes through the same chain, so a VIP (or a
+    // rule's priority) is not reset to the source's default — mail held before the chain existed included.
+    it("a refreshed mail keeps the chain's priority: a VIP stays urgent", async () => {
+        const { hub } = await setup([mail("9", "boss@corp.com")], [], ["boss@corp.com"]);
+        const refreshed: AcediaEvent[] = [];
+        hub.onRefresh((e) => refreshed.push(e));
+        await hub.pollOne("email");
+        await hub.pollOne("email");
+        expect(refreshed[0]).toMatchObject({ priority: "urgent", priorityReason: "VIP" });
+    });
 });

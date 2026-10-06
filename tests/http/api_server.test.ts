@@ -1196,6 +1196,30 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
         expect((patchRes.body as { vipSenders: string[] }).vipSenders).toEqual(["boss@corp.com"]);
         expect((getRes.body as { vipSenders: string[] }).vipSenders).toEqual(["boss@corp.com"]);
     });
+
+    // One way to set a priority: keywords are guard rules now — a client still sending them is told so, not ignored.
+    it("PATCH refuses keywords and changes nothing", async () => {
+        const port = nextPort();
+        const store = tmpClassificationStore();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            store,
+        );
+        server.start(port);
+        const res = await patch(
+            `http://localhost:${port}/api/config/email-rules`,
+            { vipSenders: ["a@b.c"], urgentKeywords: ["deadline"] },
+            AUTH,
+        );
+        server.stop();
+        expect(res.status).toBe(400);
+        expect((res.body as { error: string }).error).toMatch(/rules/);
+        expect(store.getAll().vipSenders).toEqual([]);
+    });
 });
 
 describe("AcediaApiServer — GET /api/oauth/google/*", () => {

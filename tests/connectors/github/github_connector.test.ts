@@ -473,3 +473,73 @@ describe("GitHubConnector — pagination", () => {
         expect(fetchImpl).toHaveBeenCalledWith(next, expect.anything());
     });
 });
+
+// A CI failure interrupts only on the repository's default branch; on a work branch it is still shown, as normal.
+describe("GitHubConnector — CI failures by branch", () => {
+    function ciFetch(headBranch: string | null, defaultBranch = "main") {
+        const ciThread = makeThread({
+            reason: "ci_activity",
+            url: "https://api.github.com/repos/octo-org/sample-repo/commits/abc123",
+        });
+        const calls: string[] = [];
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                const u = String(url);
+                calls.push(u);
+                const ok = (body: unknown) =>
+                    Promise.resolve({
+                        ok: true,
+                        status: 200,
+                        headers: { get: () => null },
+                        json: () => Promise.resolve(body),
+                    });
+                if (u.includes("/notifications")) return ok([ciThread]);
+                if (u.includes("/check-runs"))
+                    return Promise.resolve(
+                        makeCheckRuns([{ id: 1, name: "typecheck", conclusion: "failure" }]),
+                    );
+                if (u.endsWith("/check-suites/99"))
+                    return headBranch === null
+                        ? Promise.resolve({ ok: false, status: 404 })
+                        : ok({ head_branch: headBranch });
+                if (u.endsWith("/repos/octo-org/sample-repo"))
+                    return ok({ default_branch: defaultBranch });
+                return Promise.resolve({ ok: false, status: 404 });
+            }),
+        );
+        return calls;
+    }
+
+    it("is urgent on the default branch, and says so", async () => {
+        ciFetch("main");
+        const [e] = await new GitHubConnector().poll();
+        expect(e).toMatchObject({ priority: "urgent", priorityReason: "CI rouge sur main" });
+    });
+
+    it("is normal on a work branch", async () => {
+        ciFetch("feature/x");
+        const [e] = await new GitHubConnector().poll();
+        expect(e).toMatchObject({
+            priority: "normal",
+            priorityReason: "CI rouge sur feature/x (branche de travail)",
+        });
+    });
+
+    it("stays urgent when the branch cannot be read — never a missed failure", async () => {
+        ciFetch(null);
+        const [e] = await new GitHubConnector().poll();
+        expect(e).toMatchObject({
+            priority: "urgent",
+            priorityReason: "CI rouge (branche inconnue)",
+        });
+    });
+
+    it("reads the default branch once per repository", async () => {
+        const calls = ciFetch("main");
+        const c = new GitHubConnector();
+        await c.poll();
+        await c.poll();
+        expect(calls.filter((u) => u.endsWith("/repos/octo-org/sample-repo"))).toHaveLength(1);
+    });
+});

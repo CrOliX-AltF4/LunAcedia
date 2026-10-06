@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
+import { VIP_REASON } from "../guards/guard_types.js";
 
 /** Where the box lives on disk — next to dedup_seen.json, which it must stay consistent with. */
 export function defaultEventStorePath(): string {
@@ -101,8 +102,15 @@ export class EventStore {
         const idx = this.buf.findIndex((e) => e.dedupeKey === fresh.dedupeKey);
         if (idx === -1) return null;
         const held = this.buf[idx]!;
-        // A guard rule may have set the priority: the rule's choice stands over the source's.
-        const incoming = held.ruleId ? { ...fresh, priority: held.priority } : fresh;
+        // A guard rule or the VIP list may have set the priority: that choice stands over the source's.
+        const decided = held.ruleId !== undefined || held.priorityReason === VIP_REASON;
+        const incoming = decided
+            ? {
+                  ...fresh,
+                  priority: held.priority,
+                  ...(held.priorityReason && { priorityReason: held.priorityReason }),
+              }
+            : fresh;
         if (sameContent(held, incoming)) return null;
         const merged: AcediaEvent = {
             ...incoming,

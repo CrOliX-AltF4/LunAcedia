@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import "dotenv/config";
 import { GitHubConnector } from "./connectors/github/github_connector.js";
 import { RssConnector } from "./connectors/rss/rss_connector.js";
@@ -22,6 +24,8 @@ import { GuardJournal } from "./guards/guard_journal.js";
 import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
 import { RuleActionJournal, createRuleActor } from "./guards/rule_actor.js";
+import { migrateLegacyPriority } from "./guards/priority_migration.js";
+import { parseRules } from "./connectors/email/email_rules.js";
 import { AgentService, defaultAgentSettingsPath } from "./agent/agent_service.js";
 import { InboxSync } from "./hub/inbox_sync.js";
 import { ConversationStore, defaultConversationDir } from "./store/conversation_store.js";
@@ -41,8 +45,7 @@ await googleTokenStore.load();
 const connectors: IConnector[] = [];
 if (process.env["GITHUB_ENABLED"] === "true") connectors.push(new GitHubConnector());
 if (process.env["RSS_ENABLED"] === "true") connectors.push(new RssConnector());
-if (process.env["GMAIL_ENABLED"] === "true")
-    connectors.push(new GmailConnector(emailClassificationStore, googleTokenStore));
+if (process.env["GMAIL_ENABLED"] === "true") connectors.push(new GmailConnector(googleTokenStore));
 if (process.env["GCAL_ENABLED"] === "true") connectors.push(new GcalConnector(googleTokenStore));
 if (process.env["GTASKS_ENABLED"] === "true") connectors.push(new TasksConnector(googleTokenStore));
 if (process.env["HA_ENABLED"] === "true") connectors.push(new HaConnector());
@@ -61,6 +64,25 @@ const guardStats = new GuardStats();
 // What confirmed rules do at the source, mail by mail.
 const ruleActions = new RuleActionJournal();
 await Promise.all([guardRules.load(), guardJournal.load(), guardStats.load(), ruleActions.load()]);
+// One way to set a mail's priority: the keyword lists and GMAIL_RULES become guard rules, once (parity list kept).
+try {
+    const report = await migrateLegacyPriority({
+        classification: emailClassificationStore,
+        rules: guardRules,
+        gmailRules: process.env["GMAIL_RULES"],
+        storageDir: process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia"),
+    });
+    if (report)
+        console.warn(
+            `[Priority] ${report.migrated.length} keyword(s)/GMAIL_RULES entr(ies) turned into guard rules, ${report.skipped.length} skipped — see priority_migration.json`,
+        );
+} catch (e) {
+    console.error((e as Error).message);
+}
+if (parseRules(process.env["GMAIL_RULES"] ?? "[]").length > 0)
+    console.warn(
+        "[Priority] GMAIL_RULES is no longer read — its entries are guard rules now; remove it from .env",
+    );
 const guardPipeline = new GuardPipeline({
     rules: guardRules,
     journal: guardJournal,

@@ -3,7 +3,6 @@ import path from "node:path";
 import os from "node:os";
 import type { EmailClassificationConfig } from "../../types/email_classification.js";
 import { DEFAULT_EMAIL_CLASSIFICATION } from "../../types/email_classification.js";
-import type { EmailRule } from "./email_rules.js";
 
 function resolveConfigPath(): string {
     const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
@@ -15,13 +14,10 @@ function isStringArray(v: unknown): v is string[] {
 }
 
 /**
- * Structured, panel-editable email classification — VIP senders / urgent keywords / normal
- * keywords, compiled into the same EmailRule[] shape email_rules.ts already consumes.
+ * The VIP list — senders always urgent and never removed by a rule. The keyword lists it used to hold became guard
+ * rules (guards/priority_migration.ts); they stay in the file's shape, empty, for older clients.
  * Persisted the same way ActionTierStore is (STORAGE_DIR JSON file).
  *
- * GMAIL_RULES (raw JSON, .env) remains supported as a fallback for anyone who already has
- * it configured — GmailConnector only uses compileRules() output when this store actually
- * has something in it, so a fresh install with GMAIL_RULES set keeps working unchanged.
  */
 export class EmailClassificationStore {
     private config: EmailClassificationConfig = { ...DEFAULT_EMAIL_CLASSIFICATION };
@@ -60,28 +56,6 @@ export class EmailClassificationStore {
             this.config.urgentKeywords.length > 0 ||
             this.config.normalKeywords.length > 0
         );
-    }
-
-    /** vipSenders and urgentKeywords both map to "urgent" (senders take precedence — checked first),
-     *  normalKeywords maps to "normal"; first match wins downstream in classifyEmail(). */
-    compileRules(): EmailRule[] {
-        return [
-            ...this.config.vipSenders.map((s): EmailRule => ({
-                senderPattern: s,
-                priority: "urgent",
-                label: "VIP",
-            })),
-            ...this.config.urgentKeywords.map((k): EmailRule => ({
-                senderPattern: k,
-                priority: "urgent",
-                label: "urgent keyword",
-            })),
-            ...this.config.normalKeywords.map((k): EmailRule => ({
-                senderPattern: k,
-                priority: "normal",
-                label: "normal keyword",
-            })),
-        ];
     }
 
     async patch(updates: Partial<EmailClassificationConfig>): Promise<void> {

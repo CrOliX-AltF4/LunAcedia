@@ -133,10 +133,8 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
     <div id="tier-list"></div>
 
     <h4>Classification email</h4>
-    <div class="field-hint">Un par ligne. Expéditeurs/mots-clés VIP et urgents passent en priorité urgente, mots-clés normaux en priorité normale.</div>
+    <div class="field-hint">Expéditeurs VIP, un par ligne : toujours urgents, jamais retirés par une règle. Les autres priorités se règlent par des règles (set_priority).</div>
     <textarea id="vip-senders" placeholder="boss@corp.com"></textarea>
-    <textarea id="urgent-keywords" placeholder="urgent&#10;deadline"></textarea>
-    <textarea id="normal-keywords" placeholder="newsletter"></textarea>
 
     <button id="settings-save" onclick="saveSettings()">Enregistrer</button>
     <span id="settings-status"></span>
@@ -636,8 +634,6 @@ async function openSettings(){
     if(rulesRes&&rulesRes.ok){
       const rules=await rulesRes.json();
       document.getElementById('vip-senders').value=(rules.vipSenders||[]).join('\\n');
-      document.getElementById('urgent-keywords').value=(rules.urgentKeywords||[]).join('\\n');
-      document.getElementById('normal-keywords').value=(rules.normalKeywords||[]).join('\\n');
     }
   }catch(e){console.error(e);}
 }
@@ -665,8 +661,6 @@ async function saveSettings(){
   document.querySelectorAll('select[data-tier]').forEach(sel=>{tiers[sel.dataset.tier]=sel.value;});
   const rules={
     vipSenders:document.getElementById('vip-senders').value.split('\\n').map(s=>s.trim()).filter(Boolean),
-    urgentKeywords:document.getElementById('urgent-keywords').value.split('\\n').map(s=>s.trim()).filter(Boolean),
-    normalKeywords:document.getElementById('normal-keywords').value.split('\\n').map(s=>s.trim()).filter(Boolean),
   };
   try{
     await Promise.all([
