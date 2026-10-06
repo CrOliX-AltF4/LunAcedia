@@ -61,6 +61,11 @@ changed. Gestures are your own hand: they run directly, and are journaled (`GET 
 **Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
 enabled one by one, classified by rules, never by a model.
 
+**Priority** — one chain, in one place: the source's default (Gmail's « important » is normal, the rest info; a CI
+failure is urgent on the repository's default branch, normal on a work branch), then the first guard rule that sets a
+priority, then the VIP list — a VIP is always urgent. Each item says why (`priorityReason`). The former keyword lists
+and `GMAIL_RULES` become guard rules once, at the first start of 0.16.0, with a parity list (`priority_migration.json`).
+
 **Actions** — 26 kinds through `POST /api/actions`: Gmail (reply, archive, trash, mark read/unread, spam / not spam,
 star / unstar, add / remove a label by name, a **batch** on every mail of the box that matches, a **rule** for the mails
 to come), Calendar

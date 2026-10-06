@@ -1,13 +1,19 @@
 ﻿import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GmailConnector } from "../../../source/connectors/email/gmail_connector.js";
 import { clearTokenCache } from "../../../source/connectors/email/gmail_auth.js";
-import { EmailClassificationStore } from "../../../source/connectors/email/email_classification_store.js";
 
 const NOW = Date.now();
 const FRESH_TS = String(NOW - 1_000);
 const OLD_TS = String(NOW - 30 * 3_600_000);
 
-type FakeMessage = { id: string; from: string; subject: string; ts: string; snippet?: string };
+type FakeMessage = {
+    id: string;
+    from: string;
+    subject: string;
+    ts: string;
+    snippet?: string;
+    labels?: string[];
+};
 
 function makeFetch(messages: FakeMessage[]) {
     return vi.fn().mockImplementation((url: string) => {
@@ -33,6 +39,7 @@ function makeFetch(messages: FakeMessage[]) {
                         id: msg.id,
                         internalDate: msg.ts,
                         snippet: msg.snippet,
+                        ...(msg.labels && { labelIds: msg.labels }),
                         payload: {
                             headers: [
                                 { name: "From", value: msg.from },
@@ -154,7 +161,25 @@ describe("GmailConnector", () => {
         expect(events.map((e) => e.title)).toEqual(["m1", "m2", "m3"]);
     });
 
-    it("should apply priority rules", async () => {
+    // One way to set a priority: the source gives its default, the VIP list and the rules do the rest downstream.
+    it("takes Gmail's own « important » as normal, and says why", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([
+                {
+                    id: "msg1",
+                    from: "mairie@ville.fr",
+                    subject: "Votre dossier",
+                    ts: FRESH_TS,
+                    labels: ["INBOX", "IMPORTANT"],
+                },
+            ]),
+        );
+        const [e] = await new GmailConnector().poll();
+        expect(e).toMatchObject({ priority: "normal", priorityReason: "Gmail : important" });
+    });
+
+    it("is info otherwise — GMAIL_RULES is no longer read by the connector", async () => {
         process.env["GMAIL_RULES"] = JSON.stringify([
             { senderPattern: "boss@company.com", priority: "urgent" },
         ]);
@@ -164,49 +189,9 @@ describe("GmailConnector", () => {
                 { id: "msg1", from: "boss@company.com", subject: "Urgent matter", ts: FRESH_TS },
             ]),
         );
-        const events = await new GmailConnector().poll();
-        expect(events[0]!.priority).toBe("urgent");
-    });
-
-    it("should default to info priority when no rule matches", async () => {
-        vi.stubGlobal(
-            "fetch",
-            makeFetch([
-                { id: "msg1", from: "unknown@somewhere.com", subject: "Newsletter", ts: FRESH_TS },
-            ]),
-        );
-        const events = await new GmailConnector().poll();
-        expect(events[0]!.priority).toBe("info");
-    });
-
-    it("prefers EmailClassificationStore over GMAIL_RULES once the store has anything configured", async () => {
-        // GMAIL_RULES would classify this sender as "info" (no match) — the structured store
-        // says "urgent" for the same sender. If the result is "urgent", the store won, proving
-        // precedence rather than coincidence.
-        process.env["GMAIL_RULES"] = JSON.stringify([
-            { senderPattern: "someone-else@company.com", priority: "urgent" },
-        ]);
-        const classificationStore = new EmailClassificationStore("/tmp/does-not-matter.json");
-        await classificationStore.patch({ vipSenders: ["boss@company.com"] });
-        vi.stubGlobal(
-            "fetch",
-            makeFetch([{ id: "msg1", from: "boss@company.com", subject: "Hi", ts: FRESH_TS }]),
-        );
-        const events = await new GmailConnector(classificationStore).poll();
-        expect(events[0]!.priority).toBe("urgent");
-    });
-
-    it("falls back to GMAIL_RULES when the classification store exists but is empty", async () => {
-        process.env["GMAIL_RULES"] = JSON.stringify([
-            { senderPattern: "boss@company.com", priority: "urgent" },
-        ]);
-        const classificationStore = new EmailClassificationStore("/tmp/does-not-matter.json");
-        vi.stubGlobal(
-            "fetch",
-            makeFetch([{ id: "msg1", from: "boss@company.com", subject: "Hi", ts: FRESH_TS }]),
-        );
-        const events = await new GmailConnector(classificationStore).poll();
-        expect(events[0]!.priority).toBe("urgent");
+        const [e] = await new GmailConnector().poll();
+        expect(e!.priority).toBe("info");
+        expect(e!.priorityReason).toBeUndefined();
     });
 
     it("should set dedupeKey with email- prefix", async () => {

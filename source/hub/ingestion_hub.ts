@@ -326,7 +326,9 @@ export class IngestionHub {
         this.notify(event, { recovered });
     }
 
-    private refresh(event: AcediaEvent): void {
+    private refresh(fresh: AcediaEvent): void {
+        // The same chain of priority as at collection: a VIP or a rule's priority is not reset to the source's default.
+        const event = this.guard ? this.guard.prioritize(fresh) : fresh;
         for (const handler of this.refreshHandlers) {
             try {
                 handler(event);

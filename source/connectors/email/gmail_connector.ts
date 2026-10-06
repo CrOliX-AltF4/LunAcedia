@@ -9,9 +9,6 @@ import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
 import { getAccessToken, clearTokenCache } from "./gmail_auth.js";
-import { parseRules, classifyEmail } from "./email_rules.js";
-import type { EmailRule } from "./email_rules.js";
-import type { EmailClassificationStore } from "./email_classification_store.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
 
@@ -84,7 +81,8 @@ function isLabelMutation(action: ConnectorAction): action is LabelMutation {
 }
 
 /**
- * Polls the whole Gmail INBOX (read and unread) and classifies each mail by configurable rules.
+ * Polls the whole Gmail INBOX (read and unread). Its priority is Gmail's default only — « important » is normal,
+ * the rest info; the VIP list and the guard rules decide the rest downstream, in one place.
  *
  * Config (in .env):
  *   GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN — OAuth2 credentials
@@ -95,10 +93,8 @@ function isLabelMutation(action: ConnectorAction): action is LabelMutation {
  *                                        announced to the Core nor pushed (live check 2026-09-28, C7)
  *   GMAIL_MAX_INBOX=500               — how many inbox mails are listed at most (paginated)
  *   GMAIL_POLL_INTERVAL_MIN=5         — poll frequency
- *   GMAIL_RULES='[{"senderPattern":"boss@corp.com","priority":"urgent"}]'
- *                — fallback only; ignored once EmailClassificationStore has anything configured
  *
- * Rule: classification by senderPattern substring match only — never by LLM.
+ * GMAIL_RULES is no longer read here: it is turned into guard rules once, at startup (priority_migration.ts).
  */
 export class GmailConnector implements IConnector {
     readonly slug: ConnectorSlug = "email";
@@ -112,15 +108,11 @@ export class GmailConnector implements IConnector {
     private readonly staticRefreshToken: string;
     private readonly maxAgeMs: number;
     private readonly maxInbox: number;
-    /** Legacy fallback, parsed once from GMAIL_RULES at construction. */
-    private readonly staticRules: EmailRule[];
-    private readonly classificationStore?: EmailClassificationStore;
     private readonly tokenStore?: GoogleTokenStore;
     /** Set by the hub: keys already settled (dispatched, or dropped by a guard) are not fetched again. */
     private isSettled?: (dedupeKey: string) => boolean;
 
-    constructor(classificationStore?: EmailClassificationStore, tokenStore?: GoogleTokenStore) {
-        this.classificationStore = classificationStore;
+    constructor(tokenStore?: GoogleTokenStore) {
         this.tokenStore = tokenStore;
         this.clientId = process.env["GMAIL_CLIENT_ID"] ?? "";
         this.clientSecret = process.env["GMAIL_CLIENT_SECRET"] ?? "";
@@ -132,8 +124,6 @@ export class GmailConnector implements IConnector {
         const maxAgeHours = parseInt(process.env["GMAIL_MAX_AGE_HOURS"] ?? "24", 10);
         this.maxAgeMs = Math.max(1, maxAgeHours) * 3_600_000;
         this.maxInbox = Math.max(1, parseInt(process.env["GMAIL_MAX_INBOX"] ?? "500", 10) || 500);
-
-        this.staticRules = parseRules(process.env["GMAIL_RULES"] ?? "[]");
 
         // GMAIL_ENABLED=true gates whether this connector is even constructed — if we're here
         // without credentials AND no stored token, that's a real misconfiguration, not an
@@ -150,7 +140,7 @@ export class GmailConnector implements IConnector {
     }
 
     /** Read fresh, not cached — a token obtained through the OAuth flow after startup takes
-     *  effect on the very next poll, no restart needed (same reasoning as classificationStore). */
+     *  effect on the very next poll, no restart needed. */
     private refreshToken(): string {
         return this.tokenStore?.get("gmail") ?? this.staticRefreshToken;
     }
@@ -205,10 +195,8 @@ export class GmailConnector implements IConnector {
 
                 const from = header("From");
                 const subject = header("Subject") || "(no subject)";
-                const rules = this.classificationStore?.isConfigured()
-                    ? this.classificationStore.compileRules()
-                    : this.staticRules;
-                const priority = classifyEmail(from, subject, rules);
+                // Gmail's default only — the VIP list and the rules decide the rest, downstream, in one place.
+                const important = (msg.labelIds ?? []).includes("IMPORTANT");
 
                 events.push({
                     type: "email.received",
@@ -216,7 +204,8 @@ export class GmailConnector implements IConnector {
                     source: "email",
                     title: subject,
                     body: msg.snippet?.slice(0, 200).trim(),
-                    priority,
+                    priority: important ? "normal" : "info",
+                    ...(important && { priorityReason: "Gmail : important" }),
                     dedupeKey: `email-${id}`,
                     read: !(msg.labelIds ?? []).includes("UNREAD"),
                     meta: {

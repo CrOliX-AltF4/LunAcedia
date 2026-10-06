@@ -61,7 +61,32 @@ export function formatThread(thread: GitHubThread): AcediaEvent | null {
     };
 }
 
-export function formatFailedCheckRun(run: CheckRun, repo: string, threadId?: string): AcediaEvent {
+/** Where a failed run ran: its branch, and whether it is the repository's default one (null = could not be read). */
+export interface RunBranch {
+    name: string;
+    isDefault: boolean;
+}
+
+/**
+ * A failure interrupts only on the default branch (CrOliX, 2026-10-06): on a work branch it is shown, as normal. When the
+ * branch cannot be read it stays urgent — a failure on main is never missed for want of an answer.
+ */
+function ciPriority(branch: RunBranch | null): Pick<AcediaEvent, "priority" | "priorityReason"> {
+    if (!branch) return { priority: "urgent", priorityReason: "CI rouge (branche inconnue)" };
+    return branch.isDefault
+        ? { priority: "urgent", priorityReason: `CI rouge sur ${branch.name}` }
+        : {
+              priority: "normal",
+              priorityReason: `CI rouge sur ${branch.name} (branche de travail)`,
+          };
+}
+
+export function formatFailedCheckRun(
+    run: CheckRun,
+    repo: string,
+    threadId?: string,
+    branch: RunBranch | null = null,
+): AcediaEvent {
     return {
         type: "github.ci.failed",
         ts: Date.now(),
@@ -69,7 +94,7 @@ export function formatFailedCheckRun(run: CheckRun, repo: string, threadId?: str
         title: `CI rouge : ${run.name} — ${repo}`,
         body: `conclusion: ${run.conclusion}`,
         url: run.html_url,
-        priority: "urgent",
+        ...ciPriority(branch),
         dedupeKey: `gh-ci-run-${run.id}`,
         // threadId: the notification this failure was found through — it dies with it.
         meta: { repo, checkSuiteId: run.check_suite.id, ...(threadId && { threadId }) },

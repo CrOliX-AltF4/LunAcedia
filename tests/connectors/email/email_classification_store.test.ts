@@ -60,21 +60,6 @@ describe("EmailClassificationStore", () => {
         });
     });
 
-    it("compileRules() orders vipSenders, then urgentKeywords, then normalKeywords", async () => {
-        const store = new EmailClassificationStore("/tmp/x.json");
-        await store.patch({
-            vipSenders: ["boss@corp.com"],
-            urgentKeywords: ["urgent"],
-            normalKeywords: ["newsletter"],
-        });
-        const rules = store.compileRules();
-        expect(rules).toEqual([
-            { senderPattern: "boss@corp.com", priority: "urgent", label: "VIP" },
-            { senderPattern: "urgent", priority: "urgent", label: "urgent keyword" },
-            { senderPattern: "newsletter", priority: "normal", label: "normal keyword" },
-        ]);
-    });
-
     it("getAll() returns copies, not live references", async () => {
         const store = new EmailClassificationStore("/tmp/x.json");
         await store.patch({ vipSenders: ["a@b.com"] });

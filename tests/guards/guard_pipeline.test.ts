@@ -93,6 +93,29 @@ describe("GuardPipeline", () => {
         expect(event.priority).toBe("info");
     });
 
+    // One way to set a priority: the source's default, then the rules, then the VIP list — a VIP is always urgent.
+    it("says which rule set the priority", async () => {
+        const { pipeline } = await setup([tagWork]);
+        expect(pipeline.process(mail("5", "boss@corp.com")).event).toMatchObject({
+            priority: "normal",
+            priorityReason: "règle « Travail »",
+        });
+    });
+
+    it("a VIP is urgent whatever a rule says, and says so", async () => {
+        const { pipeline } = await setup([tagWork], ["boss@corp.com"]);
+        expect(pipeline.process(mail("6", "boss@corp.com")).event).toMatchObject({
+            priority: "urgent",
+            priorityReason: "VIP",
+        });
+    });
+
+    it("the VIP list is about mail only", async () => {
+        const { pipeline } = await setup([], ["octo"]);
+        const ci = { ...mail("7", "octo"), source: "github", priority: "normal" } as AcediaEvent;
+        expect(pipeline.process(ci).event.priority).toBe("normal");
+    });
+
     it("never drops a VIP sender, even when a rule says so", async () => {
         const { pipeline, journal } = await setup([dropAli], ["deals@mail.aliexpress.com"]);
         expect(pipeline.process(mail("4")).dropped).toBe(false);

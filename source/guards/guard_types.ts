@@ -23,6 +23,9 @@ export type GuardCondition =
 /** What a rule may do at the source, on each mail it matches at collection. */
 export type { RuleSourceKind };
 
+/** What a VIP's priority says — also how the box knows to keep it when the source refreshes the item. */
+export const VIP_REASON = "VIP";
+
 /** The source actions that take a mail out of the inbox — never applied to a VIP. */
 export const REMOVING_SOURCE_KINDS: ReadonlySet<RuleSourceKind> = new Set([
     "archive_email",
@@ -52,6 +55,8 @@ export interface GuardVerdict {
     tags: string[];
     /** The first matching `set_priority`; undefined leaves the connector's own priority. */
     priority?: AcediaEventPriority;
+    /** The rule that set `priority`. */
+    priorityRuleId?: string;
     /** The rule responsible for the drop; otherwise the first matching rule with a visible effect. */
     ruleId?: string;
     matchedRuleIds: string[];

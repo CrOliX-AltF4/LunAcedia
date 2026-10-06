@@ -3,7 +3,7 @@ import { evaluateGuard, makeVipMatcher } from "./guard_engine.js";
 import type { GuardJournal } from "./guard_journal.js";
 import type { GuardRulesStore } from "./guard_rules_store.js";
 import type { GuardStats } from "./guard_stats.js";
-import type { GuardRule, GuardVerdict } from "./guard_types.js";
+import { VIP_REASON, type GuardRule, type GuardVerdict } from "./guard_types.js";
 
 export interface GuardOutcome {
     dropped: boolean;
@@ -65,11 +65,8 @@ export class GuardPipeline {
         // A user-restored event is never evaluated again: the user's decision beats the rules.
         if (this.deps.journal.isRestored(key)) return { dropped: false, event };
 
-        const verdict = evaluateGuard(
-            event,
-            this.deps.rules.peekRules() as GuardRule[],
-            makeVipMatcher(this.deps.vipSenders()),
-        );
+        const isVip = makeVipMatcher(this.deps.vipSenders());
+        const verdict = evaluateGuard(event, this.deps.rules.peekRules() as GuardRule[], isVip);
         const version = this.deps.rules.getVersion();
         if (this.counted.get(key) !== version) {
             if (this.counted.size > 5_000) this.counted.clear();
@@ -91,14 +88,42 @@ export class GuardPipeline {
             verdict.source && event.source === "email" && this.deps.rules.sourceActionsEnabled()
                 ? { source: verdict.source }
                 : {};
-        if (verdict.tags.length === 0 && verdict.priority === undefined)
+        const vip = event.source === "email" && isVip(event);
+        if (verdict.tags.length === 0 && verdict.priority === undefined && !vip)
             return { dropped: false, event, ...source };
-        const out: AcediaEvent = { ...event };
-        if (verdict.priority !== undefined) out.priority = verdict.priority;
+        const out: AcediaEvent = this.withPriority({ ...event }, verdict, vip);
         if (verdict.tags.length > 0)
             out.tags = [...new Set([...(event.tags ?? []), ...verdict.tags])];
         if (verdict.ruleId !== undefined) out.ruleId = verdict.ruleId;
         return { dropped: false, event: out, ...source };
+    }
+
+    /**
+     * The one chain of priority: the source's default, then the first rule that sets one, then the VIP list — a VIP is
+     * always urgent (it already won over every keyword before rules held them).
+     */
+    private withPriority(out: AcediaEvent, verdict: GuardVerdict, vip: boolean): AcediaEvent {
+        if (verdict.priority !== undefined) {
+            out.priority = verdict.priority;
+            const name = this.deps.rules
+                .peekRules()
+                .find((r) => r.id === verdict.priorityRuleId)?.name;
+            out.priorityReason = name ? `règle « ${name} »` : "règle";
+        }
+        if (vip) {
+            out.priority = "urgent";
+            out.priorityReason = VIP_REASON;
+        }
+        return out;
+    }
+
+    /** The priority alone, for an item the box already holds and the source refreshed — nothing recorded or counted. */
+    prioritize(event: AcediaEvent): AcediaEvent {
+        const isVip = makeVipMatcher(this.deps.vipSenders());
+        const verdict = evaluateGuard(event, this.deps.rules.peekRules() as GuardRule[], isVip);
+        const vip = event.source === "email" && isVip(event);
+        if (verdict.priority === undefined && !vip) return event;
+        return this.withPriority({ ...event }, verdict, vip);
     }
 
     /** User restore: takes the event back out of the journal so the caller can re-dispatch it (bypassing dedup and guard). */

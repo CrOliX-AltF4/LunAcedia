@@ -1043,7 +1043,15 @@ export class AcediaApiServer {
             } catch {
                 return json(res, 400, { error: "Invalid JSON" });
             }
-            await this.emailClassificationStore.patch(body as Partial<EmailClassificationConfig>);
+            const b = (body ?? {}) as Partial<EmailClassificationConfig>;
+            // Keywords became guard rules (the priority migration): only the VIP list is set here.
+            if ((b.urgentKeywords?.length ?? 0) > 0 || (b.normalKeywords?.length ?? 0) > 0)
+                return json(res, 400, {
+                    error: "Keywords are guard rules now (set_priority) — only vipSenders is set here",
+                });
+            await this.emailClassificationStore.patch({
+                ...(b.vipSenders && { vipSenders: b.vipSenders }),
+            });
             return json(res, 200, this.emailClassificationStore.getAll());
         }
 

@@ -17,20 +17,3 @@ export function parseRules(raw: string): EmailRule[] {
         return [];
     }
 }
-
-/**
- * Classify an email by sender + subject against a rule list.
- * First matching rule wins; falls back to "info".
- * Rule: substring match (case-insensitive) — never regex, never LLM.
- */
-export function classifyEmail(
-    from: string,
-    subject: string,
-    rules: EmailRule[],
-): AcediaEventPriority {
-    const haystack = `${from} ${subject}`.toLowerCase();
-    for (const rule of rules) {
-        if (haystack.includes(rule.senderPattern.toLowerCase())) return rule.priority;
-    }
-    return "info";
-}

@@ -8,7 +8,7 @@ import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
-import { formatThread, formatFailedCheckRun } from "./github_formatter.js";
+import { formatThread, formatFailedCheckRun, type RunBranch } from "./github_formatter.js";
 import { assertHttpOk } from "../connector_http.js";
 
 const GITHUB_API = "https://api.github.com";
@@ -34,6 +34,7 @@ interface GitHubThread {
 }
 
 export class GitHubConnector implements IConnector {
+    private readonly defaultBranches = new Map<string, string>();
     readonly slug: ConnectorSlug = "github";
     get name(): string {
         return CONNECTOR_REGISTRY[this.slug].label;
@@ -129,6 +130,49 @@ export class GitHubConnector implements IConnector {
         return results;
     }
 
+    /** The branch a check suite ran on, and whether it is the repository's default — null when GitHub does not say. */
+    private async runBranch(repo: string, suiteId: number): Promise<RunBranch | null> {
+        const [head, main] = await Promise.all([
+            this.suiteBranch(repo, suiteId),
+            this.defaultBranch(repo),
+        ]);
+        return head && main ? { name: head, isDefault: head === main } : null;
+    }
+
+    private async suiteBranch(repo: string, suiteId: number): Promise<string | null> {
+        const data = await this.getJson<{ head_branch?: unknown }>(
+            `https://api.github.com/repos/${repo}/check-suites/${suiteId}`,
+        );
+        return typeof data?.head_branch === "string" ? data.head_branch : null;
+    }
+
+    /** Read once per repository: a default branch hardly ever changes. A failure is not kept, so it is tried again. */
+    private async defaultBranch(repo: string): Promise<string | null> {
+        const known = this.defaultBranches.get(repo);
+        if (known) return known;
+        const data = await this.getJson<{ default_branch?: unknown }>(
+            `https://api.github.com/repos/${repo}`,
+        );
+        if (typeof data?.default_branch !== "string") return null;
+        this.defaultBranches.set(repo, data.default_branch);
+        return data.default_branch;
+    }
+
+    private async getJson<T>(url: string): Promise<T | null> {
+        try {
+            const resp = await fetch(url, {
+                headers: {
+                    Authorization: `Bearer ${this.token}`,
+                    Accept: "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            });
+            return resp.ok ? ((await resp.json()) as T) : null;
+        } catch {
+            return null;
+        }
+    }
+
     private isWatched(fullName: string): boolean {
         if (this.excludeRepos.has(fullName)) return false;
         if (this.watchedRepos === "*") return true;
@@ -170,9 +214,21 @@ export class GitHubConnector implements IConnector {
                 }>;
             };
 
-            return data.check_runs
-                .filter((r) => r.conclusion === "failure" || r.conclusion === "timed_out")
-                .map((r) => formatFailedCheckRun(r, repo, threadId));
+            const failed = data.check_runs.filter(
+                (r) => r.conclusion === "failure" || r.conclusion === "timed_out",
+            );
+            const out: AcediaEvent[] = [];
+            for (const r of failed) {
+                out.push(
+                    formatFailedCheckRun(
+                        r,
+                        repo,
+                        threadId,
+                        await this.runBranch(repo, r.check_suite.id),
+                    ),
+                );
+            }
+            return out;
         } catch {
             return [];
         }
