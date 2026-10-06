@@ -14,6 +14,7 @@ import {
     actionCapabilities,
     actionFromArgs,
     actionToolDefinitions,
+    isGatedWrite,
 } from "../capabilities/capability_manifest.js";
 import {
     isReadTool,
@@ -204,7 +205,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
         : [...readToolDefinitions(), ...actionToolDefinitions({ includeWrites: allowWrites })];
     const writeKinds = new Set<string>(
         actionCapabilities()
-            .filter((a) => a.category === "write")
+            .filter(isGatedWrite)
             .map((a) => a.kind),
     );
     const actionKinds = new Set<string>(actionCapabilities().map((a) => a.kind));
@@ -318,7 +319,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         });
                         content = JSON.stringify({ error: built.error });
                     } else if (!allowWrites && writeKinds.has(built.action.kind)) {
-                        const reason = "write actions are off for now (triage only)";
+                        const reason = "write actions are off for now (sorting and replies only)";
                         step.error = reason;
                         result.actions.push({
                             kind: built.action.kind,

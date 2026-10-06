@@ -1,27 +1,10 @@
 import type { PendingAction } from "../actions/pending_action_store.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
+import { actionCapabilities } from "../capabilities/capability_manifest.js";
 
-/** What each write would do, in Master's words — the same wording as the dashboard's tier labels. */
-const LABELS: Record<string, string> = {
-    reply: "Répondre à un mail",
-    archive_email: "Archiver un mail",
-    delete_email: "Mettre un mail à la corbeille",
-    mark_email_read: "Marquer un mail lu",
-    mark_email_unread: "Marquer un mail non lu",
-    create_event: "Créer un événement",
-    update_event: "Modifier un événement",
-    delete_event: "Supprimer un événement",
-    create_task: "Créer une tâche",
-    complete_task: "Terminer une tâche",
-    delete_task: "Supprimer une tâche",
-    comment_issue: "Commenter sur GitHub",
-    add_label: "Ajouter un label GitHub",
-    create_issue: "Créer un ticket GitHub",
-    close_issue: "Fermer un ticket GitHub",
-    open_pr: "Ouvrir une PR GitHub",
-    mark_notification_read: "Marquer une notification GitHub lue",
-};
+/** What each action would do, in Master's words — declared once, in the capability manifest. */
+const LABELS: Record<string, string> = Object.fromEntries(actionCapabilities().map((a) => [a.kind, a.label]));
 
 const MAX = 130;
 

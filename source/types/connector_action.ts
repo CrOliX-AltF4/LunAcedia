@@ -12,6 +12,13 @@ export type ConnectorAction =
     | { kind: "delete_email"; sourceId: string }
     | { kind: "mark_email_read"; sourceId: string }
     | { kind: "mark_email_unread"; sourceId: string }
+    | { kind: "mark_spam"; sourceId: string }
+    | { kind: "unmark_spam"; sourceId: string }
+    | { kind: "star_email"; sourceId: string }
+    | { kind: "unstar_email"; sourceId: string }
+    // `label` is the Gmail label's name, as Master writes it — created on first use.
+    | { kind: "label_email"; sourceId: string; label: string }
+    | { kind: "unlabel_email"; sourceId: string; label: string }
     // Google Calendar
     | {
           kind: "create_event";

@@ -8,11 +8,19 @@ import {
 import { DEFAULT_ACTION_TIERS, ACTION_RISK } from "../../source/types/action_tier.js";
 
 // The values in force before the manifest existed (v0.9.0) — deriving them from the manifest must
-// change nothing for an existing install.
+// change nothing for an existing install. Deliberate changes since, each with its decision:
+//   delete_email manual → confirm, high → medium: it is Gmail's trash, kept 30 days (CrOliX, 2026-10-06);
+//   mark_spam, unmark_spam, star_email, unstar_email, label_email, unlabel_email: added the same day.
 const HISTORICAL_TIERS = {
     reply: "confirm",
     archive_email: "confirm",
-    delete_email: "manual",
+    delete_email: "confirm",
+    mark_spam: "confirm",
+    unmark_spam: "confirm",
+    star_email: "confirm",
+    unstar_email: "confirm",
+    label_email: "confirm",
+    unlabel_email: "confirm",
     mark_email_read: "confirm",
     mark_email_unread: "confirm",
     create_event: "confirm",
@@ -35,6 +43,13 @@ const HISTORICAL_RISK = {
     archive_email: "low",
     complete_task: "low",
     mark_notification_read: "low",
+    mark_spam: "low",
+    unmark_spam: "low",
+    star_email: "low",
+    unstar_email: "low",
+    label_email: "low",
+    unlabel_email: "low",
+    delete_email: "medium",
     reply: "medium",
     comment_issue: "medium",
     add_label: "medium",
@@ -43,7 +58,6 @@ const HISTORICAL_RISK = {
     create_issue: "medium",
     open_pr: "medium",
     update_event: "medium",
-    delete_email: "high",
     delete_event: "high",
     delete_task: "high",
     close_issue: "high",
@@ -51,6 +65,11 @@ const HISTORICAL_RISK = {
 };
 
 describe("capability manifests", () => {
+    it("names every action once, in Master's words — the one label push, dashboard and Core show", () => {
+        for (const a of actionCapabilities()) expect(a.label, a.kind).toMatch(/^[A-ZÀ-Ý]/);
+        expect(new Set(actionCapabilities().map((a) => a.label)).size).toBe(actionCapabilities().length);
+    });
+
     it("declares every action kind exactly once", () => {
         const kinds = actionCapabilities().map((a) => a.kind);
         expect(new Set(kinds).size).toBe(kinds.length);
@@ -139,12 +158,19 @@ describe("actionToolDefinitions — what the model is offered", () => {
 });
 
 // CrOliX 2026-09-25: the agent sorts the inbox now; everything that writes waits for a later v1.
+// 2026-10-06: spam, star and labels are sorting too.
 describe("triage vs write actions", () => {
     const TRIAGE = [
         "archive_email",
         "delete_email",
         "mark_email_read",
         "mark_email_unread",
+        "mark_spam",
+        "unmark_spam",
+        "star_email",
+        "unstar_email",
+        "label_email",
+        "unlabel_email",
         "mark_notification_read",
     ];
 
@@ -155,9 +181,9 @@ describe("triage vs write actions", () => {
         expect(triage.sort()).toEqual([...TRIAGE].sort());
     });
 
-    it("offers only triage actions when writes are off", () => {
+    it("offers only triage actions and reply — the first write opened — when writes are off", () => {
         const names = actionToolDefinitions({ includeWrites: false }).map((t) => t.name);
-        expect(names.sort()).toEqual([...TRIAGE].sort());
+        expect(names.sort()).toEqual([...TRIAGE, "reply"].sort());
     });
 
     it("offers writes too when they are on (merge_pr still never)", () => {

@@ -10,6 +10,15 @@ const VALID_TIERS = new Set<ActionTier>(["auto", "confirm", "manual"]);
 // keeps the *set of configurable kinds* from ever silently drifting from it too.
 const VALID_KINDS = new Set<ActionKind>(Object.keys(DEFAULT_ACTION_TIERS) as ActionKind[]);
 
+/**
+ * Version of action_tiers.json. Files written before it carry every default of their time, indistinguishable from a
+ * choice — FORMER_DEFAULTS lists the defaults changed since, which such a file does not get to keep.
+ */
+const TIER_FILE_VERSION = 2;
+const FORMER_DEFAULTS: Partial<ActionTierConfig> = {
+    delete_email: "manual", // → "confirm" on 2026-10-06: it is Gmail's trash, restorable for 30 days
+};
+
 function resolveTierPath(): string {
     const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
     return path.join(storageDir, "action_tiers.json");
@@ -50,10 +59,13 @@ export class ActionTierStore {
     async load(): Promise<void> {
         try {
             const raw = await fs.readFile(this.tierPath, "utf-8");
-            const parsed = JSON.parse(raw) as Partial<ActionTierConfig>;
+            const parsed = JSON.parse(raw) as Partial<ActionTierConfig> & { version?: unknown };
+            const legacy = parsed.version !== TIER_FILE_VERSION;
             for (const kind of Object.keys(this.tiers) as ActionKind[]) {
                 if (kind in IMMUTABLE_TIERS) continue;
                 const value = parsed[kind];
+                // The file stores every tier: in a file older than the version marker, a former default is not a choice.
+                if (legacy && FORMER_DEFAULTS[kind] === value) continue;
                 if (value && VALID_TIERS.has(value)) this.tiers[kind] = value;
             }
         } catch {
@@ -140,7 +152,11 @@ export class ActionTierStore {
     private async save(): Promise<void> {
         try {
             await fs.mkdir(path.dirname(this.tierPath), { recursive: true });
-            await fs.writeFile(this.tierPath, JSON.stringify(this.tiers, null, 2), "utf-8");
+            await fs.writeFile(
+                this.tierPath,
+                JSON.stringify({ version: TIER_FILE_VERSION, ...this.tiers }, null, 2),
+                "utf-8",
+            );
         } catch (e) {
             console.error("[ActionTiers] Failed to persist:", (e as Error).message);
         }

@@ -27,7 +27,13 @@ export function resolveTierScope(action: ConnectorAction, store: EventStore): st
         case "archive_email":
         case "delete_email":
         case "mark_email_read":
-        case "mark_email_unread": {
+        case "mark_email_unread":
+        case "mark_spam":
+        case "unmark_spam":
+        case "star_email":
+        case "unstar_email":
+        case "label_email":
+        case "unlabel_email": {
             const event = store.get(`email-${action.sourceId}`);
             const from = event?.meta?.["from"];
             return typeof from === "string" ? from : null;

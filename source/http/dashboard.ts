@@ -1,4 +1,5 @@
 import { CONNECTOR_REGISTRY } from "../connectors/connector_registry.js";
+import { actionCapabilities } from "../capabilities/capability_manifest.js";
 
 /** Inline HTML for the LunAcedia web dashboard served at GET /. */
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -267,7 +268,7 @@ function render(){
   <div class="card-title">\${esc(e.title)}</div>
   <div class="card-body">\${e.body?esc(e.body):''}</div>
   <div class="card-time">\${ago(e.ts)}</div>
-  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
+  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button><button data-g="spam" onclick="gesture(this,event)">Indésirable</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
 </div>\`).join('');
 }
 
@@ -606,25 +607,7 @@ async function setAgent(key,value){
 // ── Settings (sources / tiers / email rules) ─────────────────────────────────
 const GOOGLE_SOURCES=[{key:'gmail',label:'Gmail'},{key:'gcal',label:'Google Calendar'},{key:'gtasks',label:'Google Tasks'}];
 
-const ACTION_KIND_LABELS={
-  reply:'Répondre à un email',
-  archive_email:'Archiver un email',
-  delete_email:'Supprimer un email',
-  mark_email_read:'Marquer un email lu',
-  mark_email_unread:'Marquer un email non lu',
-  create_event:'Créer un événement calendrier',
-  update_event:'Modifier un événement',
-  delete_event:'Supprimer un événement',
-  create_task:'Créer une tâche',
-  complete_task:'Compléter une tâche',
-  delete_task:'Supprimer une tâche',
-  comment_issue:'Commenter une issue/PR GitHub',
-  add_label:'Ajouter un label GitHub',
-  create_issue:'Créer une issue GitHub',
-  close_issue:'Fermer une issue GitHub',
-  open_pr:'Ouvrir une PR GitHub',
-  merge_pr:'Merger une PR GitHub',
-};
+const ACTION_KIND_LABELS=${JSON.stringify(Object.fromEntries(actionCapabilities().map((a) => [a.kind, a.label])))};
 
 function renderTiers(tiers){
   const el=document.getElementById('tier-list');

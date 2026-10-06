@@ -62,6 +62,31 @@ describe("ActionTierStore", () => {
         expect(store.getTier("merge_pr")).toBe("manual");
     });
 
+    // delete_email was "manual" by default until 2026-10-06, and the file stores every tier: an install that ever saved
+    // one setting carries that old default. A file written before the format version is read without it.
+    it("load() drops the former delete_email default from a file written before the version marker", async () => {
+        h.mockReadFile.mockResolvedValue(JSON.stringify({ ...DEFAULT_ACTION_TIERS, delete_email: "manual", reply: "auto" }));
+        const store = new ActionTierStore("/tmp/tiers.json");
+        await store.load();
+        expect(store.getTier("delete_email")).toBe("confirm");
+        expect(store.getTier("reply")).toBe("auto");
+    });
+
+    it("load() keeps delete_email manual when it was chosen after the version marker", async () => {
+        h.mockReadFile.mockResolvedValue(JSON.stringify({ version: 2, delete_email: "manual" }));
+        const store = new ActionTierStore("/tmp/tiers.json");
+        await store.load();
+        expect(store.getTier("delete_email")).toBe("manual");
+    });
+
+    it("patch() writes the version marker with the tiers", async () => {
+        const store = new ActionTierStore("/tmp/tiers.json");
+        await store.patch({ delete_email: "manual" });
+        const written = JSON.parse(h.mockWriteFile.mock.calls[0]![1] as string) as Record<string, unknown>;
+        expect(written["version"]).toBe(2);
+        expect(written["delete_email"]).toBe("manual");
+    });
+
     it("patch() applies valid (kind, tier) pairs and persists them", async () => {
         const store = new ActionTierStore("/tmp/tiers.json");
         const changed = await store.patch({ reply: "auto", complete_task: "manual" });

@@ -27,6 +27,7 @@ export function resolveEventSync(
         case "archive_email":
             return { dedupeKey: `email-${action.sourceId}`, effect: "read" };
         case "delete_email":
+        case "mark_spam":
             return { dedupeKey: `email-${action.sourceId}`, effect: "remove" };
 
         case "complete_task":

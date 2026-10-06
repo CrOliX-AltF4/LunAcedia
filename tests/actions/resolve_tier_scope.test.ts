@@ -54,6 +54,16 @@ describe("resolveTierScope — backlog #329 P1 'paliers par expéditeur/repo'", 
         expect(resolveTierScope({ kind: "mark_email_read", sourceId: "msg1" }, store)).toBe(
             "boss@corp.com",
         );
+        for (const action of [
+            { kind: "mark_spam", sourceId: "msg1" },
+            { kind: "unmark_spam", sourceId: "msg1" },
+            { kind: "star_email", sourceId: "msg1" },
+            { kind: "unstar_email", sourceId: "msg1" },
+            { kind: "label_email", sourceId: "msg1", label: "Pubs" },
+            { kind: "unlabel_email", sourceId: "msg1", label: "Pubs" },
+        ] as const) {
+            expect(resolveTierScope(action, store), action.kind).toBe("boss@corp.com");
+        }
     });
 
     it("returns null for an email kind when the event isn't in the buffer", () => {

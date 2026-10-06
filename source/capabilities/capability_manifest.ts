@@ -14,6 +14,8 @@ import { validateArgs, type ObjectSchema } from "./json_schema.js";
 
 export interface ActionCapability {
     kind: ActionKind;
+    /** What it does, in Master's words (French) — the one label the push, the dashboard and the Core show. */
+    label: string;
     /** IConnector.name of the connector that executes it (the /api/actions lookup key). */
     connector: string;
     description: string;
@@ -29,6 +31,16 @@ export interface ActionCapability {
      * (CrOliX, 2026-09-25) — AgentService's `writes` setting turns them on.
      */
     category: "triage" | "write";
+    /**
+     * A write opened to the agent even while the writes switch is off — reply, the first one (CrOliX, 2026-10-06).
+     * Still under its tier like any action, and its text is shown with the pending action before anything is sent.
+     */
+    openWrite?: boolean;
+}
+
+/** A write the writes switch holds back (every write but the opened ones). */
+export function isGatedWrite(a: Pick<ActionCapability, "category" | "openWrite">): boolean {
+    return a.category === "write" && a.openWrite !== true;
 }
 
 export interface CapabilityManifest {
@@ -49,6 +61,11 @@ const EVENT_ID =
     '"<meta.calendarId>/<meta.eventId>" of an existing event, from a search result. Never invented.';
 const TASK_ID =
     '"<meta.listId>/<meta.taskId>" of an existing task, from a search result. Never invented.';
+const labelParams = (description: string): ObjectSchema => ({
+    type: "object",
+    properties: { sourceId: id(MAIL_ID), label: id(description) },
+    required: ["sourceId", "label"],
+});
 const ISSUE_REF = '"owner/repo#number" of an existing issue or pull request.';
 
 export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
@@ -57,6 +74,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
         actions: [
             {
                 kind: "reply",
+                label: "Répondre à un mail",
                 description: "Reply to an email thread with a plain-text body.",
                 params: {
                     type: "object",
@@ -70,9 +88,11 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 risk: "medium",
                 agentAllowed: true,
                 category: "write",
+                openWrite: true,
             },
             {
                 kind: "archive_email",
+                label: "Archiver un mail",
                 description: "Archive an email (removes it from the inbox, reversible).",
                 params: sourceOnly(MAIL_ID),
                 defaultTier: "confirm",
@@ -82,15 +102,18 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "delete_email",
-                description: "Move an email to the trash.",
+                label: "Mettre un mail à la corbeille",
+                // Gmail's trash, kept 30 days and restorable — not a permanent delete (CrOliX, 2026-10-06).
+                description: "Move an email to the trash (Gmail keeps it 30 days, restorable).",
                 params: sourceOnly(MAIL_ID),
-                defaultTier: "manual",
-                risk: "high",
+                defaultTier: "confirm",
+                risk: "medium",
                 agentAllowed: true,
                 category: "triage",
             },
             {
                 kind: "mark_email_read",
+                label: "Marquer un mail lu",
                 description: "Mark an email as read.",
                 params: sourceOnly(MAIL_ID),
                 defaultTier: "confirm",
@@ -100,8 +123,69 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "mark_email_unread",
+                label: "Marquer un mail non lu",
                 description: "Mark an email as unread.",
                 params: sourceOnly(MAIL_ID),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "mark_spam",
+                label: "Mettre un mail en indésirable",
+                description: "Report an email as spam (moves it to Spam, out of the inbox).",
+                params: sourceOnly(MAIL_ID),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "unmark_spam",
+                label: "Sortir un mail des indésirables",
+                description: "Take an email out of Spam, back to the inbox.",
+                params: sourceOnly(MAIL_ID),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "star_email",
+                label: "Suivre un mail (étoile)",
+                description: "Star an email (to follow up).",
+                params: sourceOnly(MAIL_ID),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "unstar_email",
+                label: "Ne plus suivre un mail",
+                description: "Remove an email's star.",
+                params: sourceOnly(MAIL_ID),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "label_email",
+                label: "Ajouter un libellé Gmail",
+                description: "Add a Gmail label to an email, by the label's name (created if it does not exist).",
+                params: labelParams('Label name, e.g. "Factures".'),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "triage",
+            },
+            {
+                kind: "unlabel_email",
+                label: "Retirer un libellé Gmail",
+                description: "Remove a Gmail label from an email, by the label's name.",
+                params: labelParams("Label name, as shown in Gmail."),
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
@@ -114,6 +198,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
         actions: [
             {
                 kind: "create_event",
+                label: "Créer un événement",
                 description: "Create a calendar event. Times are ISO 8601 with a timezone offset.",
                 params: {
                     type: "object",
@@ -148,6 +233,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "update_event",
+                label: "Modifier un événement",
                 description: "Change fields of an existing calendar event (e.g. its title).",
                 params: {
                     type: "object",
@@ -168,6 +254,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "delete_event",
+                label: "Supprimer un événement",
                 description: "Delete a calendar event.",
                 params: sourceOnly(EVENT_ID),
                 defaultTier: "confirm",
@@ -182,6 +269,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
         actions: [
             {
                 kind: "create_task",
+                label: "Créer une tâche",
                 description: "Create a task. `due` is an ISO date (optional).",
                 params: {
                     type: "object",
@@ -206,6 +294,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "complete_task",
+                label: "Terminer une tâche",
                 description: "Mark a task as completed.",
                 params: sourceOnly(TASK_ID),
                 defaultTier: "confirm",
@@ -215,6 +304,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "delete_task",
+                label: "Supprimer une tâche",
                 description: "Delete a task.",
                 params: sourceOnly(TASK_ID),
                 defaultTier: "confirm",
@@ -229,6 +319,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
         actions: [
             {
                 kind: "comment_issue",
+                label: "Commenter sur GitHub",
                 description: "Comment on an issue or pull request.",
                 params: {
                     type: "object",
@@ -245,6 +336,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "add_label",
+                label: "Ajouter un label GitHub",
                 description: "Add a label to an issue or pull request.",
                 params: {
                     type: "object",
@@ -261,6 +353,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "create_issue",
+                label: "Créer un ticket GitHub",
                 description: "Open a new issue in a repository.",
                 params: {
                     type: "object",
@@ -284,6 +377,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "close_issue",
+                label: "Fermer un ticket GitHub",
                 description: "Close an issue.",
                 params: sourceOnly(ISSUE_REF),
                 defaultTier: "confirm",
@@ -293,6 +387,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "open_pr",
+                label: "Ouvrir une PR GitHub",
                 description: "Open a pull request from `head` into `base`.",
                 params: {
                     type: "object",
@@ -319,6 +414,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             // "ouvrir une PR peut être auto ou confirmation, mais merger reste toujours humain" (CrOliX).
             {
                 kind: "merge_pr",
+                label: "Fusionner une PR GitHub",
                 description: "Merge a pull request.",
                 params: sourceOnly(ISSUE_REF),
                 defaultTier: "manual",
@@ -328,6 +424,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "mark_notification_read",
+                label: "Marquer une notification GitHub lue",
                 description: "Mark a GitHub notification thread as read.",
                 params: sourceOnly(
                     'dedupeKey of the GitHub notification event ("gh-<reason>-<threadId>").',
@@ -375,7 +472,7 @@ export interface ToolDefinition {
 export function actionToolDefinitions(options: { includeWrites?: boolean } = {}): ToolDefinition[] {
     const includeWrites = options.includeWrites ?? true;
     return actionCapabilities()
-        .filter((a) => a.agentAllowed && (includeWrites || a.category === "triage"))
+        .filter((a) => a.agentAllowed && (includeWrites || !isGatedWrite(a)))
         .map((a) => ({
             name: a.kind,
             description: `${a.description} [${a.connector}]`,

@@ -53,7 +53,7 @@ HA     ──┘          gestures and actions go back to the sources
 ```
 
 **The box** — what is in your inbox at the source, read and unread: `GET /api/inbox`. Your gestures act **at the
-source** and the box follows: open (the full text, marked read in Gmail), read / unread, archive, trash, restore from
+source** and the box follows: open (the full text, marked read in Gmail), read / unread, archive, trash, spam, restore from
 Gmail's trash, done (a GitHub notification, a Google task) — `POST /api/inbox/:key/:gesture`, `GET /api/inbox/trash`,
 `POST /api/inbox/trash/:id/restore`. The box is reconciled with the sources every minute and clients are told what
 changed. Gestures are your own hand: they run directly, and are journaled (`GET /api/inbox/journal`).
@@ -61,7 +61,8 @@ changed. Gestures are your own hand: they run directly, and are journaled (`GET 
 **Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
 enabled one by one, classified by rules, never by a model.
 
-**Actions** — 18 kinds through `POST /api/actions`: Gmail (reply, archive, delete, mark read/unread), Calendar
+**Actions** — 24 kinds through `POST /api/actions`: Gmail (reply, archive, trash, mark read/unread, spam / not spam,
+star / unstar, add / remove a label by name), Calendar
 (create/update/delete an event), Tasks (create/complete/delete), GitHub (comment, label, create/close an issue, open a
 PR, merge a PR, mark a notification read). Each kind has a tier (`GET/PATCH /api/config/tiers`):
 
@@ -81,7 +82,7 @@ through the tier gate. Every tool argument is checked against the capability man
 `merge_pr` is never built from model output; once it has read a third party's text (a mail body…), every action it
 proposes waits for your confirmation, whatever its tier. Bounded to 6 steps, 20 s and 3 actions per request.
 **Two switches** (`GET|PUT /api/agent/settings`, also on the dashboard): the agent itself (off = no tool is ever
-called) and its **writes** (off = it only reads and sorts; on = it may propose writes, always confirmed). A phone can
+called) and its **writes** (off = it reads, sorts and may propose a reply; on = it may propose every write, always confirmed). A phone can
 only turn the agent off. `GET /api/agent/journal` lists the last runs. Needs a model with tool calling (OpenAI, or
 Ollama with a tool-capable model).
 
