@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GmailConnector } from "../../../source/connectors/email/gmail_connector.js";
 import { clearTokenCache } from "../../../source/connectors/email/gmail_auth.js";
 
-// A batch on frozen ids (ADR-023 T2): one Gmail batchModify for label changes, the trash one mail at a time.
+// A batch on frozen ids: one Gmail batchModify for label changes, the trash one mail at a time.
 
 interface Call {
     url: string;

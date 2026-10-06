@@ -252,7 +252,7 @@ interface PersistedRules {
     v: 1;
     version: number;
     rules: GuardRule[];
-    /** Rules may act at the source (ADR-023 T3) — absent = on. */
+    /** Rules may act at the source — absent = on. */
     sourceActions?: boolean;
 }
 

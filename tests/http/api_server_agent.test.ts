@@ -169,7 +169,7 @@ describe("AcediaApiServer — agent routes", () => {
             expect(r.body.items.map((i: { key: string }) => i.key)).toEqual(["email-1"]);
         });
 
-        it("proposes a batch on the box's matching mails, with what it would touch in words (ADR-023 T2)", async () => {
+        it("proposes a batch on the box's matching mails, with what it would touch in words", async () => {
             const executed: ConnectorAction[] = [];
             const ali = (id: string): AcediaEvent => ({ ...mail(id), meta: { messageId: id, from: "promo@aliexpress.com" } });
             const ai = scripted([

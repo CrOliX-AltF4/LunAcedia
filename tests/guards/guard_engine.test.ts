@@ -211,7 +211,7 @@ describe("evaluateGuard — actions and precedence", () => {
     });
 });
 
-describe("evaluateGuard — actions at the source (ADR-023 T3)", () => {
+describe("evaluateGuard — actions at the source", () => {
     it("collects what the matching rules do at the source, once each, with the rule that asks", () => {
         const rules = [
             rule({ id: "a", actions: [{ type: "source", action: "mark_spam" }] }),

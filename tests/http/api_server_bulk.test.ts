@@ -50,7 +50,7 @@ function mail(id: string, from: string): AcediaEvent {
     };
 }
 
-// « Mets en indésirables tout ce qui vient d'aliexpress » (ADR-023 T2): the selection is computed and frozen by LunAcedia
+// « Mets en indésirables tout ce qui vient d'aliexpress »: the selection is computed and frozen by LunAcedia
 // when the batch is proposed, and a batch always waits for Master — whatever its tier says.
 describe("AcediaApiServer — bulk_email", () => {
     let dir: string;
@@ -137,6 +137,13 @@ describe("AcediaApiServer — bulk_email", () => {
         expect(store.get("email-3")).toBeDefined();
     });
 
+    it("a kind set to manual is refused with where to change it", async () => {
+        const { base } = await start({ bulk_email: "manual" });
+        const r = await call("POST", `${base}/api/actions`, spamAli);
+        expect(r.status).toBe(403);
+        expect(r.body.error).toMatch(/manual.*Confiance/);
+    });
+
     it("refuses a batch that matches nothing, and says so", async () => {
         const { base } = await start();
         const r = await call("POST", `${base}/api/actions`, {
@@ -156,7 +163,7 @@ describe("AcediaApiServer — bulk_email", () => {
         expect(executed).toEqual([]);
     });
 
-    // ADR-023 T3 — « à l'avenir, mets-les en indésirables »: a rule proposed, held for Master, added once confirmed.
+    // « à l'avenir, mets-les en indésirables »: a rule proposed, held for Master, added once confirmed.
     describe("create_rule", () => {
         const ruleAli = {
             connector: "Gmail",

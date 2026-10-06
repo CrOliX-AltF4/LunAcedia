@@ -58,7 +58,7 @@ if (connectors.length === 0) {
 const guardRules = new GuardRulesStore();
 const guardJournal = new GuardJournal();
 const guardStats = new GuardStats();
-// What confirmed rules do at the source (ADR-023 T3), mail by mail.
+// What confirmed rules do at the source, mail by mail.
 const ruleActions = new RuleActionJournal();
 await Promise.all([guardRules.load(), guardJournal.load(), guardStats.load(), ruleActions.load()]);
 const guardPipeline = new GuardPipeline({

@@ -10,6 +10,6 @@ export interface GuardServices {
     rules: GuardRulesStore;
     journal: GuardJournal;
     stats: GuardStats;
-    /** What rules did at the source (ADR-023 T3) — absent: no such journal on this deployment. */
+    /** What rules did at the source — absent: no such journal on this deployment. */
     ruleActions?: RuleActionJournal;
 }

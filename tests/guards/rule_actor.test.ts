@@ -7,7 +7,7 @@ import type { IConnector } from "../../source/connectors/connector_interface.js"
 import type { ConnectorAction } from "../../source/types/connector_action.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// What a confirmed rule does at the source (ADR-023 T3): Gmail acts, each mail touched is journaled with its rule.
+// What a confirmed rule does at the source: Gmail acts, each mail touched is journaled with its rule.
 
 const mail: AcediaEvent = {
     type: "email.received",

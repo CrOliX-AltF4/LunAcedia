@@ -136,7 +136,20 @@ function unavailableActions(offered: ReadonlySet<string>): string[] {
         .map((a) => `${a.kind} (${a.description.replace(/\.$/, "")})`);
 }
 
-function systemPrompt(persona: string, now: number, unavailable: string[]): string {
+/** Why some actions are off this run, and where the user lifts it — said, never left to a guess. */
+function whyUnavailable(req: AgentRequest, allowWrites: boolean): string[] {
+    if (req.readOnly)
+        return [
+            "Autonomy is paused (the kill switch): you may only read. Say so — it is lifted from the panel or LunAcedia's dashboard.",
+        ];
+    if (!allowWrites)
+        return [
+            "The writes are switched off: you may sort the box and propose replies only. Say so, and that writes are turned on in the panel (Confiance) or LunAcedia's dashboard.",
+        ];
+    return [];
+}
+
+function systemPrompt(persona: string, now: number, unavailable: string[], why: string[] = []): string {
     return [
         persona,
         "",
@@ -146,6 +159,7 @@ function systemPrompt(persona: string, now: number, unavailable: string[]): stri
             ? [
                   `Not available to you right now: ${unavailable.join("; ")}.`,
                   "When the user asks for one of these, answer at once that it is not possible yet — do not search for a way around it.",
+                  ...why,
               ]
             : []),
         "Ids passed to actions must come from tool results.",
@@ -220,6 +234,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                 deps.persona,
                 now(),
                 unavailableActions(new Set(tools.map((t) => t.name))),
+                whyUnavailable(req, allowWrites),
             ),
         },
         ...(req.history ?? [])
@@ -323,7 +338,8 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         });
                         content = JSON.stringify({ error: built.error });
                     } else if (!allowWrites && writeKinds.has(built.action.kind)) {
-                        const reason = "write actions are off for now (sorting and replies only)";
+                        const reason =
+                            "write actions are switched off (sorting and replies only) — turned on in the panel (Confiance) or the dashboard";
                         step.error = reason;
                         result.actions.push({
                             kind: built.action.kind,
@@ -334,7 +350,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         });
                         content = JSON.stringify({ status: "refused", reason });
                     } else if (req.readOnly) {
-                        const reason = "actions are paused (read-only request)";
+                        const reason = "autonomy is paused (kill switch) — only reading is allowed";
                         step.error = reason;
                         result.actions.push({
                             kind: built.action.kind,

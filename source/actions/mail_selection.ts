@@ -1,5 +1,5 @@
 /**
- * A selection of the box's mails (ADR-023 T2): « tous les mails qui viennent d'aliexpress ». The same structured
+ * A selection of the box's mails: « tous les mails qui viennent d'aliexpress ». The same structured
  * conditions as the guards — substring, exact sender, domain — never a regex, never a model; criteria are ANDed and
  * at least one is required, so a selection is never the whole box by accident.
  */

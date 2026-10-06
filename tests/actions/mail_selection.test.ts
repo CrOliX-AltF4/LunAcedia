@@ -3,7 +3,7 @@ import { EventStore } from "../../source/store/event_store.js";
 import { selectMail, describeMatch, BULK_LIMIT } from "../../source/actions/mail_selection.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// « Tous les mails qui viennent d'aliexpress » (ADR-023 T2): the box's mails that match, the same structured conditions
+// « Tous les mails qui viennent d'aliexpress »: the box's mails that match, the same structured conditions
 // as the guards — never a regex, never a model.
 
 function mail(id: string, from: string, title = `Mail ${id}`, ts = 1_000 + Number(id)): AcediaEvent {

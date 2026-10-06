@@ -6,7 +6,7 @@ import type { AcediaEvent } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import { REMOVING_SOURCE_KINDS, type RuleSourceKind } from "./guard_types.js";
 
-/** One mail a rule acted on at the source — never silent (ADR-023 T3). */
+/** One mail a rule acted on at the source — never silent. */
 export interface RuleActionEntry {
     ts: number;
     ruleId: string;

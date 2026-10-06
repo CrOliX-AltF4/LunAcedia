@@ -60,7 +60,7 @@ export class IngestionHub {
     private started = false;
     /** The initial sweep finished: the box reflects the sources (see isReady). */
     private initialSweepDone = false;
-    /** Mails a rule already acted on at the source (ADR-023 T3). */
+    /** Mails a rule already acted on at the source. */
     private readonly ruleActed = new Set<string>();
 
     constructor(
@@ -74,7 +74,7 @@ export class IngestionHub {
          */
         private readonly isHeld: (key: string) => boolean = () => false,
         /**
-         * Carries out what a rule does at the source (ADR-023 T3) and says what came of it: `removed` = the mail left the
+         * Carries out what a rule does at the source and says what came of it: `removed` = the mail left the
          * inbox (it is then neither stored nor announced), `read` = it was marked read. Absent: rules only sort the box.
          */
         private readonly ruleActor?: (

@@ -107,7 +107,7 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         expect((await call("GET", `${base}/api/guard/rules`)).status).toBe(503);
     });
 
-    // ADR-023 T3 — what rules do at the source: one switch (law 3), and every mail touched shown.
+    // what rules do at the source: one switch (law 3), and every mail touched shown.
     it("turns every rule's actions at the source off and on, and says so with the rules", async () => {
         const { base } = await start();
         expect((await call("GET", `${base}/api/guard/rules`)).body.sourceActions).toBe(true);

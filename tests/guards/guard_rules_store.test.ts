@@ -11,7 +11,7 @@ const goodRule = {
 };
 
 describe("validateRules", () => {
-    // ADR-023 T3: a rule may act at the source, on every mail it matches at collection.
+    // a rule may act at the source, on every mail it matches at collection.
     it("accepts actions at the source, a label only with its name", () => {
         const res = validateRules([
             {

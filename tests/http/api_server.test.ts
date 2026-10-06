@@ -946,6 +946,29 @@ describe("AcediaApiServer — GET /api/config/risk", () => {
     });
 });
 
+// what a client needs to show and set the tiers without a copy of its own — LunAcedia's own words.
+describe("AcediaApiServer — GET /api/config/actions", () => {
+    it("lists every action with its label, connector, tier, risk, and whether its tier is locked", async () => {
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/config/actions`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        const list = res.body as Array<Record<string, unknown>>;
+        expect(list.find((a) => a.kind === "delete_email")).toEqual({
+            kind: "delete_email",
+            label: "Mettre un mail à la corbeille",
+            connector: "Gmail",
+            tier: "confirm",
+            risk: "medium",
+            category: "triage",
+            locked: false,
+        });
+        expect(list.find((a) => a.kind === "merge_pr")).toMatchObject({ tier: "manual", locked: true });
+    });
+});
+
 describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     // Isolated tmp files per test — writing overrides must never touch the real ~/.lunacedia.
     function tmpTierStoreWithOverrides(): ActionTierStore {

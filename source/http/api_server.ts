@@ -33,7 +33,8 @@ import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
-import { ACTION_RISK } from "../types/action_tier.js";
+import { ACTION_RISK, IMMUTABLE_TIERS } from "../types/action_tier.js";
+import { actionCapabilities } from "../capabilities/capability_manifest.js";
 import { ActionCooldownTracker } from "../actions/action_cooldown.js";
 import { resolveTierScope } from "../actions/resolve_tier_scope.js";
 import { resolveEventSync } from "../store/event_sync.js";
@@ -119,6 +120,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   POST /api/actions/:id/cancel   → 204, discards a pending action
  *   GET  /api/actions/pending      → PendingAction[]
  *   POST /api/inbox/select         body: { match } → { matched, limit, sample } — what a bulk_email would touch
+ *   GET  /api/config/actions       → [{ kind, label, connector, tier, risk, category, locked }] — the tiers in words
  *   GET  /api/config/tiers         → ActionTierConfig
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
  *   GET  /api/config/risk          → Record<ActionKind, ActionRisk> — static, not configurable
@@ -529,7 +531,7 @@ export class AcediaApiServer {
         if (tier === "manual") {
             return {
                 status: "refused",
-                reason: `'${action.kind}' is set to manual — not executable via this endpoint`,
+                reason: `'${action.kind}' is set to manual — never done through LunAcedia; its tier is changed in the panel (Confiance) or the dashboard`,
             };
         }
         // A batch: the selection is LunAcedia's own, frozen now (a caller's ids are dropped), and it always waits.
@@ -908,7 +910,7 @@ export class AcediaApiServer {
             return json(res, 204, null);
         }
 
-        // POST /api/inbox/select — what a batch would touch, without acting (ADR-023 T2)
+        // POST /api/inbox/select — what a batch would touch, without acting
         if (method === "POST" && path === "/api/inbox/select") {
             let body: unknown;
             try {
@@ -930,6 +932,24 @@ export class AcediaApiServer {
                 res,
                 200,
                 this.pendingStore.list().map((p) => ({ ...p, summary: summarizeAction(p.action) })),
+            );
+        }
+
+        // GET /api/config/actions — each action in words with its tier: a client shows it, keeps no copy
+        if (method === "GET" && path === "/api/config/actions") {
+            const tiers = this.tierStore.getAll();
+            return json(
+                res,
+                200,
+                actionCapabilities().map((a) => ({
+                    kind: a.kind,
+                    label: a.label,
+                    connector: a.connector,
+                    tier: tiers[a.kind],
+                    risk: a.risk,
+                    category: a.category,
+                    locked: a.kind in IMMUTABLE_TIERS,
+                })),
             );
         }
 

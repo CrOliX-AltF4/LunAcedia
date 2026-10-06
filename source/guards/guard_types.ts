@@ -20,7 +20,7 @@ export type GuardCondition =
     /** A source header is present (e.g. `List-Unsubscribe`), read from `meta.headers`. */
     | { field: "header"; op: "present"; name: string };
 
-/** What a rule may do at the source, on each mail it matches at collection (ADR-023 T3). */
+/** What a rule may do at the source, on each mail it matches at collection. */
 export type { RuleSourceKind };
 
 /** The source actions that take a mail out of the inbox — never applied to a VIP. */

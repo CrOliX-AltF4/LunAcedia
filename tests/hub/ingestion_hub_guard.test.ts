@@ -175,7 +175,7 @@ describe("IngestionHub — guard stage", () => {
         expect(received).toHaveLength(1);
     });
 
-    describe("actions at the source (ADR-023 T3)", () => {
+    describe("actions at the source", () => {
         const spamAli = {
             id: "spam-ali",
             name: "AliExpress",
