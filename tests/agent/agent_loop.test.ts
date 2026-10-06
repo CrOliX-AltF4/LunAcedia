@@ -120,6 +120,7 @@ describe("runAgent — bounded tool loop", () => {
                 action: { kind: "create_task", fields: { title: "Appeler Paul" } },
                 status: "pending",
                 id: "p1",
+                summary: "Créer une tâche — Appeler Paul",
             },
         ]);
     });
@@ -308,6 +309,23 @@ describe("runAgent — bounded tool loop", () => {
         );
     });
 
+    it("offers reply while writes are off — the first write opened (CrOliX, 2026-10-06)", async () => {
+        const { provider } = scripted([
+            {
+                content: null,
+                toolCalls: [call("c1", "reply", { sourceId: "1", body: "Merci, c'est noté." })],
+            },
+            { content: "Réponse prête, à confirmer.", toolCalls: [] },
+        ]);
+        const d = { ...deps(provider), allowWrites: false };
+        await runAgent({ text: "réponds-lui que c'est noté", untrusted: true }, d);
+        expect(d.dispatch).toHaveBeenCalledWith(
+            "Gmail",
+            { kind: "reply", sourceId: "1", body: "Merci, c'est noté." },
+            true,
+        );
+    });
+
     it("passes the caller's context to the model as context, not as the request", async () => {
         const { provider, seen } = scripted([{ content: "ok", toolCalls: [] }]);
         await runAgent(
@@ -335,6 +353,20 @@ describe("runAgent — actions it cannot take are declared (C17)", () => {
         expect(system).toContain("create_task");
         expect(system).toContain("not possible yet");
         expect(system).not.toMatch(/Not available[^.]*archive_email/);
+        expect(system).not.toMatch(/Not available[^.]*[:;] reply \(/);
+    });
+
+    // a refusal says why, and where it is lifted — never a silent « not possible ».
+    it("says writes are switched off and where they are turned on", async () => {
+        const { provider, seen } = scripted([{ content: "Pas encore possible.", toolCalls: [] }]);
+        await runAgent({ text: "crée une tâche" }, { ...deps(provider), allowWrites: false });
+        expect(seen[0]![0]!.content).toMatch(/writes are switched off.*Confiance/);
+    });
+
+    it("says autonomy is paused on a read-only request", async () => {
+        const { provider, seen } = scripted([{ content: "ok", toolCalls: [] }]);
+        await runAgent({ text: "archive tout", readOnly: true }, deps(provider));
+        expect(seen[0]![0]!.content).toMatch(/autonomy is paused/i);
     });
 
     it("declares every action on a read-only request", async () => {

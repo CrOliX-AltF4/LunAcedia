@@ -10,7 +10,7 @@ import type { ConnectorSlug } from "./connector_registry.js";
 export type SourceState = "unread" | "read" | "gone";
 
 /** Master's own gestures on an item of the box — never offered to the agent as tools. */
-export type InboxGesture = "open" | "read" | "unread" | "archive" | "trash" | "done";
+export type InboxGesture = "open" | "read" | "unread" | "archive" | "trash" | "spam" | "done";
 
 /** What the gesture changed at the source (null: nothing), and the full text for "open". */
 export interface InboxGestureResult {

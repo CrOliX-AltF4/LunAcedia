@@ -5,6 +5,25 @@
  * ActionTierStore keys autonomy tiers by kind alone — "delete_email" and "delete_event"
  * must never collide the way a bare "delete" would.
  */
+/** The sorting a batch may apply (bulk_email) — the Core mirrors this list as is. */
+export type BulkEmailKind =
+    | "archive_email"
+    | "delete_email"
+    | "mark_email_read"
+    | "mark_email_unread"
+    | "mark_spam"
+    | "star_email"
+    | "label_email";
+
+/** What a rule may do at the source, on each mail it matches at collection — the Core mirrors this list as is. */
+export type RuleSourceKind =
+    | "archive_email"
+    | "delete_email"
+    | "mark_spam"
+    | "mark_email_read"
+    | "star_email"
+    | "label_email";
+
 export type ConnectorAction =
     // Gmail
     | { kind: "reply"; sourceId: string; body: string }
@@ -12,6 +31,41 @@ export type ConnectorAction =
     | { kind: "delete_email"; sourceId: string }
     | { kind: "mark_email_read"; sourceId: string }
     | { kind: "mark_email_unread"; sourceId: string }
+    | { kind: "mark_spam"; sourceId: string }
+    | { kind: "unmark_spam"; sourceId: string }
+    | { kind: "star_email"; sourceId: string }
+    | { kind: "unstar_email"; sourceId: string }
+    // `label` is the Gmail label's name, as Master writes it — created on first use.
+    | { kind: "label_email"; sourceId: string; label: string }
+    | { kind: "unlabel_email"; sourceId: string; label: string }
+    // Every mail of the box that matches (criteria ANDed, at least one). LunAcedia computes the selection and freezes
+    // `sourceIds` (and how many `matched`) when the batch is proposed — a caller's ids are never kept.
+    | {
+          kind: "bulk_email";
+          action: BulkEmailKind;
+          match: {
+              from?: string;
+              fromContains?: string;
+              fromDomain?: string;
+              subjectContains?: string;
+          };
+          label?: string;
+          sourceIds?: string[];
+          matched?: number;
+      }
+    // A sorting rule for the mails to come (a guard rule acting at the source), added once Master confirms.
+    | {
+          kind: "create_rule";
+          name: string;
+          match: {
+              from?: string;
+              fromContains?: string;
+              fromDomain?: string;
+              subjectContains?: string;
+          };
+          action: RuleSourceKind;
+          label?: string;
+      }
     // Google Calendar
     | {
           kind: "create_event";

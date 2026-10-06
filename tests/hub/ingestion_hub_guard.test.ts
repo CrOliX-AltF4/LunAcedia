@@ -51,7 +51,12 @@ describe("IngestionHub — guard stage", () => {
         if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
-    async function setup(events: AcediaEvent[], rules: unknown[], vip: string[] = []) {
+    async function setup(
+        events: AcediaEvent[],
+        rules: unknown[],
+        vip: string[] = [],
+        ruleActor?: ConstructorParameters<typeof IngestionHub>[4],
+    ) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "hub-guard-"));
         const rulesStore = new GuardRulesStore(path.join(dir, "rules.json"));
         await rulesStore.replaceAll(rules);
@@ -74,7 +79,13 @@ describe("IngestionHub — guard stage", () => {
             poll: vi.fn().mockResolvedValue(events),
             setSettledFilter: settledFilter,
         };
-        hub = new IngestionHub([connector], path.join(dir, "seen.json"), pipeline);
+        hub = new IngestionHub(
+            [connector],
+            path.join(dir, "seen.json"),
+            pipeline,
+            undefined,
+            ruleActor,
+        );
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
         return { hub, received, journal, pipeline, rulesStore, connector, settledFilter };
@@ -168,5 +179,84 @@ describe("IngestionHub — guard stage", () => {
         hub.onEvent((e) => received.push(e));
         await hub.pollOne("email");
         expect(received).toHaveLength(1);
+    });
+
+    describe("actions at the source", () => {
+        const spamAli = {
+            id: "spam-ali",
+            name: "AliExpress",
+            conditions: [{ field: "from", op: "contains", value: "aliexpress" }],
+            actions: [{ type: "source", action: "mark_spam" }],
+        };
+        const labelBank = {
+            id: "label-bank",
+            name: "Banque",
+            conditions: [{ field: "from", op: "domain", value: "banque.fr" }],
+            actions: [{ type: "source", action: "label_email", label: "Banque" }],
+        };
+
+        it("a mail a rule takes out of the inbox is acted on at the source, never announced, never acted on twice", async () => {
+            const actor = vi.fn().mockResolvedValue({ removed: true, read: false });
+            const { hub, received } = await setup(
+                [mail("1", "promo@aliexpress.com"), mail("2", "friend@home.org")],
+                [spamAli],
+                [],
+                actor,
+            );
+            await hub.pollOne("email");
+            await hub.pollOne("email");
+            expect(received.map((e) => e.dedupeKey)).toEqual(["email-2"]);
+            expect(actor).toHaveBeenCalledTimes(1);
+            expect(actor.mock.calls[0]![1]).toEqual([{ ruleId: "spam-ali", action: "mark_spam" }]);
+        });
+
+        it("when the source refuses, the mail stays in the box — a failed rule is never a lost mail", async () => {
+            const actor = vi.fn().mockResolvedValue({ removed: false, read: false });
+            const { hub, received } = await setup(
+                [mail("1", "promo@aliexpress.com")],
+                [spamAli],
+                [],
+                actor,
+            );
+            await hub.pollOne("email");
+            expect(received.map((e) => e.dedupeKey)).toEqual(["email-1"]);
+        });
+
+        it("acts once per mail, even when the urgent pass sees it again before it is announced", async () => {
+            const actor = vi.fn().mockResolvedValue({ removed: false, read: false });
+            const { hub } = await setup([mail("3", "info@banque.fr")], [labelBank], [], actor);
+            const urgent = (hub as unknown as { pollUrgent(): Promise<void> }).pollUrgent.bind(hub);
+            await urgent();
+            await urgent();
+            await hub.pollOne("email");
+            expect(actor).toHaveBeenCalledOnce();
+        });
+
+        it("a label is applied and the mail still arrives", async () => {
+            const actor = vi.fn().mockResolvedValue({ removed: false, read: false });
+            const { hub, received } = await setup(
+                [mail("3", "info@banque.fr")],
+                [labelBank],
+                [],
+                actor,
+            );
+            await hub.pollOne("email");
+            expect(actor).toHaveBeenCalledOnce();
+            expect(received).toHaveLength(1);
+        });
+
+        it("with the switch off, rules only sort the box: nothing is done at the source (law 3)", async () => {
+            const actor = vi.fn();
+            const { hub, received, rulesStore } = await setup(
+                [mail("1", "promo@aliexpress.com")],
+                [spamAli],
+                [],
+                actor,
+            );
+            await rulesStore.setSourceActionsEnabled(false);
+            await hub.pollOne("email");
+            expect(actor).not.toHaveBeenCalled();
+            expect(received).toHaveLength(1);
+        });
     });
 });

@@ -44,6 +44,45 @@ interface GmailMessageMeta {
     snippet?: string;
 }
 
+type LabelMutation = Extract<
+    ConnectorAction,
+    {
+        kind:
+            | "archive_email"
+            | "delete_email"
+            | "mark_email_read"
+            | "mark_email_unread"
+            | "mark_spam"
+            | "unmark_spam"
+            | "star_email"
+            | "unstar_email"
+            | "label_email"
+            | "unlabel_email";
+    }
+>;
+
+const LABEL_CHANGES: Record<
+    Exclude<LabelMutation["kind"], "label_email" | "unlabel_email">,
+    { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined
+> = {
+    archive_email: { removeLabelIds: ["INBOX"] },
+    delete_email: undefined, // the /trash endpoint, no body
+    mark_email_read: { removeLabelIds: ["UNREAD"] },
+    mark_email_unread: { addLabelIds: ["UNREAD"] },
+    mark_spam: { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
+    unmark_spam: { addLabelIds: ["INBOX"], removeLabelIds: ["SPAM"] },
+    star_email: { addLabelIds: ["STARRED"] },
+    unstar_email: { removeLabelIds: ["STARRED"] },
+};
+
+function isLabelMutation(action: ConnectorAction): action is LabelMutation {
+    return (
+        action.kind in LABEL_CHANGES ||
+        action.kind === "label_email" ||
+        action.kind === "unlabel_email"
+    );
+}
+
 /**
  * Polls the whole Gmail INBOX (read and unread) and classifies each mail by configurable rules.
  *
@@ -304,7 +343,7 @@ export class GmailConnector implements IConnector {
         await assertHttpOk(resp, `[Gmail] open ${id}`);
         const msg = (await resp.json()) as { payload?: GmailPart };
         const body = extractBody(msg.payload);
-        await this.modifyMessage(token, "mark_email_read", id);
+        await this.modifyMessage(token, { kind: "mark_email_read", sourceId: id });
         return { body };
     }
 
@@ -322,12 +361,13 @@ export class GmailConnector implements IConnector {
             unread: ["mark_email_unread", "unread"],
             archive: ["archive_email", "removed"],
             trash: ["delete_email", "removed"],
+            spam: ["mark_spam", "removed"],
         } as const;
         if (!(gesture in kinds)) throw new Error(`[Gmail] "${gesture}" does not apply to a mail`);
         const [kind, change] = kinds[gesture as keyof typeof kinds];
         const token = await this.accessToken();
         if (!token) throw new Error("[Gmail] not configured");
-        await this.modifyMessage(token, kind, id);
+        await this.modifyMessage(token, { kind, sourceId: id });
         return { change };
     }
 
@@ -384,15 +424,8 @@ export class GmailConnector implements IConnector {
     }
 
     async executeAction(action: ConnectorAction): Promise<void> {
-        if (
-            action.kind !== "reply" &&
-            action.kind !== "archive_email" &&
-            action.kind !== "delete_email" &&
-            action.kind !== "mark_email_read" &&
-            action.kind !== "mark_email_unread"
-        ) {
+        if (action.kind !== "reply" && action.kind !== "bulk_email" && !isLabelMutation(action))
             return;
-        }
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken) return;
 
@@ -404,13 +437,12 @@ export class GmailConnector implements IConnector {
             throw e;
         }
 
-        if (
-            action.kind === "archive_email" ||
-            action.kind === "delete_email" ||
-            action.kind === "mark_email_read" ||
-            action.kind === "mark_email_unread"
-        ) {
-            await this.modifyMessage(token, action.kind, action.sourceId);
+        if (isLabelMutation(action)) {
+            await this.modifyMessage(token, action);
+            return;
+        }
+        if (action.kind === "bulk_email") {
+            await this.modifyBatch(token, action);
             return;
         }
 
@@ -471,27 +503,25 @@ export class GmailConnector implements IConnector {
         }
     }
 
-    /** archive/delete/mark-read/mark-unread all reduce to a Gmail label mutation.
-     *  delete_email moves to Trash (recoverable, not a permanent delete) — matches what
-     *  "delete" means in a normal Gmail client. */
-    private async modifyMessage(
-        token: string,
-        kind: "archive_email" | "delete_email" | "mark_email_read" | "mark_email_unread",
-        messageId: string,
-    ): Promise<void> {
-        const endpoint = kind === "delete_email" ? "trash" : "modify";
-        const body: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined =
-            kind === "archive_email"
-                ? { removeLabelIds: ["INBOX"] }
-                : kind === "mark_email_read"
-                  ? { removeLabelIds: ["UNREAD"] }
-                  : kind === "mark_email_unread"
-                    ? { addLabelIds: ["UNREAD"] }
-                    : undefined;
+    /** Every sorting action reduces to a Gmail label mutation. delete_email moves to Trash (recoverable, not a
+     *  permanent delete) — what "delete" means in a normal Gmail client. */
+    private async modifyMessage(token: string, action: LabelMutation): Promise<void> {
+        const endpoint = action.kind === "delete_email" ? "trash" : "modify";
+        let body: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined;
+        if (action.kind === "label_email" || action.kind === "unlabel_email") {
+            const labelId = await this.labelId(token, action.label, action.kind === "label_email");
+            if (!labelId) return; // removing a label Gmail does not have: nothing to do
+            body =
+                action.kind === "label_email"
+                    ? { addLabelIds: [labelId] }
+                    : { removeLabelIds: [labelId] };
+        } else {
+            body = LABEL_CHANGES[action.kind];
+        }
 
         try {
             const resp = await fetch(
-                `${GMAIL_API}/messages/${encodeURIComponent(messageId)}/${endpoint}`,
+                `${GMAIL_API}/messages/${encodeURIComponent(action.sourceId)}/${endpoint}`,
                 {
                     method: "POST",
                     headers: {
@@ -501,11 +531,69 @@ export class GmailConnector implements IConnector {
                     ...(body ? { body: JSON.stringify(body) } : {}),
                 },
             );
-            await assertHttpOk(resp, `[Gmail] ${kind}`);
+            await assertHttpOk(resp, `[Gmail] ${action.kind}`);
         } catch (e) {
-            console.error(`[Gmail] ${kind} error:`, (e as Error).message);
+            console.error(`[Gmail] ${action.kind} error:`, (e as Error).message);
             throw e;
         }
+    }
+
+    /** A frozen batch: one batchModify for label changes (Gmail takes up to 1000 ids), the trash mail by mail. */
+    private async modifyBatch(
+        token: string,
+        action: Extract<ConnectorAction, { kind: "bulk_email" }>,
+    ): Promise<void> {
+        const ids = action.sourceIds ?? [];
+        if (ids.length === 0) throw new Error("[Gmail] bulk_email: no mail was selected");
+        if (action.action === "delete_email") {
+            let next = 0;
+            const worker = async (): Promise<void> => {
+                while (next < ids.length) {
+                    const id = ids[next++]!;
+                    await this.modifyMessage(token, { kind: "delete_email", sourceId: id });
+                }
+            };
+            await Promise.all(
+                Array.from({ length: Math.min(TRASH_READ_CONCURRENCY, ids.length) }, worker),
+            );
+            return;
+        }
+        let change: { addLabelIds?: string[]; removeLabelIds?: string[] } | undefined;
+        if (action.action === "label_email") {
+            if (!action.label?.trim())
+                throw new Error("[Gmail] bulk_email: label_email needs a label");
+            const labelId = await this.labelId(token, action.label, true);
+            change = { addLabelIds: [labelId!] };
+        } else {
+            change = LABEL_CHANGES[action.action];
+        }
+        const resp = await fetch(`${GMAIL_API}/messages/batchModify`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ ids, ...change }),
+        });
+        await assertHttpOk(resp, `[Gmail] bulk ${action.action} (${ids.length})`);
+    }
+
+    /** A user label's id, by name (case-insensitive); created when [create] and Gmail has none by that name. */
+    private async labelId(token: string, name: string, create: boolean): Promise<string | null> {
+        const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+        const list = await fetch(`${GMAIL_API}/labels`, { headers });
+        await assertHttpOk(list, "[Gmail] list labels");
+        const { labels = [] } = (await list.json()) as {
+            labels?: Array<{ id: string; name: string }>;
+        };
+        const wanted = name.trim().toLowerCase();
+        const found = labels.find((l) => l.name.toLowerCase() === wanted);
+        if (found) return found.id;
+        if (!create) return null;
+        const made = await fetch(`${GMAIL_API}/labels`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ name: name.trim() }),
+        });
+        await assertHttpOk(made, `[Gmail] create label "${name}"`);
+        return ((await made.json()) as { id: string }).id;
     }
 }
 

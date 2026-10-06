@@ -1,5 +1,10 @@
 import type { AcediaEvent } from "../types/acedia_event.js";
-import type { GuardCondition, GuardRule, GuardVerdict } from "./guard_types.js";
+import {
+    REMOVING_SOURCE_KINDS,
+    type GuardCondition,
+    type GuardRule,
+    type GuardVerdict,
+} from "./guard_types.js";
 
 /** Neutral, connector-independent view of an event — rules are written against this, never
  *  against a connector's own types, so the same engine serves every source. */
@@ -70,6 +75,15 @@ function conditionMatches(c: GuardCondition, view: EventView): boolean {
     }
 }
 
+/** Every condition holds (and there is at least one) — the matcher a guard rule and a selection share. */
+export function conditionsMatch(
+    conditions: readonly GuardCondition[],
+    event: AcediaEvent,
+): boolean {
+    const view = viewOf(event);
+    return conditions.length > 0 && conditions.every((c) => conditionMatches(c, view));
+}
+
 function ruleMatches(rule: GuardRule, view: EventView): boolean {
     // A rule without conditions would match everything — refuse it here as well as at validation.
     return (
@@ -111,6 +125,7 @@ export function evaluateGuard(
         vipProtected: false,
     };
     const seenTags = new Set<string>();
+    const seenSource = new Set<string>();
     let wantsDrop = false;
     let dropRuleId: string | undefined;
     let firstEffectRuleId: string | undefined;
@@ -134,6 +149,20 @@ export function evaluateGuard(
                 firstEffectRuleId ??= rule.id;
             } else if (action.type === "set_priority") {
                 if (verdict.priority === undefined) verdict.priority = action.priority;
+                firstEffectRuleId ??= rule.id;
+            } else if (action.type === "source") {
+                const key = `${action.action}:${action.label?.toLowerCase() ?? ""}`;
+                if (seenSource.has(key)) continue;
+                seenSource.add(key);
+                if (REMOVING_SOURCE_KINDS.has(action.action) && isVip(event)) {
+                    verdict.vipProtected = true;
+                    continue;
+                }
+                (verdict.source ??= []).push({
+                    ruleId: rule.id,
+                    action: action.action,
+                    ...(action.label && { label: action.label }),
+                });
                 firstEffectRuleId ??= rule.id;
             }
         }

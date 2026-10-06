@@ -1,3 +1,4 @@
+import { actionCapabilities } from "../../source/capabilities/capability_manifest.js";
 import { describe, it, expect } from "vitest";
 import { DASHBOARD_HTML } from "../../source/http/dashboard";
 
@@ -90,6 +91,11 @@ describe("DASHBOARD_HTML renderPending() sink", () => {
         expect(block).toContain('onclick="cancelPending(this)"');
         expect(block).not.toMatch(/onclick="confirmPending\('/);
         expect(block).not.toMatch(/onclick="cancelPending\('/);
+    });
+
+    it("lists every action kind of the manifest in the tiers, with its label", () => {
+        for (const a of actionCapabilities())
+            expect(DASHBOARD_HTML, a.kind).toContain(`"${a.kind}":${JSON.stringify(a.label)}`);
     });
 
     it("wraps every interpolated pending-action field in esc(...) — label and detail alike", () => {
@@ -187,6 +193,7 @@ describe("dashboard box", () => {
         );
         expect(cardBlock).toContain('data-g="archive"');
         expect(cardBlock).toContain('data-g="trash"');
+        expect(cardBlock).toContain('data-g="spam"');
         expect(cardBlock).toContain('data-g="unread"');
         expect(cardBlock).toContain('data-g="done"');
         // "Fait" on a task — same gesture as GitHub's, its own label.

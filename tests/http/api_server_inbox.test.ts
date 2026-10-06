@@ -65,6 +65,7 @@ function fakeGmail(fail = false): FakeGmail {
         unread: { change: "unread" },
         archive: { change: "removed" },
         trash: { change: "removed" },
+        spam: { change: "removed" },
     };
     return {
         slug: "email",
@@ -145,6 +146,15 @@ describe("AcediaApiServer — inbox routes", () => {
         expect(r.body).toEqual({ ok: true, change: "read", body: "Texte intégral" });
         expect(store.get("email-a")!.read).toBe(true);
         expect(emitted).toEqual([{ op: "read", key: "email-a", source: "email" }]);
+    });
+
+    it("reports a mail as spam directly, and it leaves the box (D1)", async () => {
+        const gmail = fakeGmail();
+        const { base, store } = await start(gmail, [mail("a")]);
+        const r = await call("POST", `${base}/api/inbox/email-a/spam`);
+        expect(r.body).toEqual({ ok: true, change: "removed" });
+        expect(gmail.gestures).toEqual([["spam", "email-a"]]);
+        expect(store.get("email-a")).toBeUndefined();
     });
 
     it("trashes a mail directly — no tier, no pending: Master's click is the decision (D1)", async () => {

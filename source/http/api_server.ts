@@ -33,7 +33,8 @@ import type { TimeSlot } from "../connectors/calendar/free_slots.js";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import type { ConnectorAction } from "../types/connector_action.js";
 import type { ActionTierStore } from "../actions/action_tier_store.js";
-import { ACTION_RISK } from "../types/action_tier.js";
+import { ACTION_RISK, IMMUTABLE_TIERS } from "../types/action_tier.js";
+import { actionCapabilities } from "../capabilities/capability_manifest.js";
 import { ActionCooldownTracker } from "../actions/action_cooldown.js";
 import { resolveTierScope } from "../actions/resolve_tier_scope.js";
 import { resolveEventSync } from "../store/event_sync.js";
@@ -50,6 +51,12 @@ import {
     exchangeGoogleCode,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
+import {
+    BULK_LIMIT,
+    selectMail,
+    ruleFromAction,
+    type MailMatch,
+} from "../actions/mail_selection.js";
 
 const SOURCES = new Set<string>(["github", "calendar", "email", "rss", "ha", "tasks", "system"]);
 const PRIORITIES = new Set<string>(["urgent", "normal", "info"]);
@@ -117,6 +124,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  | 429 if the kind is on cooldown (see ActionCooldownTracker)
  *   POST /api/actions/:id/cancel   → 204, discards a pending action
  *   GET  /api/actions/pending      → PendingAction[]
+ *   POST /api/inbox/select         body: { match } → { matched, limit, sample } — what a bulk_email would touch
+ *   GET  /api/config/actions       → [{ kind, label, connector, tier, risk, category, locked }] — the tiers in words
  *   GET  /api/config/tiers         → ActionTierConfig
  *   PATCH /api/config/tiers        body: Partial<Record<ActionKind, ActionTier>>
  *   GET  /api/config/risk          → Record<ActionKind, ActionRisk> — static, not configurable
@@ -130,6 +139,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
  *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
  *   GET  /api/guard/journal        ?limit=  events a rule dropped, newest first (never silent, restorable)
+ *   GET  /api/guard/actions        ?limit=  what rules did at the source, mail by mail, newest first
+ *   PUT  /api/guard/source-actions body: { enabled }  the one switch over every rule's actions at the source
  *   POST /api/guard/journal/restore body: { dedupeKey }  re-dispatches a dropped event, bypassing dedup + guard
  *   POST /api/guard/preview        body: { rules? }  what-if against the store + journal, changes nothing
  *   GET  /api/events               also accepts ?tag=  (guard tag, case-insensitive)
@@ -319,6 +330,7 @@ export class AcediaApiServer {
             version: g.rules.getVersion(),
             rules: g.rules.getRules(),
             stats: g.stats.getAll(),
+            sourceActions: g.rules.sourceActionsEnabled(),
         });
 
         if (method === "GET" && path === "/api/guard/rules") return json(res, 200, rulesPayload());
@@ -335,6 +347,28 @@ export class AcediaApiServer {
             if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
             return json(res, 200, rulesPayload());
+        }
+
+        if (method === "PUT" && path === "/api/guard/source-actions") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const enabled = (body as { enabled?: unknown } | null)?.enabled;
+            if (typeof enabled !== "boolean")
+                return json(res, 400, { error: "Body must be { enabled: boolean }" });
+            await g.rules.setSourceActionsEnabled(enabled);
+            return json(res, 200, { enabled: g.rules.sourceActionsEnabled() });
+        }
+
+        if (method === "GET" && path === "/api/guard/actions") {
+            const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
+            return json(res, 200, {
+                entries:
+                    g.ruleActions?.list(Number.isNaN(limit) ? 100 : Math.min(limit, 500)) ?? [],
+            });
         }
 
         if (method === "GET" && path === "/api/guard/journal") {
@@ -425,6 +459,18 @@ export class AcediaApiServer {
      *  /api/events actually serves) never heard about it. Best-effort: a no-op for actions
      *  with no derivable mapping (create_*, GitHub, reply) or no matching buffered event. */
     private syncStoreAfterAction(action: ConnectorAction): void {
+        if (action.kind === "bulk_email") {
+            // Each mail of the batch follows, as if acted on alone.
+            for (const sourceId of action.sourceIds ?? []) {
+                const one = (
+                    action.action === "label_email"
+                        ? { kind: "label_email", sourceId, label: action.label ?? "" }
+                        : { kind: action.action, sourceId }
+                ) as ConnectorAction;
+                this.syncStoreAfterAction(one);
+            }
+            return;
+        }
         const sync = resolveEventSync(action);
         if (!sync) return;
         if (sync.effect === "remove") this.store.remove(sync.dedupeKey);
@@ -443,6 +489,16 @@ export class AcediaApiServer {
             });
         }
         try {
+            if (action.kind === "create_rule") {
+                const added = this.guards
+                    ? await this.guards.rules.add(ruleFromAction(action))
+                    : null;
+                if (!added?.ok)
+                    return json(res, 409, {
+                        error: `Rule not added: ${added ? added.error : "no rules here"}`,
+                    });
+                return json(res, 204, null);
+            }
             await connector.executeAction!(action);
             this.syncStoreAfterAction(action);
             return json(res, 204, null);
@@ -472,8 +528,8 @@ export class AcediaApiServer {
         | { status: "not_found" }
         | { status: "unsupported" }
         | { status: "refused"; reason: string }
-        | { status: "pending"; id: string; expiresAt: number }
-        | { status: "executed" }
+        | { status: "pending"; id: string; expiresAt: number; action: ConnectorAction }
+        | { status: "executed"; action: ConnectorAction }
         | { status: "error" }
     > {
         const connector = this.connectors.find((c) => c.name === connectorName);
@@ -487,16 +543,34 @@ export class AcediaApiServer {
         if (tier === "manual") {
             return {
                 status: "refused",
-                reason: `'${action.kind}' is set to manual — not executable via this endpoint`,
+                reason: `'${action.kind}' is set to manual — never done through LunAcedia; its tier is changed in the panel (Confiance) or the dashboard`,
             };
         }
-        if (tier === "confirm" || (capToConfirm && tier === "auto")) {
+        // A batch: the selection is LunAcedia's own, frozen now (a caller's ids are dropped), and it always waits.
+        // A rule for the mails to come always waits too, and must already be a valid rule.
+        let batch = false;
+        if (action.kind === "create_rule") {
+            if (!this.guards)
+                return { status: "refused", reason: "rules are not available on this deployment" };
+            const check = validateRules([...this.guards.rules.getRules(), ruleFromAction(action)]);
+            if (!check.ok)
+                return { status: "refused", reason: `not a valid rule — ${check.error}` };
+            batch = true;
+        }
+        if (action.kind === "bulk_email") {
+            const selection = selectMail(this.store, (action.match ?? {}) as MailMatch);
+            if (selection.sourceIds.length === 0)
+                return { status: "refused", reason: "no mail of the box matches these criteria" };
+            action = { ...action, sourceIds: selection.sourceIds, matched: selection.matched };
+            batch = true;
+        }
+        if (tier === "confirm" || batch || (capToConfirm && tier === "auto")) {
             // Durable, with its own delay; capToConfirm = a third party's text came first.
             const pending = this.pendingStore.create(connectorName, action, {
                 origin,
                 untrusted: capToConfirm,
             });
-            return { status: "pending", id: pending.id, expiresAt: pending.expiresAt };
+            return { status: "pending", id: pending.id, expiresAt: pending.expiresAt, action };
         }
         if (!this.cooldown.tryConsume(action.kind)) {
             return {
@@ -507,7 +581,7 @@ export class AcediaApiServer {
         try {
             await connector.executeAction(action);
             this.syncStoreAfterAction(action);
-            return { status: "executed" };
+            return { status: "executed", action };
         } catch (e) {
             console.error("[API] action error:", (e as Error).message);
             return { status: "error" };
@@ -850,6 +924,27 @@ export class AcediaApiServer {
             return json(res, 204, null);
         }
 
+        // POST /api/inbox/select — what a batch would touch, without acting
+        if (method === "POST" && path === "/api/inbox/select") {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const match = (body as Record<string, unknown> | null)?.["match"];
+            if (typeof match !== "object" || match === null)
+                return json(res, 400, {
+                    error: "Body must be { match: { from?, fromContains?, fromDomain?, subjectContains? } }",
+                });
+            const selection = selectMail(this.store, match as MailMatch);
+            return json(res, 200, {
+                matched: selection.matched,
+                limit: BULK_LIMIT,
+                sample: selection.sample,
+            });
+        }
+
         // GET /api/actions/pending
         if (method === "GET" && path === "/api/actions/pending") {
             // With what each would do, in words: the phone and the panel only show it.
@@ -857,6 +952,24 @@ export class AcediaApiServer {
                 res,
                 200,
                 this.pendingStore.list().map((p) => ({ ...p, summary: summarizeAction(p.action) })),
+            );
+        }
+
+        // GET /api/config/actions — each action in words with its tier: a client shows it, keeps no copy
+        if (method === "GET" && path === "/api/config/actions") {
+            const tiers = this.tierStore.getAll();
+            return json(
+                res,
+                200,
+                actionCapabilities().map((a) => ({
+                    kind: a.kind,
+                    label: a.label,
+                    connector: a.connector,
+                    tier: tiers[a.kind],
+                    risk: a.risk,
+                    category: a.category,
+                    locked: a.kind in IMMUTABLE_TIERS,
+                })),
             );
         }
 

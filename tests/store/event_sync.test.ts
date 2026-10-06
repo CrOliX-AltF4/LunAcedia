@@ -99,4 +99,15 @@ describe("resolveEventSync — no derivable mapping", () => {
             expect(resolveEventSync(action)).toBeNull();
         });
     }
+    it("mark_spam takes the mail out of the box; unmark_spam, star and labels leave it as it is", () => {
+        expect(resolveEventSync({ kind: "mark_spam", sourceId: "msg1" })).toEqual({
+            dedupeKey: "email-msg1",
+            effect: "remove",
+        });
+        expect(resolveEventSync({ kind: "unmark_spam", sourceId: "msg1" })).toBeNull();
+        expect(resolveEventSync({ kind: "star_email", sourceId: "msg1" })).toBeNull();
+        expect(
+            resolveEventSync({ kind: "label_email", sourceId: "msg1", label: "Pubs" }),
+        ).toBeNull();
+    });
 });

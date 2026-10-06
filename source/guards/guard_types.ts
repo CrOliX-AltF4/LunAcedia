@@ -1,4 +1,5 @@
 import type { AcediaEventPriority } from "../types/acedia_event.js";
+import type { RuleSourceKind } from "../types/connector_action.js";
 
 /**
  * Ingestion guards: user-editable, deterministic rules evaluated on every
@@ -19,8 +20,20 @@ export type GuardCondition =
     /** A source header is present (e.g. `List-Unsubscribe`), read from `meta.headers`. */
     | { field: "header"; op: "present"; name: string };
 
+/** What a rule may do at the source, on each mail it matches at collection. */
+export type { RuleSourceKind };
+
+/** The source actions that take a mail out of the inbox — never applied to a VIP. */
+export const REMOVING_SOURCE_KINDS: ReadonlySet<RuleSourceKind> = new Set([
+    "archive_email",
+    "delete_email",
+    "mark_spam",
+]);
+
 export type GuardAction =
     | { type: "drop" }
+    /** Acts in Gmail itself, without asking again: the rule was confirmed once (CrOliX, 2026-10-06). Journaled. */
+    | { type: "source"; action: RuleSourceKind; label?: string }
     | { type: "tag"; tag: string }
     | { type: "set_priority"; priority: AcediaEventPriority };
 
@@ -44,4 +57,6 @@ export interface GuardVerdict {
     matchedRuleIds: string[];
     /** A drop was requested but suppressed: the sender is on the VIP allowlist (which always wins). */
     vipProtected: boolean;
+    /** What the matching rules do at the source, once each — absent when nothing. */
+    source?: Array<{ ruleId: string; action: RuleSourceKind; label?: string }>;
 }

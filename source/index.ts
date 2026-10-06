@@ -21,6 +21,7 @@ import { GuardRulesStore } from "./guards/guard_rules_store.js";
 import { GuardJournal } from "./guards/guard_journal.js";
 import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
+import { RuleActionJournal, createRuleActor } from "./guards/rule_actor.js";
 import { AgentService, defaultAgentSettingsPath } from "./agent/agent_service.js";
 import { InboxSync } from "./hub/inbox_sync.js";
 import { ConversationStore, defaultConversationDir } from "./store/conversation_store.js";
@@ -57,7 +58,9 @@ if (connectors.length === 0) {
 const guardRules = new GuardRulesStore();
 const guardJournal = new GuardJournal();
 const guardStats = new GuardStats();
-await Promise.all([guardRules.load(), guardJournal.load(), guardStats.load()]);
+// What confirmed rules do at the source, mail by mail.
+const ruleActions = new RuleActionJournal();
+await Promise.all([guardRules.load(), guardJournal.load(), guardStats.load(), ruleActions.load()]);
 const guardPipeline = new GuardPipeline({
     rules: guardRules,
     journal: guardJournal,
@@ -70,7 +73,13 @@ const guardPipeline = new GuardPipeline({
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
 const ai = createAIProvider();
-const hub = new IngestionHub(connectors, undefined, guardPipeline, (key) => store.has(key));
+const hub = new IngestionHub(
+    connectors,
+    undefined,
+    guardPipeline,
+    (key) => store.has(key),
+    createRuleActor({ connectors, journal: ruleActions }),
+);
 const ws = new AcediaWsServer();
 const tierStore = new ActionTierStore();
 // Durable since M5: the writes waiting for Master survive a restart.
@@ -122,7 +131,13 @@ const api = new AcediaApiServer(
     emailClassificationStore,
     googleTokenStore,
     undefined,
-    { pipeline: guardPipeline, rules: guardRules, journal: guardJournal, stats: guardStats },
+    {
+        pipeline: guardPipeline,
+        rules: guardRules,
+        journal: guardJournal,
+        stats: guardStats,
+        ruleActions,
+    },
     agent,
     inboxSync,
     topics,

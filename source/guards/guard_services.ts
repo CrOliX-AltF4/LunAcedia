@@ -1,3 +1,4 @@
+import type { RuleActionJournal } from "./rule_actor.js";
 import type { GuardJournal } from "./guard_journal.js";
 import type { GuardPipeline } from "./guard_pipeline.js";
 import type { GuardRulesStore } from "./guard_rules_store.js";
@@ -9,4 +10,6 @@ export interface GuardServices {
     rules: GuardRulesStore;
     journal: GuardJournal;
     stats: GuardStats;
+    /** What rules did at the source — absent: no such journal on this deployment. */
+    ruleActions?: RuleActionJournal;
 }

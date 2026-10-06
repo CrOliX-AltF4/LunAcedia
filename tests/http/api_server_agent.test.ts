@@ -169,6 +169,41 @@ describe("AcediaApiServer — agent routes", () => {
             expect(r.body.items.map((i: { key: string }) => i.key)).toEqual(["email-1"]);
         });
 
+        it("proposes a batch on the box's matching mails, with what it would touch in words", async () => {
+            const executed: ConnectorAction[] = [];
+            const ali = (id: string): AcediaEvent => ({
+                ...mail(id),
+                meta: { messageId: id, from: "promo@aliexpress.com" },
+            });
+            const ai = scripted([
+                {
+                    content: null,
+                    toolCalls: [
+                        toolCall("bulk_email", {
+                            action: "mark_spam",
+                            match: { fromContains: "aliexpress" },
+                        }),
+                    ],
+                },
+                { content: "2 mails à confirmer.", toolCalls: [] },
+            ]);
+            const base = await start({
+                ai,
+                events: [ali("1"), ali("2"), mail("3")],
+                connectors: [connector("Gmail", executed)],
+            });
+            const r = await call("POST", `${base}/api/agent`, {
+                text: "tout aliexpress en indésirable",
+            });
+            expect(executed).toEqual([]);
+            expect(r.body.actions[0]).toMatchObject({
+                kind: "bulk_email",
+                status: "pending",
+                summary: "Mettre un mail en indésirable × 2 — expéditeur contenant « aliexpress »",
+            });
+            expect(r.body.actions[0].action.sourceIds).toHaveLength(2);
+        });
+
         it("holds an action at its tier and lists it with the pending actions", async () => {
             const executed: ConnectorAction[] = [];
             const ai = scripted([

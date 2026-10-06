@@ -14,6 +14,7 @@ import {
     actionCapabilities,
     actionFromArgs,
     actionToolDefinitions,
+    isGatedWrite,
 } from "../capabilities/capability_manifest.js";
 import {
     isReadTool,
@@ -21,10 +22,12 @@ import {
     runReadTool,
     type ReadToolDeps,
 } from "../capabilities/read_tools.js";
+import { summarizeAction } from "../push/pending_push.js";
 
+/** `action`: the action as the gate kept it — a batch with its frozen selection. */
 export type DispatchOutcome =
-    | { status: "executed" }
-    | { status: "pending"; id: string; expiresAt: number }
+    | { status: "executed"; action?: ConnectorAction }
+    | { status: "pending"; id: string; expiresAt: number; action?: ConnectorAction }
     | { status: "refused"; reason: string }
     | { status: "error"; reason?: string }
     | { status: "not_found" }
@@ -92,6 +95,8 @@ export interface AgentAction {
     reason?: string;
     /** A pending action's deadline — after it nothing is done. */
     expiresAt?: number;
+    /** What it does or would do, in Master's words — what a client shows (« … × 37 — expéditeur contenant … »). */
+    summary?: string;
 }
 
 export interface AgentStep {
@@ -131,7 +136,25 @@ function unavailableActions(offered: ReadonlySet<string>): string[] {
         .map((a) => `${a.kind} (${a.description.replace(/\.$/, "")})`);
 }
 
-function systemPrompt(persona: string, now: number, unavailable: string[]): string {
+/** Why some actions are off this run, and where the user lifts it — said, never left to a guess. */
+function whyUnavailable(req: AgentRequest, allowWrites: boolean): string[] {
+    if (req.readOnly)
+        return [
+            "Autonomy is paused (the kill switch): you may only read. Say so — it is lifted from the panel or LunAcedia's dashboard.",
+        ];
+    if (!allowWrites)
+        return [
+            "The writes are switched off: you may sort the box and propose replies only. Say so, and that writes are turned on in the panel (Confiance) or LunAcedia's dashboard.",
+        ];
+    return [];
+}
+
+function systemPrompt(
+    persona: string,
+    now: number,
+    unavailable: string[],
+    why: string[] = [],
+): string {
     return [
         persona,
         "",
@@ -141,6 +164,7 @@ function systemPrompt(persona: string, now: number, unavailable: string[]): stri
             ? [
                   `Not available to you right now: ${unavailable.join("; ")}.`,
                   "When the user asks for one of these, answer at once that it is not possible yet — do not search for a way around it.",
+                  ...why,
               ]
             : []),
         "Ids passed to actions must come from tool results.",
@@ -204,7 +228,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
         : [...readToolDefinitions(), ...actionToolDefinitions({ includeWrites: allowWrites })];
     const writeKinds = new Set<string>(
         actionCapabilities()
-            .filter((a) => a.category === "write")
+            .filter(isGatedWrite)
             .map((a) => a.kind),
     );
     const actionKinds = new Set<string>(actionCapabilities().map((a) => a.kind));
@@ -215,6 +239,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                 deps.persona,
                 now(),
                 unavailableActions(new Set(tools.map((t) => t.name))),
+                whyUnavailable(req, allowWrites),
             ),
         },
         ...(req.history ?? [])
@@ -318,7 +343,8 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         });
                         content = JSON.stringify({ error: built.error });
                     } else if (!allowWrites && writeKinds.has(built.action.kind)) {
-                        const reason = "write actions are off for now (triage only)";
+                        const reason =
+                            "write actions are switched off (sorting and replies only) — turned on in the panel (Confiance) or the dashboard";
                         step.error = reason;
                         result.actions.push({
                             kind: built.action.kind,
@@ -329,7 +355,7 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         });
                         content = JSON.stringify({ status: "refused", reason });
                     } else if (req.readOnly) {
-                        const reason = "actions are paused (read-only request)";
+                        const reason = "autonomy is paused (kill switch) — only reading is allowed";
                         step.error = reason;
                         result.actions.push({
                             kind: built.action.kind,
@@ -352,18 +378,28 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
                         content = JSON.stringify({ status: "refused", reason });
                     } else {
                         actionAttempts++;
-                        const outcome = toActionStatus(
-                            await deps.dispatch(built.connector, built.action, external),
+                        const dispatched = await deps.dispatch(
+                            built.connector,
+                            built.action,
+                            external,
                         );
+                        const outcome = toActionStatus(dispatched);
+                        const kept =
+                            (dispatched.status === "pending" || dispatched.status === "executed") &&
+                            dispatched.action
+                                ? dispatched.action
+                                : built.action;
+                        const summary = summarizeAction(kept);
                         step.ok = outcome.status !== "error";
                         if (outcome.reason) step.error = outcome.reason;
                         result.actions.push({
                             kind: built.action.kind,
                             connector: built.connector,
-                            action: built.action,
+                            action: kept,
                             ...outcome,
+                            summary,
                         });
-                        content = JSON.stringify(outcome);
+                        content = JSON.stringify({ ...outcome, summary });
                     }
                 } else {
                     step.error = `unknown tool '${call.name}'`;
