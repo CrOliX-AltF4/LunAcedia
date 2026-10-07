@@ -11,6 +11,8 @@ export type ChangeScope = "box" | "actions" | "topics";
 export interface Change {
     scope: ChangeScope;
     key?: string;
+    /** The object is settled (read, gone, decided, expired): a notification about it has nothing left to say. */
+    settled?: boolean;
     at: number;
 }
 
@@ -20,8 +22,13 @@ export class ChangeFeed {
 
     constructor(private readonly now: () => number = Date.now) {}
 
-    emit(scope: ChangeScope, key?: string): void {
-        const change: Change = { scope, ...(key && { key }), at: this.now() };
+    emit(scope: ChangeScope, key?: string, settled = false): void {
+        const change: Change = {
+            scope,
+            ...(key && { key }),
+            ...(settled && { settled }),
+            at: this.now(),
+        };
         for (const listener of this.listeners) {
             try {
                 listener(change);
@@ -50,7 +57,11 @@ export function changeEvent(change: Change): AcediaEvent {
         title: change.scope,
         priority: "info",
         dedupeKey: `change-${change.scope}-${change.key ?? ""}-${change.at}`,
-        meta: { scope: change.scope, ...(change.key && { key: change.key }) },
+        meta: {
+            scope: change.scope,
+            ...(change.key && { key: change.key }),
+            ...(change.settled && { settled: true }),
+        },
     };
 }
 

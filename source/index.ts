@@ -111,6 +111,11 @@ const ws = new AcediaWsServer();
 // WebSocket (system.change), which relays to its own views.
 const changes = new ChangeFeed();
 changes.subscribe((change) => ws.broadcast(changeEvent(change)));
+// Settled — read, gone, decided, expired: a notification about it has nothing left to say, even on a closed phone (S5).
+changes.subscribe((change) => {
+    if (!change.settled || !change.key) return;
+    fcm?.settle(change.scope === "actions" ? `action-${change.key}` : change.key);
+});
 const tierStore = new ActionTierStore();
 // Durable since M5: the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
@@ -124,10 +129,7 @@ pendingStore.onCreate((p) => {
     changes.emit("actions", p.id);
 });
 // Decided anywhere, failed or expired: the views follow.
-pendingStore.onSettle((p) => {
-    changes.emit("actions", p.id);
-    fcm?.settle(`action-${p.id}`);
-});
+pendingStore.onSettle((p) => changes.emit("actions", p.id, true));
 // The agent's switch — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
@@ -153,9 +155,7 @@ const inboxSync = new InboxSync({
     store,
     emit: (change) => {
         ws.broadcast(InboxSync.toWire(change));
-        changes.emit("box", change.key);
-        // Read or gone: a notification about it has nothing left to say, even on a closed phone (lot S, S5).
-        if (change.op === "removed" || change.op === "read") fcm?.settle(change.key);
+        changes.emit("box", change.key, change.op === "removed" || change.op === "read");
     },
     forget: (key) => hub.forget(key),
 });

@@ -34,12 +34,24 @@ describe("ChangeFeed", () => {
         expect(after).toHaveBeenCalledOnce();
     });
 
-    it("rides the WebSocket the Core listens to as system.change", () => {
-        expect(changeEvent({ scope: "actions", key: "a1", at: 5 })).toMatchObject({
+    it("rides the WebSocket the Core listens to as system.change, settled said", () => {
+        expect(changeEvent({ scope: "actions", key: "a1", settled: true, at: 5 })).toMatchObject({
             type: "system.change",
             source: "system",
-            meta: { scope: "actions", key: "a1" },
+            meta: { scope: "actions", key: "a1", settled: true },
         });
+    });
+
+    it("says when the object is settled, and only then", () => {
+        const feed = new ChangeFeed(() => 1);
+        const seen = vi.fn();
+        feed.subscribe(seen);
+        feed.emit("box", "email-1", true);
+        feed.emit("box", "email-2");
+        expect(seen.mock.calls.map((c) => c[0])).toEqual([
+            { scope: "box", key: "email-1", settled: true, at: 1 },
+            { scope: "box", key: "email-2", at: 1 },
+        ]);
     });
 });
 
