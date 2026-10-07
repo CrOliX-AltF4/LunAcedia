@@ -136,7 +136,7 @@ describe("PendingActionStore — durable", () => {
         file = path.join(dir, "pending_actions.json");
     });
     afterEach(async () => {
-        await fs.rm(dir, { recursive: true, force: true });
+        await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
     it("finds its pending actions again after a restart, and forgets the ones decided", async () => {
@@ -162,6 +162,8 @@ describe("PendingActionStore — durable", () => {
         const after = new PendingActionStore(file, () => later);
         await after.load();
         expect(after.list()).toEqual([]);
+        // Loading records the expiry, and writes it: the write must land before the directory goes.
+        await after.flush();
     });
 
     it("records as expired what expired while it was down", async () => {
@@ -173,6 +175,7 @@ describe("PendingActionStore — durable", () => {
         const after = new PendingActionStore(file, () => e.expiresAt + HOUR);
         await after.load();
         expect(after.stateOf(e.id)).toMatchObject({ status: "expired", at: e.expiresAt });
+        await after.flush();
     });
 
     it("remembers how actions ended across a restart, for 30 days", async () => {
