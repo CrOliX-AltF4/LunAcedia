@@ -304,17 +304,30 @@ async function gesture(btn,ev){
   load();
 }
 
-// Gmail's trash (kept 30 days by Gmail) — ids read from the row, never interpolated into onclick.
+// Gmail's trash (kept 30 days by Gmail), a page at a time — ids read from the row, never interpolated into onclick.
+let trashNext=null;
 async function openTrash(){
   const d=document.getElementById('digest');
   document.getElementById('digest-title').textContent='Corbeille (Gmail, 30 jours)';
   const box=document.getElementById('digest-text');
   d.classList.add('open');
   box.textContent='Loading…';
+  trashNext=null;
+  await moreTrash(true);
+}
+async function moreTrash(first){
+  const box=document.getElementById('digest-text');
   try{
-    const r=await req('/api/inbox/trash');
-    const items=(await r.json()).items||[];
-    box.innerHTML=items.length?items.map(t=>\`<div class="trash-row" data-id="\${esc(t.id)}"><span>\${esc(t.title)} — \${esc(t.from)}</span><button onclick="restoreTrash(this)">Restaurer</button></div>\`).join(''):'La corbeille est vide.';
+    const r=await req('/api/inbox/trash'+(trashNext?'?page='+encodeURIComponent(trashNext):''));
+    const data=await r.json();
+    if(!r.ok){box.textContent=data.error||('Error '+r.status);return;}
+    const rows=(data.items||[]).map(t=>\`<div class="trash-row" data-id="\${esc(t.id)}"><span>\${esc(t.title)} — \${esc(t.from)}</span><button onclick="restoreTrash(this)">Restaurer</button></div>\`).join('');
+    const skipped=data.skipped?\`<div class="field-hint">\${data.skipped} mail(s) illisible(s) sur cette page.</div>\`:'';
+    if(first)box.innerHTML=rows||skipped?'':'La corbeille est vide.';
+    box.querySelector('#trash-more')?.remove();
+    box.insertAdjacentHTML('beforeend',rows+skipped);
+    trashNext=data.next||null;
+    if(trashNext)box.insertAdjacentHTML('beforeend','<button id="trash-more" onclick="moreTrash(false)">Voir plus</button>');
   }catch(e){box.textContent='Error: '+e.message;}
 }
 async function restoreTrash(btn){

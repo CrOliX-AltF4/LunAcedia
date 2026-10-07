@@ -236,7 +236,12 @@ describe("dashboard box", () => {
             script.indexOf("async function openTrash"),
             script.indexOf("async function restoreTrash") + 400,
         );
-        expect(block).toContain("req('/api/inbox/trash')");
+        // A page at a time: the next page's token comes back encoded, "Voir plus" asks for it.
+        expect(block).toContain(
+            "req('/api/inbox/trash'+(trashNext?'?page='+encodeURIComponent(trashNext):''))",
+        );
+        expect(block).toContain("Voir plus");
+        expect(block).toContain("data.skipped");
         expect(block).toContain('data-id="${esc(t.id)}"');
         expect(block).toContain("esc(t.title)");
         expect(block).toContain("esc(t.from)");
