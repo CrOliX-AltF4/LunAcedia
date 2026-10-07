@@ -148,6 +148,27 @@ describe("AcediaApiServer — inbox routes", () => {
         expect(emitted).toEqual([{ op: "read", key: "email-a", source: "email" }]);
     });
 
+    it("opens an item of a source without gestures: its text, marked read in the box, the Core told", async () => {
+        const rss: IConnector = { slug: "rss", name: "RSS", poll: async () => [] };
+        const item: AcediaEvent = {
+            type: "rss.item",
+            ts: Date.now(),
+            source: "rss",
+            title: "Article",
+            body: "Le résumé gardé",
+            priority: "info",
+            dedupeKey: "rss-1",
+        };
+        const { base, store, emitted } = await start(rss, [item]);
+        const r = await call("POST", `${base}/api/inbox/rss-1/open`);
+        expect(r.status).toBe(200);
+        expect(r.body).toEqual({ ok: true, change: "read", body: "Le résumé gardé" });
+        expect(store.get("rss-1")!.read).toBe(true);
+        expect(emitted).toEqual([{ op: "read", key: "rss-1", source: "rss" }]);
+        // Only "open": the other gestures still need the source.
+        expect((await call("POST", `${base}/api/inbox/rss-1/archive`)).status).toBe(400);
+    });
+
     it("reports a mail as spam directly, and it leaves the box (D1)", async () => {
         const gmail = fakeGmail();
         const { base, store } = await start(gmail, [mail("a")]);

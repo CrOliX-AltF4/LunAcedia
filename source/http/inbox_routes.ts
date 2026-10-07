@@ -129,6 +129,15 @@ export class InboxRoutes {
                 return true;
             }
             const connector = this.deps.connectors.find((c) => c.slug === item.source);
+            // Opening is reading, for every source: one without gestures gives the text the box holds,
+            // and the item is read in the box (there is no read state to change at its source).
+            if (gesture === "open" && !connector?.inboxGesture) {
+                const change = item.read ? null : "read";
+                if (change) this.deps.sync.applyLocal({ op: change, key, source: item.source });
+                this.record(key, gesture, true);
+                json(res, 200, { ok: true, change, body: item.body ?? "" });
+                return true;
+            }
             if (!connector?.inboxGesture) {
                 this.record(key, gesture, false, "source cannot do gestures");
                 json(res, 400, { error: `No gestures for ${item.source}` });
