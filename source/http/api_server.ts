@@ -166,7 +166,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   A paired device's token opens only the mobile routes (auth/device_scope.ts); everything else needs ACEDIA_SECRET.
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
- *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
+ *   GET  /api/digest               { response, count, urgent }: unread items, urgent ones listed by the code
  *   GET  /api/proposals            suggest next actions for unread urgent/conflict items (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
@@ -1240,17 +1240,31 @@ export class AcediaApiServer {
             });
         }
 
-        // GET /api/digest
+        // GET /api/digest — what came in and is still unread. The urgent items are listed by the code, with
+        // the same priority and reason as the box; the model only summarizes the others. Nothing unread:
+        // nothing to say, the model is not called. Without a provider: the urgent list, no summary.
         if (method === "GET" && path === "/api/digest") {
-            if (this.ai.mode === "none") {
-                return json(res, 503, { error: "AI_PROVIDER not configured" });
-            }
             const limitParam = url.searchParams.get("limit");
             const limit = limitParam ? Math.min(parseInt(limitParam, 10), 100) : 20;
-            const { events } = this.store.query({ limit, offset: 0 });
+            const { events: unread } = this.store.query({
+                unread: true,
+                limit: Number.MAX_SAFE_INTEGER,
+            });
+            const urgent = unread
+                .filter((e) => e.priority === "urgent")
+                .map((e) => ({
+                    key: e.dedupeKey,
+                    title: e.title,
+                    source: e.source,
+                    ...(e.priorityReason && { priorityReason: e.priorityReason }),
+                }));
+            const rest = unread.filter((e) => e.priority !== "urgent").slice(0, limit);
+            const count = unread.length;
+            if (rest.length === 0 || this.ai.mode === "none")
+                return json(res, 200, { response: "", count, urgent });
             try {
-                const response = await this.ai.digest(events as AcediaEvent[]);
-                return json(res, 200, { response, count: events.length });
+                const response = await this.ai.digest(rest);
+                return json(res, 200, { response, count, urgent });
             } catch (e) {
                 console.error("[API] digest error:", (e as Error).message);
                 return json(res, 502, { error: "AI provider error" });

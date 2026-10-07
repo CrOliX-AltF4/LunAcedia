@@ -1515,13 +1515,63 @@ describe("AcediaApiServer — POST /api/chat", () => {
 });
 
 describe("AcediaApiServer — GET /api/digest", () => {
-    it("should return 503 when AI provider is none", async () => {
+    it("nothing unread: nothing to summarize, the model is not called", async () => {
         const port = nextPort();
-        const server = makeServer(new EventStore());
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1", read: true }));
+        const digest = vi.fn();
+        const server = makeServer(store, [], { mode: "openai", chat: vi.fn(), digest });
         server.start(port);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
-        expect(res.status).toBe(503);
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ response: "", count: 0, urgent: [] });
+        expect(digest).not.toHaveBeenCalled();
+    });
+
+    it("lists the unread urgent items itself, with their reason, and summarizes only the other unread ones", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "u1",
+                title: "Du boss",
+                priority: "urgent",
+                priorityReason: "VIP",
+            }),
+        );
+        store.push(makeEvent({ dedupeKey: "u2", priority: "urgent", read: true }));
+        store.push(makeEvent({ dedupeKey: "n1", title: "Newsletter", priority: "normal" }));
+        store.push(makeEvent({ dedupeKey: "n2", priority: "normal", read: true }));
+        const digest = vi.fn().mockResolvedValue("Une newsletter.");
+        const server = makeServer(store, [], { mode: "openai", chat: vi.fn(), digest });
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({
+            response: "Une newsletter.",
+            count: 2,
+            urgent: [{ key: "u1", title: "Du boss", source: "email", priorityReason: "VIP" }],
+        });
+        expect((digest.mock.calls[0]![0] as AcediaEvent[]).map((e) => e.dedupeKey)).toEqual(["n1"]);
+    });
+
+    it("without an AI provider, still lists the urgent items — just no summary", async () => {
+        const port = nextPort();
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "u1", title: "Urgent", priority: "urgent" }));
+        store.push(makeEvent({ dedupeKey: "n1", priority: "normal" }));
+        const server = makeServer(store);
+        server.start(port);
+        const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({
+            response: "",
+            count: 2,
+            urgent: [{ key: "u1", title: "Urgent", source: "email" }],
+        });
     });
 
     it("should return digest from AI provider", async () => {
@@ -1538,9 +1588,10 @@ describe("AcediaApiServer — GET /api/digest", () => {
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
-        const body = res.body as { response: string; count: number };
+        const body = res.body as { response: string; count: number; urgent: unknown[] };
         expect(body.response).toBe("Today you have 1 email.");
         expect(body.count).toBe(1);
+        expect(body.urgent).toEqual([]);
     });
 
     it("should return 502 when AI provider throws", async () => {
@@ -1550,7 +1601,9 @@ describe("AcediaApiServer — GET /api/digest", () => {
             chat: vi.fn(),
             digest: vi.fn().mockRejectedValue(new Error("Timeout")),
         };
-        const server = makeServer(new EventStore(), [], mockAI);
+        const store = new EventStore();
+        store.push(makeEvent({ dedupeKey: "e1" }));
+        const server = makeServer(store, [], mockAI);
         server.start(port);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();

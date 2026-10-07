@@ -186,6 +186,18 @@ describe("dashboard box", () => {
         expect(block).toContain("esc(data.body)");
     });
 
+    it("the digest shows the urgent items listed by LunAcedia, then the summary — as text, never HTML", () => {
+        const block = script.slice(
+            script.indexOf("async function openDigest()"),
+            script.indexOf("function openProposals"),
+        );
+        expect(block).toContain("data.urgent");
+        expect(block).toContain("priorityReason");
+        expect(block).toContain("Rien de nouveau");
+        expect(block).toContain("t.textContent=");
+        expect(block).not.toContain("innerHTML");
+    });
+
     it("offers archive, trash, read and done as buttons that read the key from the card, never a JS argument", () => {
         const cardBlock = script.slice(
             script.indexOf("list.innerHTML=shown.map"),

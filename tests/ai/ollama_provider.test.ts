@@ -58,13 +58,13 @@ describe("OllamaProvider", () => {
         await expect(provider.chat("test")).rejects.toThrow("Ollama error: 404");
     });
 
-    it("should call digest with formatted prompt including URGENT", async () => {
+    it("should call digest with the formatted prompt", async () => {
         mockOk("Digest.");
         await provider.digest([makeEvent()]);
         const body = JSON.parse((mockFetch.mock.calls[0]![1] as RequestInit).body as string) as {
             messages: Array<{ content: string }>;
         };
-        expect(body.messages[1]!.content).toContain("[URGENT]");
+        expect(body.messages[1]!.content).toContain("unread events");
     });
 });
 

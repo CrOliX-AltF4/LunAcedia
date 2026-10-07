@@ -25,11 +25,12 @@ describe("formatDigestPrompt", () => {
         expect(result).toContain("Invoice");
     });
 
-    it("should mark urgent events", () => {
+    it("never hands urgency to the model: it is decided by the rules and listed apart", () => {
         const result = formatDigestPrompt([
             makeEvent({ priority: "urgent", title: "Server down" }),
         ]);
-        expect(result).toContain("[URGENT]");
+        expect(result).not.toContain("[URGENT]");
+        expect(result).toContain("Never call any of them urgent");
     });
 
     it("should include body when present", () => {
@@ -47,7 +48,7 @@ describe("formatDigestPrompt", () => {
     it("should mention event count in prompt header", () => {
         const events = [makeEvent(), makeEvent({ dedupeKey: "e2" })];
         const result = formatDigestPrompt(events);
-        expect(result).toContain("2 events");
+        expect(result).toContain("2 unread events");
     });
 });
 

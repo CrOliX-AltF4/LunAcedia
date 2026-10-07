@@ -500,7 +500,24 @@ async function checkAiProvider(){
   }catch(e){}
 }
 
-function openDigest(){openDigestLike('/api/digest','Digest');}
+// What is still unread: the urgent items as LunAcedia ranks them (with the reason), then the model's summary.
+async function openDigest(){
+  const d=document.getElementById('digest');
+  const t=document.getElementById('digest-text');
+  document.getElementById('digest-title').textContent='Digest';
+  d.classList.add('open');
+  t.textContent='Loading…';
+  try{
+    const r=await req('/api/digest');
+    const data=await r.json();
+    if(!r.ok){t.textContent=data.error||('Error '+r.status);return;}
+    const urgent=(data.urgent||[]).map(u=>'• '+u.title+(u.priorityReason?' — '+u.priorityReason:''));
+    const parts=[];
+    if(urgent.length)parts.push('Urgent ('+urgent.length+')\\n'+urgent.join('\\n'));
+    if(data.response)parts.push(data.response);
+    t.textContent=parts.length?parts.join('\\n\\n'):'Rien de nouveau.';
+  }catch(e){t.textContent='Error: '+e.message;}
+}
 function openProposals(){openDigestLike('/api/proposals','Propositions');}
 function closeDigest(){document.getElementById('digest').classList.remove('open');}
 

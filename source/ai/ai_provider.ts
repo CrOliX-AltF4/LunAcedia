@@ -17,14 +17,22 @@ export interface IAIProvider {
     ): Promise<AgentTurn>;
 }
 
+/**
+ * The digest's summary of the unread items that are not urgent. Urgency is never the model's call: the
+ * urgent items are decided by the rules (source default, guards, VIP) and listed apart by the code — a
+ * digest that called something urgent the box did not show as such was the bug (2026-10-07).
+ */
 export function formatDigestPrompt(events: AcediaEvent[]): string {
     if (events.length === 0) return "No pending events.";
     const lines = events.map((e, i) => {
-        const prio = e.priority === "urgent" ? " [URGENT]" : "";
         const body = e.body ? ` — ${e.body}` : "";
-        return `${i + 1}. [${e.source.toUpperCase()}]${prio} ${e.title}${body}`;
+        return `${i + 1}. [${e.source.toUpperCase()}] ${e.title}${body}`;
     });
-    return `Summarize these ${events.length} events concisely, prioritizing urgent ones:\n\n${lines.join("\n")}`;
+    return (
+        `Summarize these ${events.length} unread events concisely, in the language of the events. ` +
+        `Never call any of them urgent or important: urgency is decided elsewhere and shown apart.\n\n` +
+        lines.join("\n")
+    );
 }
 
 /**
