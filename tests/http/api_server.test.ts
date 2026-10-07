@@ -437,7 +437,10 @@ describe("AcediaApiServer — POST /api/actions", () => {
         );
         server.stop();
         expect(res.status).toBe(500);
-        expect((res.body as { error: string }).error).toBe("Action failed");
+        // The reason travels with the failure: "nothing was done" must say why.
+        expect((res.body as { error: string }).error).toBe(
+            "Action failed: [Gmail] reply send returned 401",
+        );
     });
 
     it("rejects with 403 once the action kind hits its cooldown, even on 'auto' tier", async () => {

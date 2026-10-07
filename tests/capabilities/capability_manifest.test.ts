@@ -142,6 +142,20 @@ describe("actionFromArgs — tool arguments to a ConnectorAction, validated by t
         expect(actionFromArgs("delete_forever", { sourceId: "1" }).ok).toBe(false);
     });
 
+    it("refuses an event id without its calendar before anything is proposed", () => {
+        const r = actionFromArgs("delete_event", { sourceId: "ev1" });
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error).toContain("calendarId");
+        expect(actionFromArgs("delete_event", { sourceId: "primary/ev1" }).ok).toBe(true);
+    });
+
+    it("refuses a task id without its list, and an issue without its owner", () => {
+        expect(actionFromArgs("complete_task", { sourceId: "t1" }).ok).toBe(false);
+        expect(actionFromArgs("complete_task", { sourceId: "list1/t1" }).ok).toBe(true);
+        expect(actionFromArgs("close_issue", { sourceId: "repo#1" }).ok).toBe(false);
+        expect(actionFromArgs("close_issue", { sourceId: "owner/repo#1" }).ok).toBe(true);
+    });
+
     it("never builds merge_pr from model output — merging stays human", () => {
         expect(actionFromArgs("merge_pr", { sourceId: "o/r#1" }).ok).toBe(false);
     });

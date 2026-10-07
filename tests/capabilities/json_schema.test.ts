@@ -15,9 +15,22 @@ const schema: ObjectSchema = {
             required: ["title"],
         },
         extra: { type: "object", additionalProperties: { type: "string" } },
+        ref: { type: "string", pattern: "^[^/]+/[^/]+$", description: '"a/b"' },
     },
     required: ["sourceId"],
 };
+
+describe("validateArgs — pattern", () => {
+    it("accepts a string of the expected form", () => {
+        expect(validateArgs(schema, { sourceId: "x", ref: "cal/ev1" }).ok).toBe(true);
+    });
+
+    it("refuses another form and says which one was expected", () => {
+        const r = validateArgs(schema, { sourceId: "x", ref: "ev1" });
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error).toBe('arguments.ref must be "a/b"');
+    });
+});
 
 describe("validateArgs — the subset of JSON Schema the capability manifest uses", () => {
     it("accepts a valid object and returns only declared properties", () => {

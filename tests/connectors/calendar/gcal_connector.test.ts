@@ -413,21 +413,44 @@ describe("GcalConnector.executeAction — update_event / create_event / delete_e
         expect(body["description"]).toBe("New desc");
     });
 
-    it("update_event: should warn and return when sourceId has no slash", async () => {
+    it("update_event: refuses a sourceId without its calendar, instead of claiming it was done", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GcalConnector().executeAction({
-            kind: "update_event",
-            sourceId: "bad-id",
-            fields: {},
-        });
+        await expect(
+            new GcalConnector().executeAction({
+                kind: "update_event",
+                sourceId: "bad-id",
+                fields: {},
+            }),
+        ).rejects.toThrow(/calendarId\/eventId/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("should ignore action kinds it doesn't own", async () => {
+    it("delete_event: refuses an event id without its calendar — nothing deleted, nothing claimed", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GcalConnector().executeAction({ kind: "complete_task", sourceId: "primary/ev1" });
+        await expect(
+            new GcalConnector().executeAction({ kind: "delete_event", sourceId: "ev1" }),
+        ).rejects.toThrow(/calendarId\/eventId/);
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("says so when Google Calendar is not configured", async () => {
+        delete process.env["GCAL_CLIENT_ID"];
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({ kind: "delete_event", sourceId: "primary/ev1" }),
+        ).rejects.toThrow(/not configured/);
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("refuses an action kind it doesn't own", async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({ kind: "complete_task", sourceId: "primary/ev1" }),
+        ).rejects.toThrow(/not a calendar action/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 

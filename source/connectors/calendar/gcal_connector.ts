@@ -209,9 +209,11 @@ export class GcalConnector implements IConnector {
             action.kind !== "create_event" &&
             action.kind !== "delete_event"
         )
-            return;
+            throw new Error(`[GCal] "${action.kind}" is not a calendar action — nothing was done`);
+        // Never a quiet return: the caller would count the action as done and drop its notification.
         const refreshToken = this.refreshToken();
-        if (!this.clientId || !this.clientSecret || !refreshToken) return;
+        if (!this.clientId || !this.clientSecret || !refreshToken)
+            throw new Error("[GCal] not configured — nothing was done");
 
         // Validate sourceId shape before spending a token fetch on a request that can't
         // proceed anyway — update_event/delete_event both address "{calendarId}/{eventId}".
@@ -219,9 +221,10 @@ export class GcalConnector implements IConnector {
         let eventId = "";
         if (action.kind !== "create_event") {
             const slash = action.sourceId.indexOf("/");
-            if (slash === -1) {
-                console.warn(`[GCal] ${action.kind}: sourceId must be '{calendarId}/{eventId}'`);
-                return;
+            if (slash <= 0 || slash === action.sourceId.length - 1) {
+                throw new Error(
+                    `[GCal] ${action.kind}: sourceId must be "calendarId/eventId", got "${action.sourceId}" — nothing was done`,
+                );
             }
             calId = action.sourceId.slice(0, slash);
             eventId = action.sourceId.slice(slash + 1);

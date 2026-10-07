@@ -196,9 +196,11 @@ export class TasksConnector implements IConnector {
             action.kind !== "create_task" &&
             action.kind !== "delete_task"
         )
-            return;
+            throw new Error(`[Tasks] "${action.kind}" is not a task action — nothing was done`);
+        // Never a quiet return: the caller would count the action as done and drop its notification.
         const refreshToken = this.refreshToken();
-        if (!this.clientId || !this.clientSecret || !refreshToken) return;
+        if (!this.clientId || !this.clientSecret || !refreshToken)
+            throw new Error("[Tasks] not configured — nothing was done");
 
         let token: string;
         try {

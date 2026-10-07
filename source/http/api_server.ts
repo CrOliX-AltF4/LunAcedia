@@ -530,7 +530,7 @@ export class AcediaApiServer {
         | { status: "refused"; reason: string }
         | { status: "pending"; id: string; expiresAt: number; action: ConnectorAction }
         | { status: "executed"; action: ConnectorAction }
-        | { status: "error" }
+        | { status: "error"; reason?: string }
     > {
         const connector = this.connectors.find((c) => c.name === connectorName);
         if (!connector) return { status: "not_found" };
@@ -583,8 +583,10 @@ export class AcediaApiServer {
             this.syncStoreAfterAction(action);
             return { status: "executed", action };
         } catch (e) {
-            console.error("[API] action error:", (e as Error).message);
-            return { status: "error" };
+            // The reason goes back to whoever asked: "nothing was done" always says why.
+            const reason = (e as Error).message;
+            console.error("[API] action error:", reason);
+            return { status: "error", reason };
         }
     }
 
@@ -884,7 +886,10 @@ export class AcediaApiServer {
                     id: result.id,
                     expiresAt: result.expiresAt,
                 });
-            if (result.status === "error") return json(res, 500, { error: "Action failed" });
+            if (result.status === "error")
+                return json(res, 500, {
+                    error: result.reason ? `Action failed: ${result.reason}` : "Action failed",
+                });
             return json(res, 204, null);
         }
 

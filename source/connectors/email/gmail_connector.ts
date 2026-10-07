@@ -414,9 +414,11 @@ export class GmailConnector implements IConnector {
 
     async executeAction(action: ConnectorAction): Promise<void> {
         if (action.kind !== "reply" && action.kind !== "bulk_email" && !isLabelMutation(action))
-            return;
+            throw new Error(`[Gmail] "${action.kind}" is not a mail action — nothing was done`);
+        // Never a quiet return: the caller would count the action as done and drop its notification.
         const refreshToken = this.refreshToken();
-        if (!this.clientId || !this.clientSecret || !refreshToken) return;
+        if (!this.clientId || !this.clientSecret || !refreshToken)
+            throw new Error("[Gmail] not configured — nothing was done");
 
         let token: string;
         try {

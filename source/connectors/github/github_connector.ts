@@ -21,7 +21,8 @@ function parseIssueRef(sourceId: string): { repo: string; number: number } | nul
     if (hash === -1) return null;
     const repo = sourceId.slice(0, hash);
     const number = parseInt(sourceId.slice(hash + 1), 10);
-    if (!repo || isNaN(number)) return null;
+    // "owner/repo": both halves, nothing else — "repo#1" would address another account's repository.
+    if (!/^[^/\s]+\/[^/\s]+$/.test(repo) || isNaN(number)) return null;
     return { repo, number };
 }
 
@@ -370,9 +371,10 @@ export class GitHubConnector implements IConnector {
             action.kind !== "merge_pr" &&
             action.kind !== "mark_notification_read"
         ) {
-            return;
+            throw new Error(`[GitHub] "${action.kind}" is not a GitHub action — nothing was done`);
         }
-        if (!this.token) return;
+        // Never a quiet return: the caller would count the action as done and drop its notification.
+        if (!this.token) throw new Error("[GitHub] not configured — nothing was done");
 
         const headers = {
             Authorization: `Bearer ${this.token}`,
@@ -438,8 +440,9 @@ export class GitHubConnector implements IConnector {
         // issue or PR via sourceId = "{owner}/{repo}#{number}"
         const ref = parseIssueRef(action.sourceId);
         if (!ref) {
-            console.warn(`[GitHub] ${action.kind}: sourceId must be '{owner}/{repo}#{number}'`);
-            return;
+            throw new Error(
+                `[GitHub] ${action.kind}: sourceId must be "owner/repo#number", got "${action.sourceId}" — nothing was done`,
+            );
         }
 
         try {

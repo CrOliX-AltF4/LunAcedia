@@ -244,18 +244,22 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
         expect(String(patchCall![0]!)).toContain("task-xyz");
     });
 
-    it("should do nothing when credentials are missing", async () => {
+    it("says so when credentials are missing, instead of claiming it was done", async () => {
         delete process.env["GTASKS_CLIENT_ID"];
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "complete_task", sourceId: "t1" });
+        await expect(
+            new TasksConnector().executeAction({ kind: "complete_task", sourceId: "t1" }),
+        ).rejects.toThrow(/not configured/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("should ignore action kinds it doesn't own", async () => {
+    it("refuses an action kind it doesn't own", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "reply", sourceId: "t1", body: "x" });
+        await expect(
+            new TasksConnector().executeAction({ kind: "reply", sourceId: "t1", body: "x" }),
+        ).rejects.toThrow(/not a task action/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
