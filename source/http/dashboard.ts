@@ -669,14 +669,31 @@ async function openSettings(){
 }
 function closeSettings(){document.getElementById('settings').classList.remove('open');}
 
+// Each source as it really is: its token and where it comes from, how its last collection went, and whether
+// « Connecter » can work — said before the click, with why not.
+const SOURCE_STATES={
+  ok:'connecté — collecte réussie',
+  idle:'jeton présent — pas encore de collecte',
+  refused:'Google a refusé le jeton — reconnecter',
+  error:'erreur à la dernière collecte',
+  absent:'non connecté',
+};
 function renderSources(status){
   const el=document.getElementById('src-list');
-  el.innerHTML=GOOGLE_SOURCES.map(s=>\`
-<div class="src-row">
-  <span class="dot\${status[s.key]?' on':''}"></span>
-  <span>\${esc(s.label)} — \${status[s.key]?'connecté':'non connecté'}</span>
-  <button onclick="connectSource('\${s.key}')">\${status[s.key]?'Reconnecter':'Connecter'}</button>
-</div>\`).join('');
+  el.innerHTML=GOOGLE_SOURCES.map(s=>{
+    const st=status[s.key]||{};
+    const from=st.token==='env'?' (jeton du fichier .env)':'';
+    const detail=st.state==='error'&&st.lastError?' : '+esc(st.lastError):'';
+    const action=st.canConnect
+      ?\`<button onclick="connectSource('\${s.key}')">\${st.token?'Reconnecter':'Connecter'}</button>\`
+      :\`<span class="field-hint">Connexion impossible : \${esc(st.why||'client OAuth absent')}</span>\`;
+    return \`
+<div class="src-row" data-source="\${s.key}">
+  <span class="dot\${st.state==='ok'||st.state==='idle'?' on':''}"></span>
+  <span>\${esc(s.label)} — \${SOURCE_STATES[st.state]||'état inconnu'}\${from}\${detail}</span>
+  \${action}
+</div>\`;
+  }).join('');
 }
 
 function connectSource(key){

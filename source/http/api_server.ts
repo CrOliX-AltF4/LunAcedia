@@ -46,13 +46,17 @@ import type {
 import { summarizeAction } from "../push/pending_push.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
-import type { GoogleTokenStore } from "../auth/google_token_store.js";
+import type { GoogleConnectorKey, GoogleTokenStore } from "../auth/google_token_store.js";
 import type { GuardServices } from "../guards/guard_services.js";
 import { validateRules } from "../guards/guard_rules_store.js";
 import {
     findGoogleOAuthConnector,
     buildGoogleAuthUrl,
     exchangeGoogleCode,
+    googleClientFor,
+    GOOGLE_ENV_PREFIX,
+    GOOGLE_OAUTH_CONNECTORS,
+    OAuthStates,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
 import {
@@ -245,6 +249,8 @@ export class AcediaApiServer {
     }
 
     private readonly usageRoutes: UsageRoutes | null;
+    /** The returns from Google this server asked for (the callback accepts no other). */
+    private readonly oauthStates = new OAuthStates();
     private readonly devices: DeviceRegistry | null;
     private readonly deviceRoutes: DeviceRoutes | null;
 
@@ -613,6 +619,49 @@ export class AcediaApiServer {
         return `http://${host}/api/oauth/google/callback`;
     }
 
+    private googleSourcesStatus(): Record<GoogleConnectorKey, Record<string, unknown>> {
+        const health = new Map(this.hub.getConnectorHealth().map((h) => [h.slug, h]));
+        const SLUG: Record<GoogleConnectorKey, string> = {
+            gmail: "email",
+            gcal: "calendar",
+            gtasks: "tasks",
+        };
+        const out = {} as Record<GoogleConnectorKey, Record<string, unknown>>;
+        for (const meta of GOOGLE_OAUTH_CONNECTORS) {
+            const prefix = GOOGLE_ENV_PREFIX[meta.key];
+            const client = googleClientFor(meta.key);
+            const token = this.googleTokenStore?.get(meta.key)
+                ? "stored"
+                : process.env[`${prefix}_REFRESH_TOKEN`]
+                  ? "env"
+                  : null;
+            const h = health.get(SLUG[meta.key]);
+            const lastError = h?.lastError ?? null;
+            const state = !token
+                ? "absent"
+                : lastError && /invalid_grant|unauthorized_client|invalid_client/i.test(lastError)
+                  ? "refused"
+                  : lastError
+                    ? "error"
+                    : h?.lastSuccessAt
+                      ? "ok"
+                      : "idle";
+            out[meta.key] = {
+                label: meta.label,
+                token,
+                client: client?.from ?? null,
+                canConnect: client !== null,
+                ...(!client && {
+                    why: `${prefix}_CLIENT_ID and ${prefix}_CLIENT_SECRET (or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET) are not set`,
+                }),
+                state,
+                lastSuccessAt: h?.lastSuccessAt ?? null,
+                lastError,
+            };
+        }
+        return out;
+    }
+
     private handleGoogleOAuthStart(
         req: http.IncomingMessage,
         res: http.ServerResponse,
@@ -620,18 +669,26 @@ export class AcediaApiServer {
     ): void {
         const key = url.searchParams.get("connector") ?? "";
         const meta = findGoogleOAuthConnector(key);
-        const clientId = process.env["GOOGLE_CLIENT_ID"];
         if (!meta) {
             json(res, 400, { error: "Unknown or missing connector" });
             return;
         }
-        if (!clientId) {
-            json(res, 503, { error: "GOOGLE_CLIENT_ID not configured" });
+        const client = googleClientFor(meta.key);
+        if (!client) {
+            const prefix = GOOGLE_ENV_PREFIX[meta.key];
+            json(res, 503, {
+                error: `No OAuth client: set ${prefix}_CLIENT_ID and ${prefix}_CLIENT_SECRET (or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)`,
+            });
             return;
         }
 
         const redirectUri = this.resolveOAuthRedirectUri(req);
-        const authUrl = buildGoogleAuthUrl(clientId, redirectUri, meta.scopes, meta.key);
+        const authUrl = buildGoogleAuthUrl(
+            client.id,
+            redirectUri,
+            meta.scopes,
+            this.oauthStates.issue(meta.key),
+        );
         res.writeHead(302, { Location: authUrl });
         res.end();
     }
@@ -647,25 +704,32 @@ export class AcediaApiServer {
         };
 
         const code = url.searchParams.get("code");
-        const state = url.searchParams.get("state") ?? "";
         const oauthError = url.searchParams.get("error");
-        const meta = findGoogleOAuthConnector(state);
+        // Only a return this server asked for, once: a forged link stores nothing.
+        const key = this.oauthStates.take(url.searchParams.get("state") ?? "");
+        const meta = key ? findGoogleOAuthConnector(key) : undefined;
 
         if (oauthError) {
             html("❌ Connexion refusée", oauthError);
             return;
         }
-        if (!code || !meta) {
-            html("❌ Requête invalide", "Code ou connecteur manquant.");
+        if (!meta) {
+            html(
+                "❌ Lien expiré ou inconnu",
+                "Relance la connexion depuis le tableau de bord (le lien vaut 10 minutes, une seule fois).",
+            );
+            return;
+        }
+        const client = googleClientFor(meta.key);
+        if (!code || !client) {
+            html("❌ Requête invalide", "Code ou client OAuth manquant.");
             return;
         }
 
-        const clientId = process.env["GOOGLE_CLIENT_ID"] ?? "";
-        const clientSecret = process.env["GOOGLE_CLIENT_SECRET"] ?? "";
         try {
             const { refreshToken } = await exchangeGoogleCode(
-                clientId,
-                clientSecret,
+                client.id,
+                client.secret,
                 code,
                 this.resolveOAuthRedirectUri(req),
             );
@@ -1132,13 +1196,10 @@ export class AcediaApiServer {
             );
         }
 
-        // GET /api/oauth/google/status
+        // GET /api/oauth/google/status — per source, the truth: where its token comes from, whether « Connecter » can
+        // work (and why not), how its last collection went (« refused » = Google refused the token: reconnect).
         if (method === "GET" && path === "/api/oauth/google/status") {
-            return json(
-                res,
-                200,
-                this.googleTokenStore?.status() ?? { gmail: false, gcal: false, gtasks: false },
-            );
+            return json(res, 200, this.googleSourcesStatus());
         }
 
         // POST /api/config/ai-provider — first-run onboarding: LunAcedia ships

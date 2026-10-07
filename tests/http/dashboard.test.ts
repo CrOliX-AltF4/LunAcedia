@@ -186,6 +186,20 @@ describe("dashboard box", () => {
         expect(block).toContain("esc(data.body)");
     });
 
+    // 2026-10-07: a token from .env showed « non connecté », a refused one « connecté », « Connecter » failed with a 503.
+    it("shows each Google source as it really is, and says before the click when it cannot be connected", () => {
+        const block = script.slice(
+            script.indexOf("const SOURCE_STATES"),
+            script.indexOf("function connectSource"),
+        );
+        expect(block).toContain("Google a refusé le jeton — reconnecter");
+        expect(block).toContain("jeton du fichier .env");
+        expect(block).toContain("st.canConnect");
+        expect(block).toContain("Connexion impossible : ${esc(st.why");
+        // The error text comes from Google or a network: escaped.
+        expect(block).toContain("esc(st.lastError)");
+    });
+
     it("the digest shows the urgent items listed by LunAcedia, then the summary — as text, never HTML", () => {
         const block = script.slice(
             script.indexOf("async function openDigest()"),

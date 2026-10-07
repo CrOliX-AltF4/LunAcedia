@@ -1273,15 +1273,24 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
 });
 
 describe("AcediaApiServer — GET /api/oauth/google/*", () => {
+    const PAIRS = ["GMAIL", "GCAL", "GTASKS", "GOOGLE"].flatMap((p) => [
+        `${p}_CLIENT_ID`,
+        `${p}_CLIENT_SECRET`,
+        `${p}_REFRESH_TOKEN`,
+    ]);
     beforeEach(() => {
         process.env["GOOGLE_CLIENT_ID"] = "test-client-id";
         process.env["GOOGLE_CLIENT_SECRET"] = "test-client-secret";
     });
     afterEach(() => {
-        delete process.env["GOOGLE_CLIENT_ID"];
-        delete process.env["GOOGLE_CLIENT_SECRET"];
+        PAIRS.forEach((k) => delete process.env[k]);
         vi.unstubAllGlobals();
     });
+
+    /** The state of a start: the only one a callback accepts. */
+    function stateOf(location: string | null): string {
+        return new URL(location ?? "").searchParams.get("state") ?? "";
+    }
 
     function tmpTokenStore(): GoogleTokenStore {
         return new GoogleTokenStore(
@@ -1302,7 +1311,21 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
         server.stop();
         expect(res.status).toBe(302);
         expect(res.location).toContain("https://accounts.google.com/o/oauth2/v2/auth");
-        expect(res.location).toContain("state=gmail");
+        // An unguessable state, never the connector's name.
+        expect(stateOf(res.location)).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("start: consents with the connector's own client — the one it will refresh the token with", async () => {
+        process.env["GMAIL_CLIENT_ID"] = "gm-id";
+        process.env["GMAIL_CLIENT_SECRET"] = "gm-secret";
+        const port = nextPort();
+        const server = makeServer(new EventStore());
+        server.start(port);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
+        );
+        server.stop();
+        expect(new URL(res.location ?? "").searchParams.get("client_id")).toBe("gm-id");
     });
 
     it("start: returns 400 for an unknown connector", async () => {
@@ -1316,7 +1339,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
         expect(res.status).toBe(400);
     });
 
-    it("start: returns 503 when GOOGLE_CLIENT_ID is not configured", async () => {
+    it("start: returns 503 when neither the connector's pair nor GOOGLE_* is configured", async () => {
         delete process.env["GOOGLE_CLIENT_ID"];
         const port = nextPort();
         const server = makeServer(new EventStore());
@@ -1329,13 +1352,51 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
     });
 
     it("callback: exchanges the code, persists the token, and does not require auth", async () => {
-        vi.stubGlobal(
-            "fetch",
-            vi.fn().mockResolvedValue({
-                ok: true,
-                json: () => Promise.resolve({ refresh_token: "rt-abc" }),
-            }),
+        process.env["GMAIL_CLIENT_ID"] = "gm-id";
+        process.env["GMAIL_CLIENT_SECRET"] = "gm-secret";
+        const exchange = vi.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ refresh_token: "rt-abc" }),
+        });
+        const port = nextPort();
+        const tokenStore = tmpTokenStore();
+        const server = makeServer(
+            new EventStore(),
+            [],
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            undefined,
+            tokenStore,
         );
+        server.start(port);
+        const start = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
+        );
+        const state = stateOf(start.location);
+        vi.stubGlobal("fetch", exchange);
+        const res = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/callback?code=abc&state=${state}`,
+        );
+        // The same return again: refused, nothing stored twice.
+        const replay = await getNoRedirect(
+            `http://localhost:${port}/api/oauth/google/callback?code=abc&state=${state}`,
+        );
+        server.stop();
+        expect(res.status).toBe(200);
+        expect(res.body).toContain("Gmail connecté");
+        expect(tokenStore.get("gmail")).toBe("rt-abc");
+        // Exchanged with the connector's own pair.
+        expect(String((exchange.mock.calls[0]![1] as RequestInit).body)).toContain(
+            "client_id=gm-id",
+        );
+        expect(replay.body).toContain("expiré");
+        expect(exchange).toHaveBeenCalledTimes(1);
+    });
+
+    it("callback: refuses a return it did not ask for — nothing exchanged, nothing stored", async () => {
+        const exchange = vi.fn();
+        vi.stubGlobal("fetch", exchange);
         const port = nextPort();
         const tokenStore = tmpTokenStore();
         const server = makeServer(
@@ -1352,9 +1413,9 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
             `http://localhost:${port}/api/oauth/google/callback?code=abc&state=gmail`,
         );
         server.stop();
-        expect(res.status).toBe(200);
-        expect(res.body).toContain("Gmail connecté");
-        expect(tokenStore.get("gmail")).toBe("rt-abc");
+        expect(res.body).toContain("expiré");
+        expect(exchange).not.toHaveBeenCalled();
+        expect(tokenStore.get("gmail")).toBeUndefined();
     });
 
     it("callback: shows an error page and does not throw when Google reports an error", async () => {
@@ -1369,23 +1430,50 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
         expect(res.body).toContain("refusée");
     });
 
-    it("status: reports which connectors have a stored token", async () => {
+    // 2026-10-07: a token in .env showed « non connecté », a token Google refused showed « connecté ».
+    it("status: where each source's token comes from, whether it can be connected, and how its last collection went", async () => {
+        delete process.env["GOOGLE_CLIENT_ID"];
+        process.env["GMAIL_CLIENT_ID"] = "gm-id";
+        process.env["GMAIL_CLIENT_SECRET"] = "gm-secret";
+        process.env["GMAIL_REFRESH_TOKEN"] = "rt-env";
         const port = nextPort();
         const tokenStore = tmpTokenStore();
         await tokenStore.set("gcal", "rt-xyz");
-        const server = makeServer(
+        const gmail: IConnector = {
+            slug: "email",
+            name: "Gmail",
+            poll: async () => {
+                throw new Error("invalid_grant");
+            },
+        };
+        const hub = new IngestionHub([gmail]);
+        await hub.pollOne("email");
+        const server = new AcediaApiServer(
             new EventStore(),
-            [],
+            [gmail],
+            hub,
+            null,
             nullAI,
             SECRET,
             new ActionTierStore(),
+            new PendingActionStore(null),
             undefined,
             tokenStore,
         );
         server.start(port);
         const res = await get(`http://localhost:${port}/api/oauth/google/status`, AUTH);
         server.stop();
-        expect(res.body).toEqual({ gmail: false, gcal: true, gtasks: false });
+        const body = res.body as Record<string, Record<string, unknown>>;
+        expect(body["gmail"]).toMatchObject({
+            token: "env",
+            client: "GMAIL",
+            canConnect: true,
+            state: "refused",
+            lastError: "invalid_grant",
+        });
+        expect(body["gcal"]).toMatchObject({ token: "stored", canConnect: false, state: "idle" });
+        expect(body["gcal"]!["why"]).toContain("GCAL_CLIENT_ID");
+        expect(body["gtasks"]).toMatchObject({ token: null, state: "absent" });
     });
 });
 

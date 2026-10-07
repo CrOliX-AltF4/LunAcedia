@@ -11,6 +11,7 @@ import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
+import { googleClientFor } from "../../auth/google_oauth_flow.js";
 
 const GCAL_API = "https://www.googleapis.com/calendar/v3";
 
@@ -106,8 +107,10 @@ export class GcalConnector implements IConnector {
 
     constructor(tokenStore?: GoogleTokenStore) {
         this.tokenStore = tokenStore;
-        this.clientId = process.env["GCAL_CLIENT_ID"] ?? "";
-        this.clientSecret = process.env["GCAL_CLIENT_SECRET"] ?? "";
+        // Its own pair, or GOOGLE_*: the same client « Connecter » obtains the token with.
+        const client = googleClientFor("gcal");
+        this.clientId = client?.id ?? "";
+        this.clientSecret = client?.secret ?? "";
         this.staticRefreshToken = process.env["GCAL_REFRESH_TOKEN"] ?? "";
 
         const intervalMin = parseInt(process.env["GCAL_POLL_INTERVAL_MIN"] ?? "15", 10);
