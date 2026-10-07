@@ -52,11 +52,14 @@ RSS    ──┤
 HA     ──┘          gestures and actions go back to the sources
 ```
 
-**The box** — what is in your inbox at the source, read and unread: `GET /api/inbox`. Your gestures act **at the
-source** and the box follows: open (the full text, marked read in Gmail), read / unread, archive, trash, spam, restore from
-Gmail's trash, done (a GitHub notification, a Google task) — `POST /api/inbox/:key/:gesture`, `GET /api/inbox/trash`,
-`POST /api/inbox/trash/:id/restore`. The box is reconciled with the sources every minute and clients are told what
-changed. Gestures are your own hand: they run directly, and are journaled (`GET /api/inbox/journal`).
+**The box** — what is in your inbox at the source, read and unread: `GET /api/inbox`. GitHub notifications stay, read
+or not, until they are done; Google Tasks shows overdue tasks, those due within `GTASKS_HORIZON_DAYS` (7) and undated
+ones, from every list. Your gestures act **at the source** and the box follows: open (opening is reading — the full
+text, marked read in Gmail and at GitHub; an event or a task read again in full), read, archive, trash, spam, done (a
+GitHub notification, a Google task) — `POST /api/inbox/:key/:gesture`. Gmail's trash comes a page at a time
+(`GET /api/inbox/trash?page=`, `next`, `skipped`), with `POST /api/inbox/trash/:id/restore`; Gmail purges it after 30
+days. The box is reconciled with the sources every minute and clients are told what changed. Gestures are your own
+hand: they run directly, and are journaled (`GET /api/inbox/journal`).
 
 **Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
 enabled one by one, classified by rules, never by a model.
@@ -114,7 +117,12 @@ confirmation, whatever its tier. `POST /api/inbox/select` previews a selection w
 gaps without a model; `GET /api/proposals` names a real free slot when proposing a fix.
 
 **AI butler** — Lun'Acedia's own model (`openai` or `ollama`), set from the dashboard's onboarding screen. It powers
-the agent, `GET /api/digest` and `GET /api/proposals`.
+the agent, `GET /api/digest` and `GET /api/proposals`. The digest covers unread items only: the urgent ones are listed
+by the rules, with why (`urgent`), and the model only summarizes the rest — it never decides what is urgent.
+
+**Actions that say how they ended** — a pending action is confirmed, cancelled, expired, failed (with why) or refused;
+`GET /api/actions/status?ids=` answers it for 30 days, and a topic's actions carry it. An action that could not be done
+is never reported done.
 
 **LLM spend** — every call of its model is measured by day, caller, purpose and model, with an estimated cost
 (`GET /api/usage`, dashboard **Dépense LLM**), alert thresholds per day and per caller, and an unusual-spend alert.
