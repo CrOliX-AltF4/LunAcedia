@@ -149,7 +149,9 @@ AI_PROVIDER=none
 ```
 
 With `AI_PROVIDER=none` (the default), the box, the gestures, the actions, the API and the dashboard all work; only the
-agent, the topics, the digest and the proposals answer `503 AI not configured`.
+agent, the topics, the digest and the proposals answer `503 AI not configured`. The provider set from the dashboard is
+kept in `STORAGE_DIR/ai_provider.json` (its key encrypted at rest when token encryption is on) and wins over `.env` at
+start: mount `STORAGE_DIR` and it survives image updates.
 
 ### Clients
 
@@ -175,9 +177,14 @@ ID** (type **Web application**). Note the **Client ID** and **Client Secret**.
 **3a. Connect from the dashboard (recommended)**
 
 - Add `http://<your-host>:<HTTP_PORT>/api/oauth/google/callback` as an authorized redirect URI.
-- Fill in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
-- Dashboard → **⚙ Réglages** → **Connecter** next to Gmail / Google Calendar / Google Tasks: each refresh token is
-  stored automatically, no restart (`GET /api/oauth/google/status`).
+- Each connector uses its own client (`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET`, `GCAL_*`, `GTASKS_*`), or the shared
+  `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` when it has none — the consent and the connector's refreshes use the same
+  one, as a refresh token is only valid with the client that obtained it.
+- Dashboard → **⚙ Réglages** → **Connecter** (or **Reconnecter**) next to Gmail / Google Calendar / Google Tasks: the
+  account can be chosen, each refresh token is stored automatically, no restart. Each source says where its token comes
+  from, how its last collection went (« Google a refusé le jeton — reconnecter ») and, before the click, whether it can
+  be connected (`GET /api/oauth/google/status`). The return from Google is accepted once, within 10 minutes.
+- Publish the OAuth consent screen (**In production**): in **Testing**, Google expires refresh tokens after 7 days.
 - `GMAIL_ENABLED` / `GCAL_ENABLED` / `GTASKS_ENABLED` must still be `true` at start for the connector to exist.
 
 **3b. Manual, via the OAuth Playground**
