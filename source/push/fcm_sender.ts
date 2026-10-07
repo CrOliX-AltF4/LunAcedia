@@ -114,7 +114,9 @@ export class FcmSender {
                     dedupeKey: event.dedupeKey,
                     priority: event.priority,
                 },
-                android: { priority: "high" },
+                // The item's key as the notification's tag: the phone takes it down once the item is read,
+                // gone or (for "action-<id>") decided — wherever that happened.
+                android: { priority: "high", notification: { tag: event.dedupeKey } },
             });
         } catch (e) {
             console.error("[FCM] send error:", (e as Error).message);
