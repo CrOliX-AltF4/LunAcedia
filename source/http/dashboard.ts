@@ -737,8 +737,46 @@ document.querySelectorAll('.chip').forEach(c=>{
   }catch(e){console.error(e);}
 })();
 
-setInterval(load,15000);
-setInterval(loadPending,15000);
+// What changed elsewhere (lot S): the box and the waiting actions reload as soon as the server says so — a burst of
+// changes is read once. The 60 s refresh is only a safety net for a stream that dropped.
+const reloadSoon={};
+function reloadOnce(name,fn){
+  clearTimeout(reloadSoon[name]);
+  reloadSoon[name]=setTimeout(fn,300);
+}
+function onChange(c){
+  if(c.scope==='box')reloadOnce('box',load);
+  else if(c.scope==='actions')reloadOnce('actions',loadPending);
+}
+async function followChanges(){
+  for(;;){
+    try{
+      const r=await req('/api/changes');
+      if(r.ok&&r.body){
+        const reader=r.body.getReader();
+        const dec=new TextDecoder();
+        let buf='';
+        for(;;){
+          const {value,done}=await reader.read();
+          if(done)break;
+          buf+=dec.decode(value,{stream:true});
+          let i;
+          while((i=buf.indexOf('\\n\\n'))>=0){
+            const block=buf.slice(0,i);
+            buf=buf.slice(i+2);
+            const data=block.startsWith('event: change')?block.split('\\ndata: ')[1]:null;
+            if(data){try{onChange(JSON.parse(data));}catch(e){}}
+          }
+        }
+      }
+    }catch(e){}
+    // Dropped or refused: try again a little later; meanwhile the safety net refreshes.
+    await new Promise(res=>setTimeout(res,5000));
+  }
+}
+followChanges();
+setInterval(load,60000);
+setInterval(loadPending,60000);
 </script>
 </body>
 </html>`;
