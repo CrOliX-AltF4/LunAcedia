@@ -124,7 +124,10 @@ pendingStore.onCreate((p) => {
     changes.emit("actions", p.id);
 });
 // Decided anywhere, failed or expired: the views follow.
-pendingStore.onSettle((p) => changes.emit("actions", p.id));
+pendingStore.onSettle((p) => {
+    changes.emit("actions", p.id);
+    fcm?.settle(`action-${p.id}`);
+});
 // The agent's switch — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
@@ -151,6 +154,8 @@ const inboxSync = new InboxSync({
     emit: (change) => {
         ws.broadcast(InboxSync.toWire(change));
         changes.emit("box", change.key);
+        // Read or gone: a notification about it has nothing left to say, even on a closed phone (lot S, S5).
+        if (change.op === "removed" || change.op === "read") fcm?.settle(change.key);
     },
     forget: (key) => hub.forget(key),
 });
