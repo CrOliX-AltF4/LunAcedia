@@ -197,7 +197,7 @@ describe("dashboard box", () => {
         // Opening is reading: no "Non lu" any more. A GitHub notification can be marked read and stays.
         expect(cardBlock).not.toContain('data-g="unread"');
         expect(cardBlock).toContain(
-            "e.source==='github'?'<button data-g=\"read\" onclick=\"gesture(this,event)\">Lu</button>",
+            'e.source===\'github\'?\'<button data-g="read" onclick="gesture(this,event)">Lu</button>',
         );
         expect(cardBlock).toContain('data-g="done"');
         // "Fait" on a task — same gesture as GitHub's, its own label.

@@ -17,14 +17,7 @@ import type { InboxSync } from "../hub/inbox_sync.js";
 import type { IConnector, InboxGesture } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 
-const GESTURES: readonly InboxGesture[] = [
-    "open",
-    "read",
-    "archive",
-    "trash",
-    "spam",
-    "done",
-];
+const GESTURES: readonly InboxGesture[] = ["open", "read", "archive", "trash", "spam", "done"];
 const JOURNAL_SIZE = 100;
 const BOX_SIZE = 200;
 
