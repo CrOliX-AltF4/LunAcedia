@@ -49,11 +49,17 @@ export interface CapabilityManifest {
 }
 
 const id = (description: string) => ({ type: "string" as const, minLength: 1, description });
-const sourceOnly = (description: string): ObjectSchema => ({
+/** A composite id ("calendar/event", "owner/repo#n"): a malformed one is refused before anything is proposed. */
+const ref = (description: string, pattern: string) => ({ ...id(description), pattern });
+const sourceOnly = (description: string, pattern?: string): ObjectSchema => ({
     type: "object",
-    properties: { sourceId: id(description) },
+    properties: { sourceId: pattern ? ref(description, pattern) : id(description) },
     required: ["sourceId"],
 });
+/** "<a>/<b>", both halves present. */
+const PAIR = "^[^/\\s]+/[^/\\s]+$";
+/** "owner/repo#number". */
+const ISSUE = "^[^/\\s#]+/[^/\\s#]+#\\d+$";
 
 const MAIL_ID =
     "Gmail message id, taken from a search_events/get_event result (meta.messageId). Never invented.";
@@ -333,7 +339,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 params: {
                     type: "object",
                     properties: {
-                        sourceId: id(EVENT_ID),
+                        sourceId: ref(EVENT_ID, PAIR),
                         fields: {
                             type: "object",
                             description: "Fields to change.",
@@ -351,7 +357,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 kind: "delete_event",
                 label: "Supprimer un événement",
                 description: "Delete a calendar event.",
-                params: sourceOnly(EVENT_ID),
+                params: sourceOnly(EVENT_ID, PAIR),
                 defaultTier: "confirm",
                 risk: "high",
                 agentAllowed: true,
@@ -391,7 +397,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 kind: "complete_task",
                 label: "Terminer une tâche",
                 description: "Mark a task as completed.",
-                params: sourceOnly(TASK_ID),
+                params: sourceOnly(TASK_ID, PAIR),
                 defaultTier: "confirm",
                 risk: "low",
                 agentAllowed: true,
@@ -401,7 +407,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 kind: "delete_task",
                 label: "Supprimer une tâche",
                 description: "Delete a task.",
-                params: sourceOnly(TASK_ID),
+                params: sourceOnly(TASK_ID, PAIR),
                 defaultTier: "confirm",
                 risk: "high",
                 agentAllowed: true,
@@ -419,7 +425,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 params: {
                     type: "object",
                     properties: {
-                        sourceId: id(ISSUE_REF),
+                        sourceId: ref(ISSUE_REF, ISSUE),
                         body: { type: "string", description: "Comment text." },
                     },
                     required: ["sourceId", "body"],
@@ -436,7 +442,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 params: {
                     type: "object",
                     properties: {
-                        sourceId: id(ISSUE_REF),
+                        sourceId: ref(ISSUE_REF, ISSUE),
                         label: { type: "string", minLength: 1 },
                     },
                     required: ["sourceId", "label"],
@@ -474,7 +480,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 kind: "close_issue",
                 label: "Fermer un ticket GitHub",
                 description: "Close an issue.",
-                params: sourceOnly(ISSUE_REF),
+                params: sourceOnly(ISSUE_REF, ISSUE),
                 defaultTier: "confirm",
                 risk: "high",
                 agentAllowed: true,
@@ -511,7 +517,7 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 kind: "merge_pr",
                 label: "Fusionner une PR GitHub",
                 description: "Merge a pull request.",
-                params: sourceOnly(ISSUE_REF),
+                params: sourceOnly(ISSUE_REF, ISSUE),
                 defaultTier: "manual",
                 risk: "high",
                 agentAllowed: false,

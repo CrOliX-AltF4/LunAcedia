@@ -375,6 +375,75 @@ describe("GcalConnector — conflict detection", () => {
     });
 });
 
+describe("GcalConnector.inboxGesture — open", () => {
+    const item = {
+        type: "calendar.upcoming" as const,
+        ts: 1,
+        source: "calendar" as const,
+        title: "Dentiste",
+        priority: "normal" as const,
+        dedupeKey: "cal-ev1",
+        meta: { calendarId: "primary", eventId: "ev1" },
+    };
+
+    beforeEach(() => {
+        clearGoogleTokenCache();
+        process.env["GCAL_CLIENT_ID"] = "cid";
+        process.env["GCAL_CLIENT_SECRET"] = "csec";
+        process.env["GCAL_REFRESH_TOKEN"] = "rtoken";
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    function eventFetch(event: object | null) {
+        return vi.fn().mockImplementation((url: string) => {
+            const u = String(url);
+            if (u.includes("oauth2"))
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                });
+            expect(u).toContain("/calendars/primary/events/ev1");
+            return Promise.resolve(
+                event
+                    ? { ok: true, status: 200, json: () => Promise.resolve(event) }
+                    : { ok: false, status: 404, json: () => Promise.resolve({}) },
+            );
+        });
+    }
+
+    it("reads the whole event — when, where, the full description — and marks it read in the box", async () => {
+        vi.stubGlobal(
+            "fetch",
+            eventFetch({
+                id: "ev1",
+                summary: "Dentiste",
+                location: "12 rue des Lilas",
+                description: "d".repeat(300),
+                start: { dateTime: "2026-10-08T14:00:00+02:00" },
+                end: { dateTime: "2026-10-08T15:00:00+02:00" },
+            }),
+        );
+        const r = await new GcalConnector().inboxGesture("open", item);
+        expect(r.change).toBe("read");
+        expect(r.body).toContain("Quand :");
+        expect(r.body).toContain("Lieu : 12 rue des Lilas");
+        expect(r.body).toContain("d".repeat(300));
+    });
+
+    it("says so when the event no longer exists", async () => {
+        vi.stubGlobal("fetch", eventFetch(null));
+        await expect(new GcalConnector().inboxGesture("open", item)).rejects.toThrow(
+            /no longer exists/,
+        );
+    });
+
+    it("refuses any other gesture: an event is not archived or trashed from the box", async () => {
+        await expect(new GcalConnector().inboxGesture("trash", item)).rejects.toThrow(
+            /does not apply/,
+        );
+    });
+});
+
 describe("GcalConnector.executeAction — update_event / create_event / delete_event", () => {
     beforeEach(() => {
         clearGoogleTokenCache();
@@ -413,21 +482,44 @@ describe("GcalConnector.executeAction — update_event / create_event / delete_e
         expect(body["description"]).toBe("New desc");
     });
 
-    it("update_event: should warn and return when sourceId has no slash", async () => {
+    it("update_event: refuses a sourceId without its calendar, instead of claiming it was done", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GcalConnector().executeAction({
-            kind: "update_event",
-            sourceId: "bad-id",
-            fields: {},
-        });
+        await expect(
+            new GcalConnector().executeAction({
+                kind: "update_event",
+                sourceId: "bad-id",
+                fields: {},
+            }),
+        ).rejects.toThrow(/calendarId\/eventId/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("should ignore action kinds it doesn't own", async () => {
+    it("delete_event: refuses an event id without its calendar — nothing deleted, nothing claimed", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GcalConnector().executeAction({ kind: "complete_task", sourceId: "primary/ev1" });
+        await expect(
+            new GcalConnector().executeAction({ kind: "delete_event", sourceId: "ev1" }),
+        ).rejects.toThrow(/calendarId\/eventId/);
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("says so when Google Calendar is not configured", async () => {
+        delete process.env["GCAL_CLIENT_ID"];
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({ kind: "delete_event", sourceId: "primary/ev1" }),
+        ).rejects.toThrow(/not configured/);
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("refuses an action kind it doesn't own", async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GcalConnector().executeAction({ kind: "complete_task", sourceId: "primary/ev1" }),
+        ).rejects.toThrow(/not a calendar action/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 

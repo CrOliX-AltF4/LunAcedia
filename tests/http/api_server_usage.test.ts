@@ -14,7 +14,7 @@ import type { IAIProvider } from "../../source/ai/ai_provider.js";
 
 // GET /api/usage and the alert settings; and every request's LLM calls land under the right caller.
 
-let PORT = 49_600 + Math.floor(Math.random() * 300);
+let PORT = 49_800 + Math.floor(Math.random() * 200);
 const nextPort = () => PORT++;
 
 async function call(
@@ -45,8 +45,18 @@ describe("AcediaApiServer — usage", () => {
 
     async function start(ai: IAIProvider, ledger: UsageLedger, alerts: UsageAlerts) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-usage-"));
+        // One unread item: the digest only calls the model when there is something to summarize.
+        const store = new EventStore();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "Un mail",
+            priority: "normal",
+            dedupeKey: "email-1",
+        });
         server = new AcediaApiServer(
-            new EventStore(),
+            store,
             [],
             new IngestionHub([]),
             null,

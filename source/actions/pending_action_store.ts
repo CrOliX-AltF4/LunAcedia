@@ -22,7 +22,24 @@ export interface PendingMeta {
     untrusted?: boolean;
 }
 
+/** How a pending action ended. Confirmed and cancelled are Master's hand; expired and failed are said as such. */
+export type ActionEnd = "confirmed" | "cancelled" | "expired" | "failed" | "refused";
+
+export interface ActionOutcome {
+    status: ActionEnd;
+    at: number;
+    kind: string;
+    /** Why it failed or was refused — "nothing was done" always says why. */
+    reason?: string;
+}
+
+/** Where an action stands: still waiting, or how it ended. */
+export type ActionState = { status: "pending"; expiresAt: number } | ActionOutcome;
+
 const HOUR = 60 * 60 * 1000;
+/** How long the end of an action is remembered — a topic reopened weeks later still shows it. */
+const OUTCOME_KEEP_MS = 30 * 24 * HOUR;
+const OUTCOME_MAX = 2000;
 
 /**
  * Each kind its own delay: what goes stale fast (a reply, a comment) or undoes something (a
@@ -62,6 +79,26 @@ function revive(raw: unknown, now: number): PendingAction | null {
     };
 }
 
+const ENDS = new Set<string>(["confirmed", "cancelled", "expired", "failed", "refused"]);
+
+function reviveOutcome(raw: unknown): { id: string; at: number; outcome: ActionOutcome } | null {
+    if (!raw || typeof raw !== "object") return null;
+    const e = raw as Record<string, unknown>;
+    if (typeof e["id"] !== "string" || typeof e["at"] !== "number") return null;
+    if (typeof e["status"] !== "string" || !ENDS.has(e["status"])) return null;
+    if (typeof e["kind"] !== "string") return null;
+    return {
+        id: e["id"],
+        at: e["at"],
+        outcome: {
+            status: e["status"] as ActionEnd,
+            at: e["at"],
+            kind: e["kind"],
+            ...(typeof e["reason"] === "string" && { reason: e["reason"] }),
+        },
+    };
+}
+
 /**
  * The writes waiting for Master. Durable since M5: a pending action is a list Master comes back to
  * — from the phone, the panel or the dashboard, hours later — so it survives a restart. Each kind expires on its own
@@ -70,6 +107,8 @@ function revive(raw: unknown, now: number): PendingAction | null {
  */
 export class PendingActionStore {
     private readonly pending = new Map<string, PendingAction>();
+    /** What became of the actions no longer pending: a card in a topic shows it instead of staying active. */
+    private readonly outcomes = new Map<string, ActionOutcome>();
     private writes: Promise<void> = Promise.resolve();
     private readonly created: Array<(p: PendingAction) => void> = [];
 
@@ -80,16 +119,32 @@ export class PendingActionStore {
 
     async load(): Promise<void> {
         if (!this.filePath) return;
+        const t = this.now();
+        try {
+            const parsed = JSON.parse(await fs.readFile(this.outcomesPath()!, "utf-8")) as unknown;
+            for (const raw of Array.isArray(parsed) ? parsed : []) {
+                const o = reviveOutcome(raw);
+                if (o && o.at > t - OUTCOME_KEEP_MS) this.outcomes.set(o.id, o.outcome);
+            }
+        } catch {
+            // Absent or unreadable — no history, that's fine.
+        }
+        let expiredWhileDown = false;
         try {
             const parsed = JSON.parse(await fs.readFile(this.filePath, "utf-8")) as unknown;
-            const t = this.now();
             for (const raw of Array.isArray(parsed) ? parsed : []) {
-                const entry = revive(raw, t);
-                if (entry) this.pending.set(entry.id, entry);
+                const entry = revive(raw, 0);
+                if (!entry) continue;
+                if (entry.expiresAt > t) this.pending.set(entry.id, entry);
+                else {
+                    this.record(entry, "expired", undefined, entry.expiresAt);
+                    expiredWhileDown = true;
+                }
             }
         } catch {
             // Absent or unreadable — nothing waits, that's fine.
         }
+        if (expiredWhileDown) this.persist();
     }
 
     create(connector: string, action: ConnectorAction, meta: PendingMeta = {}): PendingAction {
@@ -124,6 +179,40 @@ export class PendingActionStore {
         return entry;
     }
 
+    /** Records how a consumed action ended — confirmed, cancelled, failed or refused (with why). */
+    settle(entry: PendingAction, status: ActionEnd, reason?: string): void {
+        this.record(entry, status, reason, this.now());
+        this.persist();
+    }
+
+    /** Still waiting, or how it ended (kept 30 days); undefined for an id never seen or long forgotten. */
+    stateOf(id: string): ActionState | undefined {
+        this.purgeExpired();
+        const entry = this.pending.get(id);
+        if (entry) return { status: "pending", expiresAt: entry.expiresAt };
+        return this.outcomes.get(id);
+    }
+
+    private record(
+        entry: PendingAction,
+        status: ActionEnd,
+        reason: string | undefined,
+        at: number,
+    ): void {
+        this.outcomes.set(entry.id, {
+            status,
+            at,
+            kind: entry.action.kind,
+            ...(reason && { reason }),
+        });
+    }
+
+    private outcomesPath(): string | null {
+        return this.filePath
+            ? path.join(path.dirname(this.filePath), "action_outcomes.json")
+            : null;
+    }
+
     /** Oldest first. */
     list(): PendingAction[] {
         this.purgeExpired();
@@ -146,6 +235,7 @@ export class PendingActionStore {
         for (const [id, entry] of this.pending) {
             if (entry.expiresAt <= t) {
                 this.pending.delete(id);
+                this.record(entry, "expired", undefined, entry.expiresAt);
                 changed = true;
                 console.warn(
                     `[Actions] pending ${entry.action.kind} ${id} expired — nothing was done`,
@@ -158,14 +248,26 @@ export class PendingActionStore {
     /** One write at a time, in order; a temporary file then a rename, so a crash never leaves half a list. */
     private persist(): void {
         const file = this.filePath;
-        if (!file) return;
+        const outcomesFile = this.outcomesPath();
+        if (!file || !outcomesFile) return;
         const snapshot = JSON.stringify([...this.pending.values()], null, 2);
+        const cutoff = this.now() - OUTCOME_KEEP_MS;
+        const kept = [...this.outcomes]
+            .filter(([, o]) => o.at > cutoff)
+            .sort(([, a], [, b]) => b.at - a.at)
+            .slice(0, OUTCOME_MAX);
+        const outcomes = JSON.stringify(kept.map(([id, o]) => ({ id, ...o })));
         this.writes = this.writes.then(async () => {
             try {
                 await fs.mkdir(path.dirname(file), { recursive: true });
-                const tmp = `${file}.tmp`;
-                await fs.writeFile(tmp, snapshot, "utf-8");
-                await fs.rename(tmp, file);
+                for (const [target, text] of [
+                    [file, snapshot],
+                    [outcomesFile, outcomes],
+                ] as const) {
+                    const tmp = `${target}.tmp`;
+                    await fs.writeFile(tmp, text, "utf-8");
+                    await fs.rename(tmp, target);
+                }
             } catch (e) {
                 console.error(
                     "[Actions] could not save the pending actions:",

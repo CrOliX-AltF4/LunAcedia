@@ -38,7 +38,11 @@ import { actionCapabilities } from "../capabilities/capability_manifest.js";
 import { ActionCooldownTracker } from "../actions/action_cooldown.js";
 import { resolveTierScope } from "../actions/resolve_tier_scope.js";
 import { resolveEventSync } from "../store/event_sync.js";
-import type { PendingActionStore } from "../actions/pending_action_store.js";
+import type {
+    ActionState,
+    PendingAction,
+    PendingActionStore,
+} from "../actions/pending_action_store.js";
 import { summarizeAction } from "../push/pending_push.js";
 import type { EmailClassificationStore } from "../connectors/email/email_classification_store.js";
 import type { EmailClassificationConfig } from "../types/email_classification.js";
@@ -124,6 +128,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  | 429 if the kind is on cooldown (see ActionCooldownTracker)
  *   POST /api/actions/:id/cancel   → 204, discards a pending action
  *   GET  /api/actions/pending      → PendingAction[]
+ *   GET  /api/actions/status?ids=  → { states }: pending, or how each ended (confirmed, cancelled, expired, failed, refused)
  *   POST /api/inbox/select         body: { match } → { matched, limit, sample } — what a bulk_email would touch
  *   GET  /api/config/actions       → [{ kind, label, connector, tier, risk, category, locked }] — the tiers in words
  *   GET  /api/config/tiers         → ActionTierConfig
@@ -166,7 +171,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   A paired device's token opens only the mobile routes (auth/device_scope.ts); everything else needs ACEDIA_SECRET.
  *   POST /api/intent               body: { text } → the agent limited to one action, answered as
  *                                  { matched, connector, action, status, id?/reason? }
- *   GET  /api/digest               synthesize recent events (requires AI_PROVIDER != none)
+ *   GET  /api/digest               { response, count, urgent }: unread items, urgent ones listed by the code
  *   GET  /api/proposals            suggest next actions for unread urgent/conflict items (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
  *   DELETE /api/devices/push-token
@@ -232,6 +237,7 @@ export class AcediaApiServer {
                   ai: () => this.ai,
                   agentEnabled: () => this.agent.isEnabled(),
                   runAgent: (r) => this.runAgentRequest(r),
+                  actionState: (id) => this.pendingStore.stateOf(id),
                   readBody,
                   json,
               })
@@ -478,34 +484,40 @@ export class AcediaApiServer {
         else this.store.markUnread(sync.dedupeKey);
     }
 
-    private async executeConnectorAction(
+    /** Executes a confirmed pending action, and records how it ended (a card in a topic shows it). */
+    private async executeConfirmed(
         res: http.ServerResponse,
         connector: IConnector,
-        action: ConnectorAction,
+        pending: PendingAction,
     ): Promise<void> {
-        if (!this.cooldown.tryConsume(action.kind)) {
-            return json(res, 429, {
-                error: `'${action.kind}' hit its cooldown — too many executions in a short window`,
-            });
-        }
+        const action = pending.action;
+        const failed = (status: number, error: string) => {
+            this.pendingStore.settle(pending, "failed", error);
+            return json(res, status, { error });
+        };
+        if (!this.cooldown.tryConsume(action.kind))
+            return failed(
+                429,
+                `'${action.kind}' hit its cooldown — too many executions in a short window`,
+            );
         try {
             if (action.kind === "create_rule") {
                 const added = this.guards
                     ? await this.guards.rules.add(ruleFromAction(action))
                     : null;
                 if (!added?.ok)
-                    return json(res, 409, {
-                        error: `Rule not added: ${added ? added.error : "no rules here"}`,
-                    });
-                return json(res, 204, null);
+                    return failed(409, `Rule not added: ${added ? added.error : "no rules here"}`);
+            } else {
+                await connector.executeAction!(action);
+                this.syncStoreAfterAction(action);
             }
-            await connector.executeAction!(action);
-            this.syncStoreAfterAction(action);
+            this.pendingStore.settle(pending, "confirmed");
             return json(res, 204, null);
         } catch (e) {
             // Said to Master, not hidden: the object may have changed or gone since the action was proposed.
             const message = (e as Error).message;
             console.error("[API] action error:", message);
+            this.pendingStore.settle(pending, "failed", message);
             return json(res, 502, { error: `Action failed: ${message}` });
         }
     }
@@ -530,7 +542,7 @@ export class AcediaApiServer {
         | { status: "refused"; reason: string }
         | { status: "pending"; id: string; expiresAt: number; action: ConnectorAction }
         | { status: "executed"; action: ConnectorAction }
-        | { status: "error" }
+        | { status: "error"; reason?: string }
     > {
         const connector = this.connectors.find((c) => c.name === connectorName);
         if (!connector) return { status: "not_found" };
@@ -583,8 +595,10 @@ export class AcediaApiServer {
             this.syncStoreAfterAction(action);
             return { status: "executed", action };
         } catch (e) {
-            console.error("[API] action error:", (e as Error).message);
-            return { status: "error" };
+            // The reason goes back to whoever asked: "nothing was done" always says why.
+            const reason = (e as Error).message;
+            console.error("[API] action error:", reason);
+            return { status: "error", reason };
         }
     }
 
@@ -884,7 +898,10 @@ export class AcediaApiServer {
                     id: result.id,
                     expiresAt: result.expiresAt,
                 });
-            if (result.status === "error") return json(res, 500, { error: "Action failed" });
+            if (result.status === "error")
+                return json(res, 500, {
+                    error: result.reason ? `Action failed: ${result.reason}` : "Action failed",
+                });
             return json(res, 204, null);
         }
 
@@ -898,18 +915,21 @@ export class AcediaApiServer {
                     error: "No such pending action (expired or already resolved)",
                 });
             const connector = this.connectors.find((c) => c.name === pending.connector);
-            if (!connector?.executeAction)
+            if (!connector?.executeAction) {
+                this.pendingStore.settle(pending, "failed", "connector no longer available");
                 return json(res, 404, { error: "Connector no longer available" });
+            }
             // Hours may have passed: the tier is read again — a kind set to manual since is refused.
             const tier = this.tierStore.getTier(
                 pending.action.kind,
                 resolveTierScope(pending.action, this.store) ?? undefined,
             );
-            if (tier === "manual")
-                return json(res, 403, {
-                    error: `'${pending.action.kind}' is set to manual since — nothing was done`,
-                });
-            return this.executeConnectorAction(res, connector, pending.action);
+            if (tier === "manual") {
+                const error = `'${pending.action.kind}' is set to manual since — nothing was done`;
+                this.pendingStore.settle(pending, "refused", error);
+                return json(res, 403, { error });
+            }
+            return this.executeConfirmed(res, connector, pending);
         }
 
         // POST /api/actions/:id/cancel
@@ -921,7 +941,22 @@ export class AcediaApiServer {
                 return json(res, 404, {
                     error: "No such pending action (expired or already resolved)",
                 });
+            this.pendingStore.settle(pending, "cancelled");
             return json(res, 204, null);
+        }
+
+        // GET /api/actions/status?ids=a,b — still pending, or how each ended (kept 30 days). Unknown ids are left out.
+        if (method === "GET" && path === "/api/actions/status") {
+            const ids = (url.searchParams.get("ids") ?? "")
+                .split(",")
+                .filter(Boolean)
+                .slice(0, 200);
+            const states: Record<string, ActionState> = {};
+            for (const id of ids) {
+                const state = this.pendingStore.stateOf(id);
+                if (state) states[id] = state;
+            }
+            return json(res, 200, { states });
         }
 
         // POST /api/inbox/select — what a batch would touch, without acting
@@ -1056,7 +1091,11 @@ export class AcediaApiServer {
         }
 
         // The box: Master's gestures at the source, trash, journal
-        if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
+        if (
+            this.inboxRoutes &&
+            (await this.inboxRoutes.handle(method, path, res, url.searchParams))
+        )
+            return;
 
         // LLM usage and its alert settings
         if (this.usageRoutes && (await this.usageRoutes.handle(method, path, url, req, res)))
@@ -1235,17 +1274,31 @@ export class AcediaApiServer {
             });
         }
 
-        // GET /api/digest
+        // GET /api/digest — what came in and is still unread. The urgent items are listed by the code, with
+        // the same priority and reason as the box; the model only summarizes the others. Nothing unread:
+        // nothing to say, the model is not called. Without a provider: the urgent list, no summary.
         if (method === "GET" && path === "/api/digest") {
-            if (this.ai.mode === "none") {
-                return json(res, 503, { error: "AI_PROVIDER not configured" });
-            }
             const limitParam = url.searchParams.get("limit");
             const limit = limitParam ? Math.min(parseInt(limitParam, 10), 100) : 20;
-            const { events } = this.store.query({ limit, offset: 0 });
+            const { events: unread } = this.store.query({
+                unread: true,
+                limit: Number.MAX_SAFE_INTEGER,
+            });
+            const urgent = unread
+                .filter((e) => e.priority === "urgent")
+                .map((e) => ({
+                    key: e.dedupeKey,
+                    title: e.title,
+                    source: e.source,
+                    ...(e.priorityReason && { priorityReason: e.priorityReason }),
+                }));
+            const rest = unread.filter((e) => e.priority !== "urgent").slice(0, limit);
+            const count = unread.length;
+            if (rest.length === 0 || this.ai.mode === "none")
+                return json(res, 200, { response: "", count, urgent });
             try {
-                const response = await this.ai.digest(events as AcediaEvent[]);
-                return json(res, 200, { response, count: events.length });
+                const response = await this.ai.digest(rest);
+                return json(res, 200, { response, count, urgent });
             } catch (e) {
                 console.error("[API] digest error:", (e as Error).message);
                 return json(res, 502, { error: "AI provider error" });

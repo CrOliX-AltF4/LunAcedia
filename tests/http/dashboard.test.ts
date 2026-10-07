@@ -186,7 +186,19 @@ describe("dashboard box", () => {
         expect(block).toContain("esc(data.body)");
     });
 
-    it("offers archive, trash, unread and done as buttons that read the key from the card, never a JS argument", () => {
+    it("the digest shows the urgent items listed by LunAcedia, then the summary — as text, never HTML", () => {
+        const block = script.slice(
+            script.indexOf("async function openDigest()"),
+            script.indexOf("function openProposals"),
+        );
+        expect(block).toContain("data.urgent");
+        expect(block).toContain("priorityReason");
+        expect(block).toContain("Rien de nouveau");
+        expect(block).toContain("t.textContent=");
+        expect(block).not.toContain("innerHTML");
+    });
+
+    it("offers archive, trash, read and done as buttons that read the key from the card, never a JS argument", () => {
         const cardBlock = script.slice(
             script.indexOf("list.innerHTML=shown.map"),
             script.indexOf("`).join('');") + 1,
@@ -194,7 +206,11 @@ describe("dashboard box", () => {
         expect(cardBlock).toContain('data-g="archive"');
         expect(cardBlock).toContain('data-g="trash"');
         expect(cardBlock).toContain('data-g="spam"');
-        expect(cardBlock).toContain('data-g="unread"');
+        // Opening is reading: no "Non lu" any more. A GitHub notification can be marked read and stays.
+        expect(cardBlock).not.toContain('data-g="unread"');
+        expect(cardBlock).toContain(
+            'e.source===\'github\'?\'<button data-g="read" onclick="gesture(this,event)">Lu</button>',
+        );
         expect(cardBlock).toContain('data-g="done"');
         // "Fait" on a task — same gesture as GitHub's, its own label.
         expect(cardBlock).toContain(
@@ -220,7 +236,12 @@ describe("dashboard box", () => {
             script.indexOf("async function openTrash"),
             script.indexOf("async function restoreTrash") + 400,
         );
-        expect(block).toContain("req('/api/inbox/trash')");
+        // A page at a time: the next page's token comes back encoded, "Voir plus" asks for it.
+        expect(block).toContain(
+            "req('/api/inbox/trash'+(trashNext?'?page='+encodeURIComponent(trashNext):''))",
+        );
+        expect(block).toContain("Voir plus");
+        expect(block).toContain("data.skipped");
         expect(block).toContain('data-id="${esc(t.id)}"');
         expect(block).toContain("esc(t.title)");
         expect(block).toContain("esc(t.from)");

@@ -51,3 +51,26 @@ jobs:
                   l_max_size: 1000
                   xl_label: "size/XL"
                   fail_if_xl: false
+
+    version-notice:
+        name: Release notice — version unchanged (feat/fix)
+        runs-on: ubuntu-latest
+        # Never blocking: versions are set once, at the end of a working session, in a chore(release) PR. A feat/fix PR
+        # merged without a new version does not ship on its own — said here, so it is never forgotten silently.
+        if: startsWith(github.event.pull_request.title, 'feat') || startsWith(github.event.pull_request.title, 'fix')
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Compare version against master
+              run: |
+                  git fetch origin master --depth=1
+                  base=$(git show origin/master:package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))")
+                  head=$(node -p "require('./package.json').version")
+                  if [ "$base" = "$head" ]; then
+                    echo "::warning::package.json version ($head) unchanged from master — this PR does not ship on its own; it ships with the version bump at the end of the session."
+                    echo "Version $head unchanged: not released by this PR (bump at the end of the session)." >> "$GITHUB_STEP_SUMMARY"
+                  else
+                    echo "Version $base → $head: merging this PR releases it." >> "$GITHUB_STEP_SUMMARY"
+                  fi

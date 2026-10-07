@@ -12,6 +12,8 @@ export interface StringSchema {
     description?: string;
     minLength?: number;
     enum?: readonly string[];
+    /** The form the string must have (a composite id): refused with its description, so the model can correct it. */
+    pattern?: string;
 }
 export interface IntegerSchema {
     type: "integer";
@@ -52,6 +54,11 @@ function check(
                 return { ok: false, error: `${path} must not be empty` };
             if (schema.enum && !schema.enum.includes(value))
                 return { ok: false, error: `${path} must be one of ${schema.enum.join(", ")}` };
+            if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value))
+                return {
+                    ok: false,
+                    error: `${path} must be ${schema.description ?? `of the form ${schema.pattern}`}`,
+                };
             return { ok: true, value };
         }
         case "integer": {

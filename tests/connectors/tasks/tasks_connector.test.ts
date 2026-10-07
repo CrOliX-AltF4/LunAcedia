@@ -6,6 +6,9 @@ import { GoogleTokenStore } from "../../../source/auth/google_token_store.js";
 const NOW = Date.now();
 const DUE_TODAY = new Date(NOW + 2 * 3_600_000).toISOString(); // 2h from now
 const DUE_PAST = new Date(NOW - 24 * 3_600_000).toISOString(); // yesterday
+const DUE_IN_3_DAYS = new Date(NOW + 3 * 86_400_000).toISOString();
+const DUE_IN_10_DAYS = new Date(NOW + 10 * 86_400_000).toISOString();
+const LISTS_URL = "/users/@me/lists";
 
 function task(id: string, title: string, due: string, notes?: string) {
     return {
@@ -18,6 +21,7 @@ function task(id: string, title: string, due: string, notes?: string) {
     };
 }
 
+/** One task list ("list-a") holding `tasks` — the lists endpoint answers with it. */
 function makeFetch(tasks: object[]) {
     return vi.fn().mockImplementation((url: string) => {
         const u = String(url);
@@ -27,6 +31,11 @@ function makeFetch(tasks: object[]) {
                 json: () => Promise.resolve({ access_token: "tok", expires_in: 3600 }),
             });
         }
+        if (u.includes(LISTS_URL))
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ items: [{ id: "list-a", title: "Mes tâches" }] }),
+            });
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: tasks }) });
     });
 }
@@ -102,7 +111,7 @@ describe("TasksConnector", () => {
         const events = await new TasksConnector().poll();
         expect(events[0]!.meta?.["taskId"]).toBe("t1");
         expect(events[0]!.meta?.["overdue"]).toBe(true);
-        expect(events[0]!.meta?.["listId"]).toBe("@default");
+        expect(events[0]!.meta?.["listId"]).toBe("list-a");
     });
 
     it("should truncate notes to 200 chars", async () => {
@@ -111,20 +120,69 @@ describe("TasksConnector", () => {
         expect(events[0]!.body).toHaveLength(200);
     });
 
-    it("should filter out tasks without a due date", async () => {
+    it("keeps a task without a due date, as info, dated when it last changed", async () => {
+        const updated = new Date(NOW - 3_600_000).toISOString();
+        vi.stubGlobal(
+            "fetch",
+            makeFetch([{ id: "t1", title: "No due", status: "needsAction", updated }]),
+        );
+        const events = await new TasksConnector().poll();
+        expect(events).toHaveLength(1);
+        expect(events[0]!.priority).toBe("info");
+        expect(events[0]!.ts).toBe(new Date(updated).getTime());
+    });
+
+    it("keeps what is due within the next 7 days, leaves what is due later", async () => {
         vi.stubGlobal(
             "fetch",
             makeFetch([
-                {
-                    id: "t1",
-                    title: "No due",
-                    status: "needsAction",
-                    updated: new Date().toISOString(),
-                },
+                task("soon", "Soon", DUE_IN_3_DAYS),
+                task("later", "Later", DUE_IN_10_DAYS),
             ]),
         );
         const events = await new TasksConnector().poll();
-        expect(events).toHaveLength(0);
+        expect(events.map((e) => e.title)).toEqual(["Soon"]);
+        expect(events[0]!.priority).toBe("normal");
+    });
+
+    it("reads every task list, each task tied to its own list", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                const u = String(url);
+                if (u.includes("oauth2"))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                if (u.includes(LISTS_URL))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () =>
+                            Promise.resolve({ items: [{ id: "perso" }, { id: "travail" }] }),
+                    });
+                const items = u.includes("/lists/perso/")
+                    ? [task("p1", "Perso", DUE_TODAY)]
+                    : [task("w1", "Travail", DUE_TODAY)];
+                return Promise.resolve({ ok: true, json: () => Promise.resolve({ items }) });
+            }),
+        );
+        const events = await new TasksConnector().poll();
+        expect(Object.fromEntries(events.map((e) => [e.title, e.meta?.["listId"]]))).toEqual({
+            Perso: "perso",
+            Travail: "travail",
+        });
+    });
+
+    it("reads only the configured list when GTASKS_LIST_ID is set", async () => {
+        process.env["GTASKS_LIST_ID"] = "only";
+        const mockFetch = makeFetch([task("t1", "T", DUE_TODAY)]);
+        vi.stubGlobal("fetch", mockFetch);
+        const events = await new TasksConnector().poll();
+        expect(events[0]!.meta?.["listId"]).toBe("only");
+        expect(mockFetch.mock.calls.some(([u]: [string]) => String(u).includes(LISTS_URL))).toBe(
+            false,
+        );
     });
 
     it("should return empty array when token refresh fails", async () => {
@@ -244,18 +302,22 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
         expect(String(patchCall![0]!)).toContain("task-xyz");
     });
 
-    it("should do nothing when credentials are missing", async () => {
+    it("says so when credentials are missing, instead of claiming it was done", async () => {
         delete process.env["GTASKS_CLIENT_ID"];
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "complete_task", sourceId: "t1" });
+        await expect(
+            new TasksConnector().executeAction({ kind: "complete_task", sourceId: "t1" }),
+        ).rejects.toThrow(/not configured/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("should ignore action kinds it doesn't own", async () => {
+    it("refuses an action kind it doesn't own", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new TasksConnector().executeAction({ kind: "reply", sourceId: "t1", body: "x" });
+        await expect(
+            new TasksConnector().executeAction({ kind: "reply", sourceId: "t1", body: "x" }),
+        ).rejects.toThrow(/not a task action/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
@@ -408,7 +470,7 @@ describe("TasksConnector — lifecycle at the source", () => {
         dedupeKey: key,
     });
 
-    it("reports gone a task the due listing no longer has (completed, deleted, postponed)", async () => {
+    it("reports gone a task the listing no longer has (completed, deleted, postponed past the horizon)", async () => {
         vi.stubGlobal("fetch", makeFetch([task("t1", "Open", DUE_TODAY)]));
         const state = await new TasksConnector().sourceState([held("task-t1"), held("task-done")]);
         expect(state?.get("task-t1")).toBeUndefined();
@@ -439,6 +501,11 @@ describe("TasksConnector — lifecycle at the source", () => {
                     return Promise.resolve({
                         ok: true,
                         json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                if (u.includes(LISTS_URL))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ items: [{ id: "list-a" }] }),
                     });
                 const second = u.includes("pageToken=p2");
                 return Promise.resolve({
@@ -497,6 +564,36 @@ describe("TasksConnector.inboxGesture", () => {
         await expect(new TasksConnector().inboxGesture("done", item)).rejects.toThrow(
             /not configured/,
         );
+    });
+
+    it("open reads the whole task — its due date and its full note — and marks it read in the box", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((url: string) => {
+                if (String(url).includes("oauth2"))
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: "t", expires_in: 3600 }),
+                    });
+                expect(String(url)).toContain("/lists/list-9/tasks/t1");
+                return Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            id: "t1",
+                            title: "Appeler",
+                            due: "2026-10-08T00:00:00.000Z",
+                            notes: "x".repeat(300),
+                            status: "needsAction",
+                            updated: "2026-10-07T00:00:00.000Z",
+                        }),
+                });
+            }),
+        );
+        const r = await new TasksConnector().inboxGesture("open", item);
+        expect(r.change).toBe("read");
+        expect(r.body).toContain("Échéance");
+        expect(r.body).toContain("x".repeat(300));
     });
 
     it("refuses any other gesture, and an item without its task", async () => {

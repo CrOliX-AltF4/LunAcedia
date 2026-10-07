@@ -81,7 +81,7 @@ describe("GitHubConnector", () => {
         expect(await new GitHubConnector().poll()).toHaveLength(0);
     });
 
-    it("should return empty array when all threads are read", async () => {
+    it("keeps a read thread, marked read — it leaves the box only once done", async () => {
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue({
@@ -91,7 +91,9 @@ describe("GitHubConnector", () => {
                 json: () => Promise.resolve([makeThread({ unread: false })]),
             }),
         );
-        expect(await new GitHubConnector().poll()).toHaveLength(0);
+        const events = await new GitHubConnector().poll();
+        expect(events).toHaveLength(1);
+        expect(events[0]!.read).toBe(true);
     });
 
     it("should return an event for an unread thread", async () => {
@@ -271,21 +273,35 @@ describe("GitHubConnector", () => {
 describe("GitHubConnector.executeAction", () => {
     afterEach(() => vi.unstubAllGlobals());
 
-    it("does nothing when GITHUB_TOKEN is missing", async () => {
+    it("says so when GITHUB_TOKEN is missing, instead of claiming it was done", async () => {
         delete process.env["GITHUB_TOKEN"];
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GitHubConnector().executeAction({
-            kind: "close_issue",
-            sourceId: "owner/repo#1",
-        });
+        await expect(
+            new GitHubConnector().executeAction({
+                kind: "close_issue",
+                sourceId: "owner/repo#1",
+            }),
+        ).rejects.toThrow(/not configured/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("ignores action kinds it doesn't own", async () => {
+    it("refuses an action kind it doesn't own", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GitHubConnector().executeAction({ kind: "complete_task", sourceId: "x" });
+        await expect(
+            new GitHubConnector().executeAction({ kind: "complete_task", sourceId: "x" }),
+        ).rejects.toThrow(/not a GitHub action/);
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("refuses an issue reference that is not owner/repo#number", async () => {
+        process.env["GITHUB_TOKEN"] = "tok";
+        const mockFetch = vi.fn();
+        vi.stubGlobal("fetch", mockFetch);
+        await expect(
+            new GitHubConnector().executeAction({ kind: "close_issue", sourceId: "repo#1" }),
+        ).rejects.toThrow(/owner\/repo#number/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
@@ -393,17 +409,16 @@ describe("GitHubConnector.executeAction", () => {
         expect(String(url)).toBe("https://api.github.com/notifications/threads/98765");
     });
 
-    it("warns and does nothing for a malformed sourceId (no '#')", async () => {
+    it("refuses a malformed sourceId (no '#') and does nothing", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-        await new GitHubConnector().executeAction({
-            kind: "close_issue",
-            sourceId: "owner/repo-no-hash",
-        });
+        await expect(
+            new GitHubConnector().executeAction({
+                kind: "close_issue",
+                sourceId: "owner/repo-no-hash",
+            }),
+        ).rejects.toThrow(/owner\/repo#number/);
         expect(mockFetch).not.toHaveBeenCalled();
-        expect(warnSpy).toHaveBeenCalled();
-        warnSpy.mockRestore();
     });
 
     // Regression: this used to log-and-swallow the failure, so dispatchAction's own

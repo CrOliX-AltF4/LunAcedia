@@ -21,7 +21,8 @@ function parseIssueRef(sourceId: string): { repo: string; number: number } | nul
     if (hash === -1) return null;
     const repo = sourceId.slice(0, hash);
     const number = parseInt(sourceId.slice(hash + 1), 10);
-    if (!repo || isNaN(number)) return null;
+    // "owner/repo": both halves, nothing else — "repo#1" would address another account's repository.
+    if (!/^[^/\s]+\/[^/\s]+$/.test(repo) || isNaN(number)) return null;
     return { repo, number };
 }
 
@@ -81,8 +82,9 @@ export class GitHubConnector implements IConnector {
 
         let resp: Response;
         try {
+            // all=true: read notifications too — the box keeps them until they are done at GitHub.
             resp = await fetch(
-                `${GITHUB_API}/notifications?all=false&participating=false&per_page=50`,
+                `${GITHUB_API}/notifications?all=true&participating=false&per_page=50`,
                 {
                     headers,
                 },
@@ -104,7 +106,7 @@ export class GitHubConnector implements IConnector {
         // Paginated: the listing used to stop at the first 50 threads.
         let threads = (await resp.json()) as GitHubThread[];
         try {
-            threads = threads.concat(await this.nextPages<GitHubThread>(resp));
+            threads = threads.concat((await this.nextPages<GitHubThread>(resp)).items);
         } catch (e) {
             console.warn("[GitHub] next pages unavailable:", (e as Error).message);
         }
@@ -121,7 +123,11 @@ export class GitHubConnector implements IConnector {
                     thread.repository.full_name,
                     thread,
                 );
-                results.push(...(enriched.length ? enriched : [event]));
+                results.push(
+                    ...(enriched.length
+                        ? enriched.map((e) => ({ ...e, read: event.read }))
+                        : [event]),
+                );
             } else {
                 results.push(event);
             }
@@ -238,18 +244,19 @@ export class GitHubConnector implements IConnector {
      * The pages after `first`, following GitHub's `Link: <…>; rel="next"` header (never with
      * If-Modified-Since: the first page already said something changed). Throws when a page cannot be read.
      */
-    private async nextPages<T>(first: Response): Promise<T[]> {
+    /** The pages after the first, up to MAX_PAGES; `complete` = the listing was read to its end. */
+    private async nextPages<T>(first: Response): Promise<{ items: T[]; complete: boolean }> {
         const out: T[] = [];
-        let link = first.headers.get("Link");
-        for (let page = 1; page < MAX_PAGES && link; page++) {
-            const next = /<([^>]+)>;\s*rel="next"/.exec(link)?.[1];
-            if (!next) break;
+        const nextOf = (link: string | null) =>
+            link ? /<([^>]+)>;\s*rel="next"/.exec(link)?.[1] : undefined;
+        let next = nextOf(first.headers.get("Link"));
+        for (let page = 1; page < MAX_PAGES && next; page++) {
             const resp = await fetch(next, { headers: this.apiHeaders() });
             if (!resp.ok) throw new Error(`notifications page returned ${resp.status}`);
             out.push(...((await resp.json()) as T[]));
-            link = resp.headers.get("Link");
+            next = nextOf(resp.headers.get("Link"));
         }
-        return out;
+        return { items: out, complete: !next };
     }
 
     private apiHeaders(): Record<string, string> {
@@ -261,9 +268,10 @@ export class GitHubConnector implements IConnector {
     }
 
     /**
-     * Where each held item stands at GitHub. v1 rule: the box holds unread notifications —
-     * a thread read or done at GitHub leaves it. A thread missing from the unread listing is checked one
-     * by one; an item without its thread is not judged. null when GitHub cannot be asked.
+     * Where each held item stands at GitHub. The box holds read and unread notifications; a thread leaves
+     * it once done at GitHub (it is then gone from the listing). A listing read to its end settles every
+     * thread; one cut short (more than MAX_PAGES pages) leaves the threads it did not show to be checked one
+     * by one. An item without its thread is not judged. null when GitHub cannot be asked.
      */
     async sourceState(events: AcediaEvent[]): Promise<Map<string, SourceState> | null> {
         const held = events
@@ -272,26 +280,36 @@ export class GitHubConnector implements IConnector {
         const state = new Map<string, SourceState>();
         if (held.length === 0 || !this.token) return state;
 
-        let unread: Set<string>;
+        type Listed = { id: string | number; unread?: boolean };
+        let listed: Map<string, boolean>;
+        let complete: boolean;
         try {
             // No If-Modified-Since here: this is a full picture, not the incremental poll.
             const resp = await fetch(
-                `${GITHUB_API}/notifications?all=false&participating=false&per_page=50`,
+                `${GITHUB_API}/notifications?all=true&participating=false&per_page=50`,
                 { headers: this.apiHeaders() },
             );
             if (!resp.ok) throw new Error(`notifications returned ${resp.status}`);
-            const threads = ((await resp.json()) as Array<{ id: string | number }>).concat(
-                await this.nextPages<{ id: string | number }>(resp),
+            const first = (await resp.json()) as Listed[];
+            const rest = await this.nextPages<Listed>(resp);
+            listed = new Map(
+                first.concat(rest.items).map((t) => [String(t.id), t.unread === true]),
             );
-            unread = new Set(threads.map((t) => String(t.id)));
+            complete = rest.complete;
         } catch (e) {
             console.warn("[GitHub] source state unavailable:", (e as Error).message);
             return null;
         }
 
         for (const { key, threadId } of held) {
-            if (unread.has(threadId)) {
-                state.set(key, "unread");
+            const unread = listed.get(threadId);
+            if (unread !== undefined) {
+                state.set(key, unread ? "unread" : "read");
+                continue;
+            }
+            // Read to its end, the listing has every thread not done: this one is done.
+            if (complete) {
+                state.set(key, "gone");
                 continue;
             }
             try {
@@ -306,8 +324,9 @@ export class GitHubConnector implements IConnector {
                     continue;
                 }
                 if (!resp.ok) continue;
+                // Past the listing's end a done thread cannot be told from a read one: kept, as read.
                 const thread = (await resp.json()) as { unread?: boolean };
-                state.set(key, thread.unread ? "unread" : "gone");
+                state.set(key, thread.unread ? "unread" : "read");
             } catch {
                 // unknown this time — never removed on uncertainty
             }
@@ -316,18 +335,19 @@ export class GitHubConnector implements IConnector {
     }
 
     /**
-     * Master's gestures on a notification. v1 rule: the box holds unread notifications, so
-     * read and done both take the item out; open changes nothing (the link opens the thread).
+     * Master's gestures on a notification, applied at GitHub. Like a mail in the inbox, a notification
+     * stays in the box once read (open or read mark it read at GitHub); done takes it out.
      */
     async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
-        if (gesture === "open") return { change: null };
+        // Opening is reading — already read, nothing to tell GitHub.
+        if (gesture === "open" && event.read === true) return { change: null };
         const threadId = event.meta?.["threadId"];
         if (threadId === undefined) throw new Error("[GitHub] item has no notification thread");
         if (gesture === "done") {
             await this.markThreadDone(String(threadId));
             return { change: "removed" };
         }
-        if (gesture === "read") {
+        if (gesture === "read" || gesture === "open") {
             const resp = await fetch(
                 `${GITHUB_API}/notifications/threads/${encodeURIComponent(String(threadId))}`,
                 {
@@ -336,7 +356,8 @@ export class GitHubConnector implements IConnector {
                 },
             );
             await assertHttpOk(resp, "[GitHub] mark thread read");
-            return { change: "removed" };
+            // Read, it stays in the box: only done takes it out.
+            return { change: "read" };
         }
         throw new Error(`[GitHub] "${gesture}" does not apply to a notification`);
     }
@@ -370,9 +391,10 @@ export class GitHubConnector implements IConnector {
             action.kind !== "merge_pr" &&
             action.kind !== "mark_notification_read"
         ) {
-            return;
+            throw new Error(`[GitHub] "${action.kind}" is not a GitHub action — nothing was done`);
         }
-        if (!this.token) return;
+        // Never a quiet return: the caller would count the action as done and drop its notification.
+        if (!this.token) throw new Error("[GitHub] not configured — nothing was done");
 
         const headers = {
             Authorization: `Bearer ${this.token}`,
@@ -438,8 +460,9 @@ export class GitHubConnector implements IConnector {
         // issue or PR via sourceId = "{owner}/{repo}#{number}"
         const ref = parseIssueRef(action.sourceId);
         if (!ref) {
-            console.warn(`[GitHub] ${action.kind}: sourceId must be '{owner}/{repo}#{number}'`);
-            return;
+            throw new Error(
+                `[GitHub] ${action.kind}: sourceId must be "owner/repo#number", got "${action.sourceId}" — nothing was done`,
+            );
         }
 
         try {

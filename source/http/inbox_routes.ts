@@ -5,8 +5,9 @@
  * tier gate that governs the agent (D1), and every gesture is journaled.
  *
  *   GET  /api/inbox                          { items (newest first), unread }
- *   POST /api/inbox/:key/:gesture            open | read | unread | archive | trash | spam | done
- *   GET  /api/inbox/trash                    Gmail's trash (30 days, kept by Gmail)
+ *   POST /api/inbox/:key/:gesture            open | read | archive | trash | spam | done
+ *   GET  /api/inbox/trash?page=…             Gmail's trash (30 days, kept by Gmail), a page at a time:
+ *                                            { items, next?, skipped }
  *   POST /api/inbox/trash/:messageId/restore back to the inbox, collected again at the next pass
  *   GET  /api/inbox/journal                  the last 100 gestures, newest first
  */
@@ -16,16 +17,9 @@ import type { IngestionHub } from "../hub/ingestion_hub.js";
 import type { InboxSync } from "../hub/inbox_sync.js";
 import type { IConnector, InboxGesture } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
+import type { TrashPage } from "../connectors/email/gmail_connector.js";
 
-const GESTURES: readonly InboxGesture[] = [
-    "open",
-    "read",
-    "unread",
-    "archive",
-    "trash",
-    "spam",
-    "done",
-];
+const GESTURES: readonly InboxGesture[] = ["open", "read", "archive", "trash", "spam", "done"];
 const JOURNAL_SIZE = 100;
 const BOX_SIZE = 200;
 
@@ -39,7 +33,7 @@ export interface InboxJournalEntry {
 
 /** Trash-capable connector (Gmail). */
 interface TrashCapable {
-    listTrash(): Promise<Array<{ id: string; title: string; from: string; ts: number }>>;
+    listTrash(page?: string): Promise<TrashPage>;
     restoreMessage(id: string): Promise<void>;
 }
 
@@ -62,7 +56,12 @@ export class InboxRoutes {
     constructor(private readonly deps: InboxRouteDeps) {}
 
     /** Handles the request if it is an inbox route; returns false otherwise. */
-    async handle(method: string, path: string, res: http.ServerResponse): Promise<boolean> {
+    async handle(
+        method: string,
+        path: string,
+        res: http.ServerResponse,
+        query: URLSearchParams = new URLSearchParams(),
+    ): Promise<boolean> {
         const { json, store } = this.deps;
         if (!path.startsWith("/api/inbox")) return false;
 
@@ -81,11 +80,11 @@ export class InboxRoutes {
         if (method === "GET" && path === "/api/inbox/trash") {
             const gmail = this.deps.connectors.find(isTrashCapable);
             if (!gmail) {
-                json(res, 200, { items: [] });
+                json(res, 200, { items: [], skipped: 0 });
                 return true;
             }
             try {
-                json(res, 200, { items: await gmail.listTrash() });
+                json(res, 200, await gmail.listTrash(query.get("page") ?? undefined));
             } catch (e) {
                 json(res, 502, { error: (e as Error).message });
             }
@@ -129,6 +128,15 @@ export class InboxRoutes {
                 return true;
             }
             const connector = this.deps.connectors.find((c) => c.slug === item.source);
+            // Opening is reading, for every source: one without gestures gives the text the box holds,
+            // and the item is read in the box (there is no read state to change at its source).
+            if (gesture === "open" && !connector?.inboxGesture) {
+                const change = item.read ? null : "read";
+                if (change) this.deps.sync.applyLocal({ op: change, key, source: item.source });
+                this.record(key, gesture, true);
+                json(res, 200, { ok: true, change, body: item.body ?? "" });
+                return true;
+            }
             if (!connector?.inboxGesture) {
                 this.record(key, gesture, false, "source cannot do gestures");
                 json(res, 400, { error: `No gestures for ${item.source}` });

@@ -6,28 +6,36 @@ import {
 } from "../../../source/connectors/github/github_formatter.js";
 import type { AcediaEvent } from "../../../source/types/acedia_event.js";
 
-// A GitHub notification lives in the box until it is read or done at GitHub.
+// A GitHub notification lives in the box, read or unread, until it is done at GitHub — like a mail
+// stays in the inbox until it is archived.
 
 interface FakeThread {
     id: string;
     unread: boolean;
     status?: number;
+    /** Done at GitHub: gone from the notifications listing. */
+    done?: boolean;
     listed?: boolean;
 }
 
-function fakeGitHub(threads: FakeThread[]) {
+/** `truncated`: the listing always has a next page, so it is never read to its end. */
+function fakeGitHub(threads: FakeThread[], truncated = false) {
     const calls: { method: string; url: string }[] = [];
     const fetchImpl = vi.fn().mockImplementation((url: string, init?: { method?: string }) => {
         const u = String(url);
         const method = init?.method ?? "GET";
         calls.push({ method, url: u });
         if (u.includes("/notifications?")) {
-            const listed = threads.filter((t) => t.unread && t.listed !== false);
+            const listed = threads.filter((t) => !t.done && t.listed !== false);
             return Promise.resolve({
                 ok: true,
                 status: 200,
-                headers: new Headers(),
-                json: () => Promise.resolve(listed.map((t) => ({ id: t.id, unread: true }))),
+                headers: new Headers(
+                    truncated
+                        ? { Link: '<https://api.github.com/notifications?page=2>; rel="next"' }
+                        : {},
+                ),
+                json: () => Promise.resolve(listed.map((t) => ({ id: t.id, unread: t.unread }))),
             });
         }
         const m = u.match(/\/notifications\/threads\/(\w+)/);
@@ -90,12 +98,20 @@ describe("GitHub events keep their notification thread", () => {
 });
 
 describe("GitHubConnector.sourceState", () => {
-    it("reports unread threads, and gone for threads read or done at GitHub", async () => {
+    it("asks GitHub for read notifications too, not only the unread ones", async () => {
+        process.env["GITHUB_TOKEN"] = "t";
+        const { fetchImpl, calls } = fakeGitHub([{ id: "1", unread: false }]);
+        vi.stubGlobal("fetch", fetchImpl);
+        await new GitHubConnector().sourceState([ghEvent("gh-mention-1", "1")]);
+        expect(calls[0]!.url).toContain("all=true");
+    });
+
+    it("reports each thread read or unread as GitHub has it, and gone once done at GitHub", async () => {
         process.env["GITHUB_TOKEN"] = "t";
         const { fetchImpl } = fakeGitHub([
             { id: "1", unread: true },
             { id: "2", unread: false },
-            { id: "3", unread: false, status: 404 },
+            { id: "3", unread: false, done: true },
         ]);
         vi.stubGlobal("fetch", fetchImpl);
         const state = await new GitHubConnector().sourceState([
@@ -105,14 +121,14 @@ describe("GitHubConnector.sourceState", () => {
         ]);
         expect(Object.fromEntries(state!)).toEqual({
             "gh-mention-1": "unread",
-            "gh-mention-2": "gone",
+            "gh-mention-2": "read",
             "gh-ci-run-9": "gone",
         });
     });
 
-    it("checks a thread one by one when the listing did not show it — still unread stays", async () => {
+    it("checks a thread one by one when a listing cut short did not show it — still unread stays", async () => {
         process.env["GITHUB_TOKEN"] = "t";
-        const { fetchImpl } = fakeGitHub([{ id: "5", unread: true, listed: false }]);
+        const { fetchImpl } = fakeGitHub([{ id: "5", unread: true, listed: false }], true);
         vi.stubGlobal("fetch", fetchImpl);
         const state = await new GitHubConnector().sourceState([ghEvent("gh-mention-5", "5")]);
         expect(state!.get("gh-mention-5")).toBe("unread");
@@ -156,20 +172,32 @@ describe("GitHubConnector.inboxGesture", () => {
         expect(calls.some((c) => c.method === "DELETE")).toBe(true);
     });
 
-    it("read marks the thread read at GitHub — v1 rule: it leaves the box", async () => {
+    it("read marks the thread read at GitHub, and it stays in the box until done", async () => {
         process.env["GITHUB_TOKEN"] = "t";
         const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: true }]);
         vi.stubGlobal("fetch", fetchImpl);
         const r = await new GitHubConnector().inboxGesture("read", ghEvent("gh-mention-8", "8"));
-        expect(r.change).toBe("removed");
+        expect(r.change).toBe("read");
         expect(calls.some((c) => c.method === "PATCH")).toBe(true);
     });
 
-    it("open changes nothing at GitHub (the link opens the thread)", async () => {
+    it("open is reading: an unread thread is marked read at GitHub", async () => {
         process.env["GITHUB_TOKEN"] = "t";
         const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: true }]);
         vi.stubGlobal("fetch", fetchImpl);
         const r = await new GitHubConnector().inboxGesture("open", ghEvent("gh-mention-8", "8"));
+        expect(r.change).toBe("read");
+        expect(calls.some((c) => c.method === "PATCH")).toBe(true);
+    });
+
+    it("open on a thread already read changes nothing at GitHub", async () => {
+        process.env["GITHUB_TOKEN"] = "t";
+        const { fetchImpl, calls } = fakeGitHub([{ id: "8", unread: false }]);
+        vi.stubGlobal("fetch", fetchImpl);
+        const r = await new GitHubConnector().inboxGesture("open", {
+            ...ghEvent("gh-mention-8", "8"),
+            read: true,
+        });
         expect(r.change).toBeNull();
         expect(calls).toEqual([]);
     });

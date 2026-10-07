@@ -1,4 +1,9 @@
-﻿import type { IConnector, SourceState } from "../connector_interface.js";
+﻿import type {
+    IConnector,
+    InboxGesture,
+    InboxGestureResult,
+    SourceState,
+} from "../connector_interface.js";
 import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
@@ -26,6 +31,34 @@ interface CalListResponse {
 
 /** Pages read at most per calendar and window — 10 × 250 events is far beyond any real lookahead. */
 const MAX_PAGES = 10;
+
+/** The event as the reader shows it: when, where, then the full description. */
+function describeEvent(ev: CalEvent): string {
+    const lines: string[] = [];
+    if (ev.start.dateTime) {
+        const start = new Date(ev.start.dateTime);
+        const day = start.toLocaleDateString("fr-FR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+        });
+        const time = (d: Date) =>
+            d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+        const end = ev.end.dateTime ? `–${time(new Date(ev.end.dateTime))}` : "";
+        lines.push(`Quand : ${day}, ${time(start)}${end}`);
+    } else if (ev.start.date) {
+        const day = new Date(ev.start.date).toLocaleDateString("fr-FR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            timeZone: "UTC",
+        });
+        lines.push(`Quand : ${day}, toute la journée`);
+    }
+    if (ev.location) lines.push(`Lieu : ${ev.location}`);
+    const head = lines.join("\n");
+    return ev.description ? `${head}\n\n${ev.description}` : head;
+}
 
 function parseCalendars(raw: string): string[] {
     try {
@@ -203,15 +236,42 @@ export class GcalConnector implements IConnector {
         return conflicts;
     }
 
+    /**
+     * "open" from the box: the whole event, read again at Google (the box keeps only an excerpt). An event
+     * has no read state at the source — it is read in the box. Nothing else applies: an event is not
+     * archived or trashed from the box (deleting one goes through the agent and its tiers).
+     */
+    async inboxGesture(gesture: InboxGesture, event: AcediaEvent): Promise<InboxGestureResult> {
+        if (gesture !== "open") throw new Error(`[GCal] "${gesture}" does not apply to an event`);
+        const calId = event.meta?.["calendarId"];
+        const eventId = event.meta?.["eventId"];
+        if (typeof calId !== "string" || typeof eventId !== "string")
+            throw new Error("[GCal] item has no event id");
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken)
+            throw new Error("[GCal] not configured");
+        const token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gcal");
+        const resp = await fetch(
+            `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (resp.status === 404 || resp.status === 410)
+            throw new Error("[GCal] event no longer exists");
+        await assertHttpOk(resp, "[GCal] read event");
+        return { change: "read", body: describeEvent((await resp.json()) as CalEvent) };
+    }
+
     async executeAction(action: ConnectorAction): Promise<void> {
         if (
             action.kind !== "update_event" &&
             action.kind !== "create_event" &&
             action.kind !== "delete_event"
         )
-            return;
+            throw new Error(`[GCal] "${action.kind}" is not a calendar action — nothing was done`);
+        // Never a quiet return: the caller would count the action as done and drop its notification.
         const refreshToken = this.refreshToken();
-        if (!this.clientId || !this.clientSecret || !refreshToken) return;
+        if (!this.clientId || !this.clientSecret || !refreshToken)
+            throw new Error("[GCal] not configured — nothing was done");
 
         // Validate sourceId shape before spending a token fetch on a request that can't
         // proceed anyway — update_event/delete_event both address "{calendarId}/{eventId}".
@@ -219,9 +279,10 @@ export class GcalConnector implements IConnector {
         let eventId = "";
         if (action.kind !== "create_event") {
             const slash = action.sourceId.indexOf("/");
-            if (slash === -1) {
-                console.warn(`[GCal] ${action.kind}: sourceId must be '{calendarId}/{eventId}'`);
-                return;
+            if (slash <= 0 || slash === action.sourceId.length - 1) {
+                throw new Error(
+                    `[GCal] ${action.kind}: sourceId must be "calendarId/eventId", got "${action.sourceId}" — nothing was done`,
+                );
             }
             calId = action.sourceId.slice(0, slash);
             eventId = action.sourceId.slice(slash + 1);

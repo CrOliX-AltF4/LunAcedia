@@ -266,7 +266,7 @@ function render(){
   <div class="card-title">\${esc(e.title)}</div>
   <div class="card-body">\${e.body?esc(e.body):''}</div>
   <div class="card-time">\${ago(e.ts)}</div>
-  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button><button data-g="spam" onclick="gesture(this,event)">Indésirable</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
+  <div class="card-actions">\${e.source==='email'?'<button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button><button data-g="spam" onclick="gesture(this,event)">Indésirable</button>':''}\${e.source==='github'?'<button data-g="read" onclick="gesture(this,event)">Lu</button><button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
 </div>\`).join('');
 }
 
@@ -304,17 +304,30 @@ async function gesture(btn,ev){
   load();
 }
 
-// Gmail's trash (kept 30 days by Gmail) — ids read from the row, never interpolated into onclick.
+// Gmail's trash (kept 30 days by Gmail), a page at a time — ids read from the row, never interpolated into onclick.
+let trashNext=null;
 async function openTrash(){
   const d=document.getElementById('digest');
   document.getElementById('digest-title').textContent='Corbeille (Gmail, 30 jours)';
   const box=document.getElementById('digest-text');
   d.classList.add('open');
   box.textContent='Loading…';
+  trashNext=null;
+  await moreTrash(true);
+}
+async function moreTrash(first){
+  const box=document.getElementById('digest-text');
   try{
-    const r=await req('/api/inbox/trash');
-    const items=(await r.json()).items||[];
-    box.innerHTML=items.length?items.map(t=>\`<div class="trash-row" data-id="\${esc(t.id)}"><span>\${esc(t.title)} — \${esc(t.from)}</span><button onclick="restoreTrash(this)">Restaurer</button></div>\`).join(''):'La corbeille est vide.';
+    const r=await req('/api/inbox/trash'+(trashNext?'?page='+encodeURIComponent(trashNext):''));
+    const data=await r.json();
+    if(!r.ok){box.textContent=data.error||('Error '+r.status);return;}
+    const rows=(data.items||[]).map(t=>\`<div class="trash-row" data-id="\${esc(t.id)}"><span>\${esc(t.title)} — \${esc(t.from)}</span><button onclick="restoreTrash(this)">Restaurer</button></div>\`).join('');
+    const skipped=data.skipped?\`<div class="field-hint">\${data.skipped} mail(s) illisible(s) sur cette page.</div>\`:'';
+    if(first)box.innerHTML=rows||skipped?'':'La corbeille est vide.';
+    box.querySelector('#trash-more')?.remove();
+    box.insertAdjacentHTML('beforeend',rows+skipped);
+    trashNext=data.next||null;
+    if(trashNext)box.insertAdjacentHTML('beforeend','<button id="trash-more" onclick="moreTrash(false)">Voir plus</button>');
   }catch(e){box.textContent='Error: '+e.message;}
 }
 async function restoreTrash(btn){
@@ -500,7 +513,24 @@ async function checkAiProvider(){
   }catch(e){}
 }
 
-function openDigest(){openDigestLike('/api/digest','Digest');}
+// What is still unread: the urgent items as LunAcedia ranks them (with the reason), then the model's summary.
+async function openDigest(){
+  const d=document.getElementById('digest');
+  const t=document.getElementById('digest-text');
+  document.getElementById('digest-title').textContent='Digest';
+  d.classList.add('open');
+  t.textContent='Loading…';
+  try{
+    const r=await req('/api/digest');
+    const data=await r.json();
+    if(!r.ok){t.textContent=data.error||('Error '+r.status);return;}
+    const urgent=(data.urgent||[]).map(u=>'• '+u.title+(u.priorityReason?' — '+u.priorityReason:''));
+    const parts=[];
+    if(urgent.length)parts.push('Urgent ('+urgent.length+')\\n'+urgent.join('\\n'));
+    if(data.response)parts.push(data.response);
+    t.textContent=parts.length?parts.join('\\n\\n'):'Rien de nouveau.';
+  }catch(e){t.textContent='Error: '+e.message;}
+}
 function openProposals(){openDigestLike('/api/proposals','Propositions');}
 function closeDigest(){document.getElementById('digest').classList.remove('open');}
 

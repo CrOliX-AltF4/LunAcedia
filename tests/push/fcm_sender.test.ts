@@ -156,6 +156,8 @@ describe("FcmSender.send", () => {
         expect(payload.notification.body).toBe("From Bob");
         expect(payload.data.dedupeKey).toBe("email-99");
         expect(payload.android.priority).toBe("high");
+        // Tagged with the item's key: the phone takes the notification down once the item is read or settled.
+        expect(payload.android.notification.tag).toBe("email-99");
     });
 
     it("should use title as body when event.body is absent", async () => {

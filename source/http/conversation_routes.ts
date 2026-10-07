@@ -18,6 +18,7 @@
 import type http from "node:http";
 import type { IAIProvider } from "../ai/ai_provider.js";
 import type { AgentRequest, AgentResult } from "../agent/agent_loop.js";
+import type { ActionState } from "../actions/pending_action_store.js";
 import type { EventStore } from "../store/event_store.js";
 import { withUsagePurpose } from "../usage/llm_usage.js";
 import {
@@ -49,6 +50,8 @@ export interface ConversationRouteDeps {
     ai: () => IAIProvider;
     agentEnabled: () => boolean;
     runAgent: (req: AgentRequest) => Promise<AgentResult>;
+    /** Where an action proposed in a topic stands now — a reopened topic shows it instead of an active card. */
+    actionState?: (id: string) => ActionState | undefined;
     readBody: (req: http.IncomingMessage) => Promise<unknown>;
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
@@ -135,7 +138,11 @@ export class ConversationRoutes {
             );
             const before = url.searchParams.get("before") ?? undefined;
             const page = await topics.page(id, { limit, ...(before && { before }) });
-            json(res, 200, { conversation: toView(meta), ...page });
+            json(res, 200, {
+                conversation: toView(meta),
+                ...page,
+                messages: page.messages.map((m) => this.withActionStates(m)),
+            });
             return true;
         }
         if (method === "PATCH") {
@@ -151,6 +158,17 @@ export class ConversationRoutes {
         }
         json(res, 405, { error: "Method not allowed" });
         return true;
+    }
+
+    /** Each action that had an id (it waited for Master) carries where it stands now: pending or how it ended. */
+    private withActionStates(m: ConversationMessage): ConversationMessage {
+        const stateOf = this.deps.actionState;
+        if (!stateOf || !m.agent?.actions.length) return m;
+        const actions = m.agent.actions.map((a) => {
+            const state = typeof a["id"] === "string" ? stateOf(a["id"]) : undefined;
+            return state ? { ...a, state } : a;
+        });
+        return { ...m, agent: { ...m.agent, actions } };
     }
 
     private async readText(

@@ -396,18 +396,22 @@ describe("GmailConnector.executeAction — reply", () => {
         expect(decoded).toContain("To: alice@example.com");
     });
 
-    it("should do nothing when credentials are missing", async () => {
+    it("says so when credentials are missing, instead of claiming it was done", async () => {
         delete process.env["GMAIL_CLIENT_ID"];
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GmailConnector().executeAction({ kind: "reply", sourceId: "msg1", body: "Hi" });
+        await expect(
+            new GmailConnector().executeAction({ kind: "reply", sourceId: "msg1", body: "Hi" }),
+        ).rejects.toThrow(/not configured/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("should ignore non-reply actions", async () => {
+    it("refuses an action kind it doesn't own", async () => {
         const mockFetch = vi.fn();
         vi.stubGlobal("fetch", mockFetch);
-        await new GmailConnector().executeAction({ kind: "complete", sourceId: "msg1" });
+        await expect(
+            new GmailConnector().executeAction({ kind: "complete", sourceId: "msg1" }),
+        ).rejects.toThrow(/not a mail action/);
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
