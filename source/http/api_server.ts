@@ -1204,7 +1204,7 @@ export class AcediaApiServer {
 
         // POST /api/config/ai-provider — first-run onboarding: LunAcedia ships
         // with AI_PROVIDER=none and no default key to guess at (LunAcedia always
-        // keeps its own LLM, the Core never picks one for it). Writes .env and swaps this.ai
+        // keeps its own LLM, the Core never picks one for it). Keeps it in STORAGE_DIR (survives image updates) and swaps this.ai
         // live so the dashboard's setup screen takes effect without a restart.
         if (method === "POST" && path === "/api/config/ai-provider") {
             let body: unknown;
@@ -1217,7 +1217,12 @@ export class AcediaApiServer {
             if (!validated.ok) {
                 return json(res, 400, { error: validated.error });
             }
-            writeAiProviderConfig(validated.patch);
+            try {
+                writeAiProviderConfig(validated.patch);
+            } catch (e) {
+                // Encryption on without its key, or STORAGE_DIR not writable: said, nothing half-done.
+                return json(res, 500, { error: (e as Error).message });
+            }
             this.ai = createAIProvider();
             return json(res, 200, { ok: true, provider: this.ai.mode });
         }

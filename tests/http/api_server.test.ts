@@ -2112,6 +2112,7 @@ describe("AcediaApiServer — POST /api/config/ai-provider", () => {
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lunacedia-ai-onboard-"));
         cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
+        process.env["STORAGE_DIR"] = tmpDir;
         delete process.env["AI_PROVIDER"];
         delete process.env["OPENAI_API_KEY"];
     });
@@ -2119,6 +2120,7 @@ describe("AcediaApiServer — POST /api/config/ai-provider", () => {
     afterEach(() => {
         cwdSpy.mockRestore();
         fs.rmSync(tmpDir, { recursive: true, force: true });
+        delete process.env["STORAGE_DIR"];
         delete process.env["AI_PROVIDER"];
         delete process.env["OPENAI_API_KEY"];
     });

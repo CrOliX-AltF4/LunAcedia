@@ -14,6 +14,7 @@ import { AcediaApiServer } from "./http/api_server.js";
 import { EventStore, defaultEventStorePath } from "./store/event_store.js";
 import { FcmSender } from "./push/fcm_sender.js";
 import { createAIProvider } from "./ai/create_ai_provider.js";
+import { applyStoredAiProvider } from "./ai/ai_provider_writer.js";
 import { ActionTierStore } from "./actions/action_tier_store.js";
 import { PendingActionStore } from "./actions/pending_action_store.js";
 import { pendingActionEvent } from "./push/pending_push.js";
@@ -94,6 +95,8 @@ const guardPipeline = new GuardPipeline({
 // The box is persisted next to dedup — both must survive a restart together.
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
+// The AI set from the dashboard, kept in STORAGE_DIR, over .env — it survives image updates.
+applyStoredAiProvider();
 const ai = createAIProvider();
 const hub = new IngestionHub(
     connectors,
