@@ -517,6 +517,53 @@ describe("AcediaApiServer — POST /api/actions", () => {
         expect(called).toEqual({ kind: "reply", sourceId: "msg1", body: "Hi" });
     });
 
+    it("says what became of each action: confirmed, failed with its reason, cancelled", async () => {
+        const port = nextPort();
+        let fail = false;
+        const conn = makeConnector("Gmail", async () => {
+            if (fail) throw new Error("[Gmail] reply send returned 401");
+        });
+        const server = makeServer(new EventStore(), [conn]);
+        server.start(port);
+        const base = `http://localhost:${port}`;
+        const propose = async () =>
+            (
+                (
+                    await post(
+                        `${base}/api/actions`,
+                        {
+                            connector: "Gmail",
+                            action: { kind: "reply", sourceId: "m1", body: "Hi" },
+                        },
+                        AUTH,
+                    )
+                ).body as { id: string }
+            ).id;
+        const ok = await propose();
+        const ko = await propose();
+        const no = await propose();
+        const waiting = await propose();
+        await post(`${base}/api/actions/${ok}/confirm`, {}, AUTH);
+        fail = true;
+        await post(`${base}/api/actions/${ko}/confirm`, {}, AUTH);
+        await post(`${base}/api/actions/${no}/cancel`, {}, AUTH);
+        const r = await get(
+            `${base}/api/actions/status?ids=${[ok, ko, no, waiting, "zz"].join(",")}`,
+            AUTH,
+        );
+        server.stop();
+        expect(r.status).toBe(200);
+        const states = (r.body as { states: Record<string, Record<string, unknown>> }).states;
+        expect(states[ok]).toMatchObject({ status: "confirmed", kind: "reply" });
+        expect(states[ko]).toMatchObject({
+            status: "failed",
+            reason: "[Gmail] reply send returned 401",
+        });
+        expect(states[no]).toMatchObject({ status: "cancelled" });
+        expect(states[waiting]).toMatchObject({ status: "pending" });
+        expect(states["zz"]).toBeUndefined();
+    });
+
     it("confirm tier: POST /api/actions/:id/confirm rejects with 429 once the kind hits its cooldown", async () => {
         const port = nextPort();
         const store = new EventStore();

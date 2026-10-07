@@ -86,6 +86,47 @@ describe("PendingActionStore", () => {
 });
 
 // A pending write survives a restart: it is a list Master comes back to, not a 5-minute window.
+// 2026-10-07: a card in a topic stayed active once its action was decided — nothing kept how it ended.
+describe("PendingActionStore — what became of each action", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("is pending, then says how it ended and when", () => {
+        const store = new PendingActionStore(null);
+        const e = store.create("Gmail", { kind: "reply", sourceId: "m1", body: "hi" });
+        expect(store.stateOf(e.id)).toEqual({ status: "pending", expiresAt: e.expiresAt });
+        store.consume(e.id);
+        store.settle(e, "confirmed");
+        expect(store.stateOf(e.id)).toEqual({ status: "confirmed", at: Date.now(), kind: "reply" });
+    });
+
+    it("keeps the reason of a failure", () => {
+        const store = new PendingActionStore(null);
+        const e = store.create("Calendar", { kind: "delete_event", sourceId: "primary/ev1" });
+        store.consume(e.id);
+        store.settle(e, "failed", "[GCal] event no longer exists");
+        expect(store.stateOf(e.id)).toMatchObject({
+            status: "failed",
+            reason: "[GCal] event no longer exists",
+        });
+    });
+
+    it("records an action left to expire as expired, at its deadline", () => {
+        const store = new PendingActionStore(null);
+        const e = store.create("Gmail", { kind: "reply", sourceId: "m1", body: "hi" });
+        vi.advanceTimersByTime(3 * HOUR);
+        expect(store.stateOf(e.id)).toEqual({ status: "expired", at: e.expiresAt, kind: "reply" });
+    });
+
+    it("knows nothing of an id it never had", () => {
+        expect(new PendingActionStore(null).stateOf("nope")).toBeUndefined();
+    });
+});
+
 describe("PendingActionStore — durable", () => {
     let dir: string;
     let file: string;
@@ -121,6 +162,34 @@ describe("PendingActionStore — durable", () => {
         const after = new PendingActionStore(file, () => later);
         await after.load();
         expect(after.list()).toEqual([]);
+    });
+
+    it("records as expired what expired while it was down", async () => {
+        const before = new PendingActionStore(file);
+        await before.load();
+        const e = before.create("Gmail", { kind: "reply", sourceId: "m1", body: "Noté." });
+        await before.flush();
+
+        const after = new PendingActionStore(file, () => e.expiresAt + HOUR);
+        await after.load();
+        expect(after.stateOf(e.id)).toMatchObject({ status: "expired", at: e.expiresAt });
+    });
+
+    it("remembers how actions ended across a restart, for 30 days", async () => {
+        const before = new PendingActionStore(file);
+        await before.load();
+        const e = before.create("Tasks", { kind: "complete_task", sourceId: "l/t1" });
+        before.consume(e.id);
+        before.settle(e, "cancelled");
+        await before.flush();
+
+        const after = new PendingActionStore(file);
+        await after.load();
+        expect(after.stateOf(e.id)).toMatchObject({ status: "cancelled", kind: "complete_task" });
+
+        const muchLater = new PendingActionStore(file, () => Date.now() + 31 * 24 * HOUR);
+        await muchLater.load();
+        expect(muchLater.stateOf(e.id)).toBeUndefined();
     });
 
     it("never revives an unknown kind or a merge from the file — the catalogue decides, not the disk", async () => {

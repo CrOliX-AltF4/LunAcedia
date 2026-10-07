@@ -293,6 +293,41 @@ describe("AcediaApiServer — topics", () => {
             expect(executed).toEqual([]);
         });
 
+        // 2026-10-07: the card stayed active once decided — the topic now says how each action ended.
+        it("reopened, a topic shows how each of its actions ended", async () => {
+            const executed: ConnectorAction[] = [];
+            const { ai } = provider([
+                { content: null, toolCalls: [toolCall("get_event", { key: "email-1" })] },
+                { content: null, toolCalls: [toolCall("archive_email", { sourceId: "1" })] },
+                { content: "C'est en attente de ta confirmation.", toolCalls: [] },
+            ]);
+            const base = await start({
+                ai,
+                events: [mail("1")],
+                connectors: [gmail(executed)],
+            });
+            const first = await call("POST", `${base}/api/conversations`, { text: "archive-le" });
+            const id = first.body.message.agent.actions[0].id as string;
+            const waiting = await call(
+                "GET",
+                `${base}/api/conversations/${first.body.conversation.id}`,
+            );
+            expect(waiting.body.messages[1].agent.actions[0].state).toMatchObject({
+                status: "pending",
+            });
+
+            await call("POST", `${base}/api/actions/${id}/confirm`);
+            const after = await call(
+                "GET",
+                `${base}/api/conversations/${first.body.conversation.id}`,
+            );
+            expect(after.body.messages[1].agent.actions[0].state).toMatchObject({
+                status: "confirmed",
+                kind: "archive_email",
+            });
+            expect(executed).toHaveLength(1);
+        });
+
         it("lets an action run at its tier in a topic that never read third-party text", async () => {
             const executed: ConnectorAction[] = [];
             const { ai } = provider([
