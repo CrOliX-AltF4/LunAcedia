@@ -9,6 +9,7 @@ import { EventStore } from "../../source/store/event_store.js";
 import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
+import { ChangeFeed } from "../../source/changes/change_feed.js";
 import { ActionCooldownTracker } from "../../source/actions/action_cooldown.js";
 import { EmailClassificationStore } from "../../source/connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "../../source/auth/google_token_store.js";
@@ -1269,6 +1270,51 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
         expect(res.status).toBe(400);
         expect((res.body as { error: string }).error).toMatch(/rules/);
         expect(store.getAll().vipSenders).toEqual([]);
+    });
+});
+
+// Lot S: one stream of changes — what changed, never the content — for the dashboard and paired phones.
+describe("AcediaApiServer — GET /api/changes", () => {
+    it("streams the server's changes to an authenticated caller, and refuses anyone else", async () => {
+        const port = nextPort();
+        const feed = new ChangeFeed(() => 9);
+        const server = new AcediaApiServer(
+            new EventStore(),
+            [],
+            new IngestionHub([]),
+            null,
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            new PendingActionStore(null),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            feed,
+        );
+        server.start(port);
+        expect((await fetch(`http://localhost:${port}/api/changes`)).status).toBe(401);
+        const controller = new AbortController();
+        const resp = await fetch(`http://localhost:${port}/api/changes`, {
+            headers: { Authorization: AUTH["Authorization"]! },
+            signal: controller.signal,
+        });
+        expect(resp.headers.get("content-type")).toContain("text/event-stream");
+        while (feed.listening === 0) await new Promise((r) => setTimeout(r, 5));
+        feed.emit("actions", "a1");
+        const reader = resp.body!.getReader();
+        let text = "";
+        while (!text.includes("event: change"))
+            text += new TextDecoder().decode((await reader.read()).value);
+        controller.abort();
+        server.stop();
+        expect(text).toContain('{"scope":"actions","key":"a1","at":9}');
     });
 });
 

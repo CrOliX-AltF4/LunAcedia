@@ -129,6 +129,7 @@ describe("isDeviceRoute", () => {
             ["GET", "/api/actions/pending"],
             ["POST", "/api/actions/a1/confirm"],
             ["GET", "/api/digest"],
+            ["GET", "/api/changes"],
             ["POST", "/api/devices/push-token"],
             ["PUT", "/api/agent/settings"],
         ])

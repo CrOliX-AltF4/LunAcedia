@@ -111,6 +111,7 @@ export class PendingActionStore {
     private readonly outcomes = new Map<string, ActionOutcome>();
     private writes: Promise<void> = Promise.resolve();
     private readonly created: Array<(p: PendingAction) => void> = [];
+    private readonly settled: Array<(p: PendingAction, outcome: ActionOutcome) => void> = [];
 
     constructor(
         private readonly filePath: string | null = defaultPendingActionsPath(),
@@ -199,12 +200,20 @@ export class PendingActionStore {
         reason: string | undefined,
         at: number,
     ): void {
-        this.outcomes.set(entry.id, {
+        const outcome: ActionOutcome = {
             status,
             at,
             kind: entry.action.kind,
             ...(reason && { reason }),
-        });
+        };
+        this.outcomes.set(entry.id, outcome);
+        for (const listener of this.settled) {
+            try {
+                listener(entry, outcome);
+            } catch {
+                // a listener never stops the record
+            }
+        }
     }
 
     private outcomesPath(): string | null {
@@ -217,6 +226,11 @@ export class PendingActionStore {
     list(): PendingAction[] {
         this.purgeExpired();
         return [...this.pending.values()];
+    }
+
+    /** Told of each action that ended — decided, failed, refused or expired (the views follow, the notification goes). */
+    onSettle(listener: (p: PendingAction, outcome: ActionOutcome) => void): void {
+        this.settled.push(listener);
     }
 
     /** Told of each new pending action — the phone's notification. */

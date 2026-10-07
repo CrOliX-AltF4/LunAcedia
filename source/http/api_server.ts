@@ -59,6 +59,7 @@ import {
     OAuthStates,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
+import { serveChanges, type ChangeFeed } from "../changes/change_feed.js";
 import {
     BULK_LIMIT,
     selectMail,
@@ -226,6 +227,8 @@ export class AcediaApiServer {
         usage?: { ledger: UsageLedger; alerts: UsageAlerts },
         // Paired devices — absent in tests that do not exercise them.
         devices?: DeviceRegistry,
+        // What changed, for the views that follow (lot S) — absent in tests that do not exercise it.
+        private readonly changes?: ChangeFeed,
     ) {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
         this.devices = devices ?? null;
@@ -242,6 +245,7 @@ export class AcediaApiServer {
                   agentEnabled: () => this.agent.isEnabled(),
                   runAgent: (r) => this.runAgentRequest(r),
                   actionState: (id) => this.pendingStore.stateOf(id),
+                  changed: (id) => this.changes?.emit("topics", id),
                   readBody,
                   json,
               })
@@ -1338,6 +1342,14 @@ export class AcediaApiServer {
                 ...(taken.id && { id: taken.id }),
                 ...(taken.reason && { reason: taken.reason }),
             });
+        }
+
+        // GET /api/changes — what changed, as Server-Sent Events (lot S): the dashboard and the paired phones reload what
+        // concerns them instead of polling. The content never rides the stream.
+        if (method === "GET" && path === "/api/changes") {
+            if (!this.changes) return json(res, 503, { error: "No change feed" });
+            serveChanges(req, res, this.changes);
+            return;
         }
 
         // GET /api/digest — what came in and is still unread. The urgent items are listed by the code, with

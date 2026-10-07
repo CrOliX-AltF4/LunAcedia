@@ -18,6 +18,7 @@ import { applyStoredAiProvider } from "./ai/ai_provider_writer.js";
 import { ActionTierStore } from "./actions/action_tier_store.js";
 import { PendingActionStore } from "./actions/pending_action_store.js";
 import { pendingActionEvent } from "./push/pending_push.js";
+import { ChangeFeed, changeEvent } from "./changes/change_feed.js";
 import { EmailClassificationStore } from "./connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "./auth/google_token_store.js";
 import { GuardRulesStore } from "./guards/guard_rules_store.js";
@@ -106,6 +107,10 @@ const hub = new IngestionHub(
     createRuleActor({ connectors, journal: ruleActions }),
 );
 const ws = new AcediaWsServer();
+// What changed, for the views that follow (lot S): the dashboard and the phones by /api/changes, the Core by the
+// WebSocket (system.change), which relays to its own views.
+const changes = new ChangeFeed();
+changes.subscribe((change) => ws.broadcast(changeEvent(change)));
 const tierStore = new ActionTierStore();
 // Durable since M5: the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
@@ -116,7 +121,10 @@ pendingStore.onCreate((p) => {
     const event = pendingActionEvent(p);
     ws.broadcast(event);
     void fcm?.send(event);
+    changes.emit("actions", p.id);
 });
+// Decided anywhere, failed or expired: the views follow.
+pendingStore.onSettle((p) => changes.emit("actions", p.id));
 // The agent's switch — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
@@ -140,7 +148,10 @@ setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
 const inboxSync = new InboxSync({
     connectors,
     store,
-    emit: (change) => ws.broadcast(InboxSync.toWire(change)),
+    emit: (change) => {
+        ws.broadcast(InboxSync.toWire(change));
+        changes.emit("box", change.key);
+    },
     forget: (key) => hub.forget(key),
 });
 const INBOX_SYNC_MS = 60_000;
@@ -168,6 +179,7 @@ const api = new AcediaApiServer(
     topics,
     { ledger: usageLedger, alerts: usageAlerts },
     devices,
+    changes,
 );
 
 if (fcm) await fcm.load();
@@ -198,6 +210,7 @@ api.start(httpPort);
 
 hub.onEvent((event, meta) => {
     store.push(event);
+    changes.emit("box", event.dedupeKey);
     // A recovered item is back in the box only: the Core already holds it and the phone must not ring.
     if (meta?.recovered) return;
     ws.broadcast(event);

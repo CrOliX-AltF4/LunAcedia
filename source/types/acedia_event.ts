@@ -23,7 +23,9 @@ export type AcediaEventType =
      * removed | read | unread | updated — `updated` also carries meta.item { title, body, priority,
      * ts } — a refresh of what the client holds, never news.
      */
-    | "inbox.changed";
+    | "inbox.changed"
+    /** What changed — meta { scope: box | actions | topics, key? } — for the Core to relay to its views; never news. */
+    | "system.change";
 
 export type AcediaEventSource = "github" | "calendar" | "email" | "rss" | "ha" | "tasks" | "system";
 

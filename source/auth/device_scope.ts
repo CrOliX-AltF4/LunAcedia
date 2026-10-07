@@ -24,6 +24,8 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "GET", pattern: /^\/api\/actions\/pending$/ },
     { method: "POST", pattern: /^\/api\/actions\/[^/]+\/(confirm|cancel)$/ },
     { method: "GET", pattern: /^\/api\/digest$/ },
+    // What changed — the app reloads what concerns it (lot S)
+    { method: "GET", pattern: /^\/api\/changes$/ },
     // Its own notifications
     { method: "POST", pattern: /^\/api\/devices\/push-token$/ },
     { method: "DELETE", pattern: /^\/api\/devices\/push-token$/ },
