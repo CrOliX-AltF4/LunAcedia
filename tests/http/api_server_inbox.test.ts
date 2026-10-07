@@ -53,7 +53,7 @@ function mail(id: string, read = false): AcediaEvent {
 
 type FakeGmail = IConnector & {
     gestures: Array<[InboxGesture, string]>;
-    listTrash: () => Promise<Array<{ id: string; title: string; from: string; ts: number }>>;
+    listTrash: ReturnType<typeof vi.fn>;
     restoreMessage: ReturnType<typeof vi.fn>;
 };
 
@@ -78,7 +78,11 @@ function fakeGmail(fail = false): FakeGmail {
             gestures.push([g, e.dedupeKey]);
             return results[g]!;
         },
-        listTrash: async () => [{ id: "t1", title: "Vieille pub", from: "x@y.z", ts: 1 }],
+        listTrash: vi.fn(async () => ({
+            items: [{ id: "t1", title: "Vieille pub", from: "x@y.z", ts: 1 }],
+            next: "p2",
+            skipped: 0,
+        })),
         restoreMessage: vi.fn(async () => {}),
     };
 }
@@ -212,6 +216,19 @@ describe("AcediaApiServer — inbox routes", () => {
         expect((await call("POST", `${base}/api/inbox/email-a/explode`)).status).toBe(400);
         // "Non lu" is no longer a gesture of the box (opening is reading); the agent can still do it.
         expect((await call("POST", `${base}/api/inbox/email-a/unread`)).status).toBe(400);
+    });
+
+    it("gives the trash one page at a time: the page asked for, and the token of the next", async () => {
+        const gmail = fakeGmail();
+        const { base } = await start(gmail, []);
+        const r = await call("GET", `${base}/api/inbox/trash?page=p1`);
+        expect(r.status).toBe(200);
+        expect(r.body).toEqual({
+            items: [{ id: "t1", title: "Vieille pub", from: "x@y.z", ts: 1 }],
+            next: "p2",
+            skipped: 0,
+        });
+        expect(gmail.listTrash).toHaveBeenCalledWith("p1");
     });
 
     it("reports a refusal from the source as 502 and changes nothing", async () => {

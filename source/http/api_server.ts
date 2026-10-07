@@ -1061,7 +1061,11 @@ export class AcediaApiServer {
         }
 
         // The box: Master's gestures at the source, trash, journal
-        if (this.inboxRoutes && (await this.inboxRoutes.handle(method, path, res))) return;
+        if (
+            this.inboxRoutes &&
+            (await this.inboxRoutes.handle(method, path, res, url.searchParams))
+        )
+            return;
 
         // LLM usage and its alert settings
         if (this.usageRoutes && (await this.usageRoutes.handle(method, path, url, req, res)))

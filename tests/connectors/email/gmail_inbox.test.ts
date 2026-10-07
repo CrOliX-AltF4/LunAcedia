@@ -266,7 +266,7 @@ describe("GmailConnector.inboxGesture — Master's own gestures, applied in Gmai
         );
         vi.stubGlobal("fetch", fetchImpl);
         const trash = await new GmailConnector().listTrash();
-        expect(trash).toEqual([
+        expect(trash.items).toEqual([
             expect.objectContaining({ id: "t1", title: "Vieille pub", from: "paul@example.com" }),
         ]);
         await new GmailConnector().restoreMessage("t1");
@@ -301,7 +301,62 @@ describe("GmailConnector.listTrash — reads the trash in parallel, in Gmail's o
 
         const trash = await new GmailConnector().listTrash();
 
-        expect(trash.map((t) => t.id)).toEqual(ids);
+        expect(trash.items.map((t) => t.id)).toEqual(ids);
         expect(maxInFlight).toBeGreaterThan(1);
+    });
+});
+
+// 2026-10-07: the trash was read whole (up to 500 mails, each read one by one) — slow at 300, cut
+// without a word past 500, and an unreadable mail vanished from the list.
+describe("GmailConnector.listTrash — one page at a time, nothing hidden", () => {
+    function trashFetch(answer: (u: string) => unknown) {
+        const { fetchImpl } = fakeGmail([
+            { id: "t1", labels: ["TRASH"], subject: "Un" },
+            { id: "gone", labels: ["TRASH"], status: 404 },
+        ]);
+        const base = fetchImpl.getMockImplementation()!;
+        const urls: string[] = [];
+        fetchImpl.mockImplementation((url: string, init?: { method?: string }) => {
+            const u = decodeURIComponent(String(url));
+            if (u.includes("/messages?q=") && u.includes("in:trash")) {
+                urls.push(u);
+                return Promise.resolve(answer(u));
+            }
+            return base(url, init);
+        });
+        vi.stubGlobal("fetch", fetchImpl);
+        return urls;
+    }
+
+    it("reads a page of 50 and gives the token of the next one", async () => {
+        const urls = trashFetch(() => ({
+            ok: true,
+            json: () => Promise.resolve({ messages: [{ id: "t1" }], nextPageToken: "p2" }),
+        }));
+        const page = await new GmailConnector().listTrash("p1");
+        expect(urls[0]).toContain("maxResults=50");
+        expect(urls[0]).toContain("pageToken=p1");
+        expect(page.next).toBe("p2");
+        expect(page.items.map((t) => t.id)).toEqual(["t1"]);
+    });
+
+    it("counts a mail it could not read instead of hiding it", async () => {
+        trashFetch(() => ({
+            ok: true,
+            json: () => Promise.resolve({ messages: [{ id: "t1" }, { id: "gone" }] }),
+        }));
+        const page = await new GmailConnector().listTrash();
+        expect(page.items.map((t) => t.id)).toEqual(["t1"]);
+        expect(page.skipped).toBe(1);
+        expect(page.next).toBeUndefined();
+    });
+
+    it("keeps Google's reason when the listing is refused", async () => {
+        trashFetch(() => ({
+            ok: false,
+            status: 403,
+            json: () => Promise.resolve({ error: { errors: [{ reason: "rateLimitExceeded" }] } }),
+        }));
+        await expect(new GmailConnector().listTrash()).rejects.toThrow(/403 \(rateLimitExceeded\)/);
     });
 });

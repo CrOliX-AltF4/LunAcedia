@@ -20,10 +20,34 @@ class GmailListError extends Error {
     constructor(
         query: string,
         readonly status: number,
+        reason?: string,
     ) {
-        super(`[Gmail] list "${query}" returned ${status}`);
+        super(`[Gmail] list "${query}" returned ${status}${reason ? ` (${reason})` : ""}`);
+    }
+
+    /** Keeps Google's own reason (rateLimitExceeded, insufficientPermissions…): a bare 403 says nothing. */
+    static async from(query: string, resp: Response): Promise<GmailListError> {
+        let reason: string | undefined;
+        try {
+            const body = (await resp.json()) as {
+                error?: { errors?: Array<{ reason?: string }>; status?: string };
+            };
+            reason = body.error?.errors?.[0]?.reason ?? body.error?.status;
+        } catch {
+            // no readable body: the status alone
+        }
+        return new GmailListError(query, resp.status, reason);
     }
 }
+
+/** One page of Gmail's trash. `skipped`: mails listed but unreadable — counted, never hidden. */
+export interface TrashPage {
+    items: Array<{ id: string; title: string; from: string; ts: number }>;
+    next?: string;
+    skipped: number;
+}
+
+const TRASH_PAGE_SIZE = 50;
 
 interface MessageHeader {
     name: string;
@@ -246,7 +270,7 @@ export class GmailConnector implements IConnector {
                 `${GMAIL_API}/messages?q=${encodeURIComponent(query)}&maxResults=100${page}`,
                 { headers: { Authorization: `Bearer ${token}` } },
             );
-            if (!resp.ok) throw new GmailListError(query, resp.status);
+            if (!resp.ok) throw await GmailListError.from(query, resp);
             const data = (await resp.json()) as {
                 messages?: Array<{ id: string }>;
                 nextPageToken?: string;
@@ -360,10 +384,24 @@ export class GmailConnector implements IConnector {
     }
 
     /** Gmail's trash, most recent first (Gmail keeps it 30 days) — nothing is stored on our side. */
-    async listTrash(): Promise<Array<{ id: string; title: string; from: string; ts: number }>> {
+    /**
+     * One page of the trash (TRASH_PAGE_SIZE mails), `page` being the token of a previous answer: read
+     * whole, a trash of hundreds of mails was slow and cut without a word past GMAIL_MAX_INBOX.
+     */
+    async listTrash(page?: string): Promise<TrashPage> {
         const token = await this.accessToken();
-        if (!token) return [];
-        const ids = [...(await this.listIds(token, "in:trash"))];
+        if (!token) return { items: [], skipped: 0 };
+        const resp = await fetch(
+            `${GMAIL_API}/messages?q=${encodeURIComponent("in:trash")}&maxResults=${TRASH_PAGE_SIZE}` +
+                (page ? `&pageToken=${encodeURIComponent(page)}` : ""),
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!resp.ok) throw await GmailListError.from("in:trash", resp);
+        const listed = (await resp.json()) as {
+            messages?: Array<{ id: string }>;
+            nextPageToken?: string;
+        };
+        const ids = (listed.messages ?? []).map((m) => m.id);
         // In parallel, a few at a time (live check 2026-09-28: one by one took 18.7 s, past the Core's
         // proxy timeout). Gmail's order is kept; an unreadable mail is skipped, not fatal.
         type TrashItem = { id: string; title: string; from: string; ts: number };
@@ -397,7 +435,12 @@ export class GmailConnector implements IConnector {
         await Promise.all(
             Array.from({ length: Math.min(TRASH_READ_CONCURRENCY, ids.length) }, worker),
         );
-        return results.filter((r): r is TrashItem => r !== null);
+        const items = results.filter((r): r is TrashItem => r !== null);
+        return {
+            items,
+            ...(listed.nextPageToken && { next: listed.nextPageToken }),
+            skipped: ids.length - items.length,
+        };
     }
 
     /** Takes a mail out of the trash (Gmail keeps trashed mail 30 days). */
