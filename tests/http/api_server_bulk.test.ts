@@ -18,7 +18,7 @@ import type { ConnectorAction } from "../../source/types/connector_action.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // A port range of its own: test files run in parallel and must never collide with the other API tests.
-let PORT = 48_600 + Math.floor(Math.random() * 300);
+let PORT = 48_200 + Math.floor(Math.random() * 300);
 const nextPort = () => PORT++;
 
 // Decodes arbitrary JSON responses so each test can assert on the field it cares about.

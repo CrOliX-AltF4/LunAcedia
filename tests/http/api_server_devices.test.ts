@@ -13,7 +13,7 @@ import { DeviceRegistry } from "../../source/auth/device_registry.js";
 
 // End to end: pairing, a device token limited to the mobile routes, revocation; the admin secret unchanged.
 
-let PORT = 49_900 + Math.floor(Math.random() * 300);
+let PORT = 50_200 + Math.floor(Math.random() * 300);
 const nextPort = () => PORT++;
 const SECRET = "admin-secret-of-this-test";
 

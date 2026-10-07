@@ -14,7 +14,7 @@ import type { IAIProvider } from "../../source/ai/ai_provider.js";
 
 // GET /api/usage and the alert settings; and every request's LLM calls land under the right caller.
 
-let PORT = 49_600 + Math.floor(Math.random() * 300);
+let PORT = 49_800 + Math.floor(Math.random() * 200);
 const nextPort = () => PORT++;
 
 async function call(

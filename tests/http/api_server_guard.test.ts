@@ -17,7 +17,7 @@ import type { GuardServices } from "../../source/guards/guard_services.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // A port range of its own: test files run in parallel and must never collide with the other API tests.
-let PORT = 47_300 + Math.floor(Math.random() * 400);
+let PORT = 47_000 + Math.floor(Math.random() * 400);
 const nextPort = () => PORT++;
 
 function mail(id: string, from: string, extra: Partial<AcediaEvent> = {}): AcediaEvent {

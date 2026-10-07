@@ -20,7 +20,7 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 // The pocket app's topics: one conversation = one topic, answered by the default agent
 // with the topic's earlier turns, D2 held across them.
 
-let PORT = 49_100 + Math.floor(Math.random() * 400);
+let PORT = 49_200 + Math.floor(Math.random() * 400);
 const nextPort = () => PORT++;
 
 async function call(
