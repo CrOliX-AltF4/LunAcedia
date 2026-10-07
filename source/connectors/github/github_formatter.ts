@@ -28,8 +28,6 @@ const REASON_PRIORITY: Record<string, AcediaEventPriority> = {
 };
 
 export function formatThread(thread: GitHubThread): AcediaEvent | null {
-    if (!thread.unread) return null;
-
     const repo = thread.repository.full_name;
     const reason = thread.reason;
     const priority = REASON_PRIORITY[reason] ?? "info";
@@ -56,6 +54,8 @@ export function formatThread(thread: GitHubThread): AcediaEvent | null {
         url: htmlUrl,
         priority,
         dedupeKey: `gh-${reason}-${thread.id}`,
+        // Read or not, as at GitHub: the box keeps a read notification until it is done.
+        read: !thread.unread,
         // The notification thread this item lives in — its source object.
         meta: { threadId: String(thread.id) },
     };

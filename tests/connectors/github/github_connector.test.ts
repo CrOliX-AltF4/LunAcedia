@@ -81,7 +81,7 @@ describe("GitHubConnector", () => {
         expect(await new GitHubConnector().poll()).toHaveLength(0);
     });
 
-    it("should return empty array when all threads are read", async () => {
+    it("keeps a read thread, marked read — it leaves the box only once done", async () => {
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue({
@@ -91,7 +91,9 @@ describe("GitHubConnector", () => {
                 json: () => Promise.resolve([makeThread({ unread: false })]),
             }),
         );
-        expect(await new GitHubConnector().poll()).toHaveLength(0);
+        const events = await new GitHubConnector().poll();
+        expect(events).toHaveLength(1);
+        expect(events[0]!.read).toBe(true);
     });
 
     it("should return an event for an unread thread", async () => {
