@@ -210,6 +210,8 @@ describe("AcediaApiServer — inbox routes", () => {
         const { base } = await start(fakeGmail(), [mail("a")]);
         expect((await call("POST", `${base}/api/inbox/email-zz/read`)).status).toBe(404);
         expect((await call("POST", `${base}/api/inbox/email-a/explode`)).status).toBe(400);
+        // "Non lu" is no longer a gesture of the box (opening is reading); the agent can still do it.
+        expect((await call("POST", `${base}/api/inbox/email-a/unread`)).status).toBe(400);
     });
 
     it("reports a refusal from the source as 502 and changes nothing", async () => {

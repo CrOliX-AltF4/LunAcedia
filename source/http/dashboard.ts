@@ -266,7 +266,7 @@ function render(){
   <div class="card-title">\${esc(e.title)}</div>
   <div class="card-body">\${e.body?esc(e.body):''}</div>
   <div class="card-time">\${ago(e.ts)}</div>
-  <div class="card-actions">\${e.source==='email'?'<button data-g="unread" onclick="gesture(this,event)">Non lu</button><button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button><button data-g="spam" onclick="gesture(this,event)">Indésirable</button>':''}\${e.source==='github'?'<button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
+  <div class="card-actions">\${e.source==='email'?'<button data-g="archive" onclick="gesture(this,event)">Archiver</button><button data-g="trash" onclick="gesture(this,event)">Corbeille</button><button data-g="spam" onclick="gesture(this,event)">Indésirable</button>':''}\${e.source==='github'?'<button data-g="read" onclick="gesture(this,event)">Lu</button><button data-g="done" onclick="gesture(this,event)">Terminé</button>':''}\${e.source==='tasks'?'<button data-g="done" onclick="gesture(this,event)">Fait</button>':''}</div>
 </div>\`).join('');
 }
 

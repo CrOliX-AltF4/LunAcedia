@@ -223,7 +223,6 @@ describe("GmailConnector — opening and restoring a mail", () => {
 describe("GmailConnector.inboxGesture — Master's own gestures, applied in Gmail", () => {
     const cases: [string, string, string | null][] = [
         ["read", "/messages/a/modify", "read"],
-        ["unread", "/messages/a/modify", "unread"],
         ["archive", "/messages/a/modify", "removed"],
         ["trash", "/messages/a/trash", "removed"],
     ];

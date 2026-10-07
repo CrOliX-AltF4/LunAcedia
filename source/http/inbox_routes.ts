@@ -5,7 +5,7 @@
  * tier gate that governs the agent (D1), and every gesture is journaled.
  *
  *   GET  /api/inbox                          { items (newest first), unread }
- *   POST /api/inbox/:key/:gesture            open | read | unread | archive | trash | spam | done
+ *   POST /api/inbox/:key/:gesture            open | read | archive | trash | spam | done
  *   GET  /api/inbox/trash                    Gmail's trash (30 days, kept by Gmail)
  *   POST /api/inbox/trash/:messageId/restore back to the inbox, collected again at the next pass
  *   GET  /api/inbox/journal                  the last 100 gestures, newest first
@@ -20,7 +20,6 @@ import type { AcediaEvent } from "../types/acedia_event.js";
 const GESTURES: readonly InboxGesture[] = [
     "open",
     "read",
-    "unread",
     "archive",
     "trash",
     "spam",

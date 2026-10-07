@@ -186,7 +186,7 @@ describe("dashboard box", () => {
         expect(block).toContain("esc(data.body)");
     });
 
-    it("offers archive, trash, unread and done as buttons that read the key from the card, never a JS argument", () => {
+    it("offers archive, trash, read and done as buttons that read the key from the card, never a JS argument", () => {
         const cardBlock = script.slice(
             script.indexOf("list.innerHTML=shown.map"),
             script.indexOf("`).join('');") + 1,
@@ -194,7 +194,11 @@ describe("dashboard box", () => {
         expect(cardBlock).toContain('data-g="archive"');
         expect(cardBlock).toContain('data-g="trash"');
         expect(cardBlock).toContain('data-g="spam"');
-        expect(cardBlock).toContain('data-g="unread"');
+        // Opening is reading: no "Non lu" any more. A GitHub notification can be marked read and stays.
+        expect(cardBlock).not.toContain('data-g="unread"');
+        expect(cardBlock).toContain(
+            "e.source==='github'?'<button data-g=\"read\" onclick=\"gesture(this,event)\">Lu</button>",
+        );
         expect(cardBlock).toContain('data-g="done"');
         // "Fait" on a task — same gesture as GitHub's, its own label.
         expect(cardBlock).toContain(

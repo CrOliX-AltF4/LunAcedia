@@ -347,7 +347,6 @@ export class GmailConnector implements IConnector {
         }
         const kinds = {
             read: ["mark_email_read", "read"],
-            unread: ["mark_email_unread", "unread"],
             archive: ["archive_email", "removed"],
             trash: ["delete_email", "removed"],
             spam: ["mark_spam", "removed"],
