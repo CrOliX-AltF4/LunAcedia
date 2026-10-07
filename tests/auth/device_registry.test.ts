@@ -151,6 +151,10 @@ describe("isDeviceRoute", () => {
             ["POST", "/api/config/ai-provider"],
             ["POST", "/api/events/held"],
             ["POST", "/api/events/clear-read"],
+            // The legacy event list: the app has read the box since M4 (closed 2026-10-07).
+            ["GET", "/api/events"],
+            ["POST", "/api/events/read-all"],
+            ["POST", "/api/events/email-1/read"],
             ["GET", "/api/agent/journal"],
         ])
             expect(isDeviceRoute(m!, p!), `${m} ${p}`).toBe(false);
