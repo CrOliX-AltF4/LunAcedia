@@ -50,6 +50,8 @@ export interface ConversationRouteDeps {
     ai: () => IAIProvider;
     agentEnabled: () => boolean;
     runAgent: (req: AgentRequest) => Promise<AgentResult>;
+    /** Told when a topic changed (a turn, a rename, archived, deleted) — the views that show it follow (lot S). */
+    changed?: (id: string) => void;
     /** Where an action proposed in a topic stands now — a reopened topic shows it instead of an active card. */
     actionState?: (id: string) => ActionState | undefined;
     readBody: (req: http.IncomingMessage) => Promise<unknown>;
@@ -152,6 +154,7 @@ export class ConversationRoutes {
         if (method === "DELETE") {
             await topics.delete(id);
             this.titled.delete(id);
+            this.deps.changed?.(id);
             res.writeHead(204);
             res.end();
             return true;
@@ -240,6 +243,8 @@ export class ConversationRoutes {
         status: number,
     ): void {
         const conversation = toView(this.deps.topics.get(meta.id) ?? meta);
+        // A turn stores at least the user's message, even when the answer failed.
+        this.deps.changed?.(meta.id);
         if (turn.ok) {
             this.deps.json(res, status, {
                 conversation,
@@ -278,6 +283,7 @@ export class ConversationRoutes {
         }
         if (title) await this.deps.topics.rename(meta.id, title, "user");
         if (archived !== undefined) await this.deps.topics.setArchived(meta.id, archived);
+        this.deps.changed?.(meta.id);
         this.deps.json(res, 200, { conversation: toView(this.deps.topics.get(meta.id)!) });
     }
 
@@ -439,6 +445,7 @@ export class ConversationRoutes {
         const now = this.deps.topics.get(id);
         if (!title || !now || now.titleSource !== "first_message") return;
         await this.deps.topics.rename(id, title, "generated");
+        this.deps.changed?.(id);
     }
 
     /** Folds the messages that left the window into the summary, a few at a time — nothing is silently dropped. */

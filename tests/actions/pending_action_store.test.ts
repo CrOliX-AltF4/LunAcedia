@@ -122,6 +122,22 @@ describe("PendingActionStore — what became of each action", () => {
         expect(store.stateOf(e.id)).toEqual({ status: "expired", at: e.expiresAt, kind: "reply" });
     });
 
+    it("tells who listens when an action ends — decided or expired", () => {
+        const store = new PendingActionStore(null);
+        const ended = vi.fn();
+        store.onSettle(ended);
+        const a = store.create("Gmail", { kind: "reply", sourceId: "m1", body: "hi" });
+        const b = store.create("Gmail", { kind: "reply", sourceId: "m2", body: "hi" });
+        store.consume(a.id);
+        store.settle(a, "cancelled");
+        vi.advanceTimersByTime(3 * HOUR);
+        store.list();
+        expect(ended.mock.calls.map(([p, o]) => [p.id, o.status])).toEqual([
+            [a.id, "cancelled"],
+            [b.id, "expired"],
+        ]);
+    });
+
     it("knows nothing of an id it never had", () => {
         expect(new PendingActionStore(null).stateOf("nope")).toBeUndefined();
     });

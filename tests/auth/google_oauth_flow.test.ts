@@ -4,7 +4,59 @@ import {
     buildGoogleAuthUrl,
     exchangeGoogleCode,
     GOOGLE_OAUTH_CONNECTORS,
+    googleClientFor,
+    OAuthStates,
 } from "../../source/auth/google_oauth_flow.js";
+
+// 2026-10-07: the consent ran with GOOGLE_CLIENT_ID while each connector refreshes with its own pair — a token is
+// only valid with the client that obtained it.
+describe("googleClientFor", () => {
+    const KEYS = ["GMAIL", "GCAL", "GTASKS", "GOOGLE"].flatMap((p) => [
+        `${p}_CLIENT_ID`,
+        `${p}_CLIENT_SECRET`,
+    ]);
+    afterEach(() => KEYS.forEach((k) => delete process.env[k]));
+
+    it("takes the connector's own pair first", () => {
+        process.env["GMAIL_CLIENT_ID"] = "gm-id";
+        process.env["GMAIL_CLIENT_SECRET"] = "gm-secret";
+        process.env["GOOGLE_CLIENT_ID"] = "g-id";
+        process.env["GOOGLE_CLIENT_SECRET"] = "g-secret";
+        expect(googleClientFor("gmail")).toEqual({
+            id: "gm-id",
+            secret: "gm-secret",
+            from: "GMAIL",
+        });
+    });
+
+    it("falls back on the shared pair, and has none when neither is complete", () => {
+        process.env["GOOGLE_CLIENT_ID"] = "g-id";
+        process.env["GOOGLE_CLIENT_SECRET"] = "g-secret";
+        process.env["GCAL_CLIENT_ID"] = "half-a-pair";
+        expect(googleClientFor("gcal")).toEqual({ id: "g-id", secret: "g-secret", from: "GOOGLE" });
+        delete process.env["GOOGLE_CLIENT_SECRET"];
+        expect(googleClientFor("gtasks")).toBeNull();
+    });
+});
+
+describe("OAuthStates — a return from Google that was asked for", () => {
+    it("gives an unguessable state, taken once, for its connector", () => {
+        const states = new OAuthStates();
+        const s = states.issue("gmail");
+        expect(s).toMatch(/^[0-9a-f]{32}$/);
+        expect(states.take(s)).toBe("gmail");
+        expect(states.take(s)).toBeNull();
+        expect(states.take("gmail")).toBeNull();
+    });
+
+    it("forgets a state after 10 minutes", () => {
+        let now = 0;
+        const states = new OAuthStates(() => now);
+        const s = states.issue("gcal");
+        now = 10 * 60 * 1000 + 1;
+        expect(states.take(s)).toBeNull();
+    });
+});
 
 describe("findGoogleOAuthConnector", () => {
     it("finds gmail/gcal/gtasks by key", () => {
@@ -43,7 +95,8 @@ describe("buildGoogleAuthUrl", () => {
         expect(url.searchParams.get("scope")).toBe("scope-a scope-b");
         expect(url.searchParams.get("state")).toBe("gmail");
         expect(url.searchParams.get("access_type")).toBe("offline");
-        expect(url.searchParams.get("prompt")).toBe("consent");
+        // The account can be chosen: reconnecting with another Google account is possible.
+        expect(url.searchParams.get("prompt")).toBe("consent select_account");
     });
 });
 

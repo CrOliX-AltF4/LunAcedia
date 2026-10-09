@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // ── Firebase mocks (hoisted) ──────────────────────────────────────────────────
@@ -255,5 +255,48 @@ describe("FcmSender.load", () => {
         h.mockReadFile.mockRejectedValueOnce(new Error("permission denied"));
         const sender = new FcmSender();
         await expect(sender.load()).resolves.toBeUndefined();
+    });
+});
+
+// Lot S (S5): an object settled while the app is closed — the phone takes its notification down without showing
+// anything. Settlements are gathered, so a sync that settles a hundred items sends one message, not a hundred.
+describe("FcmSender.settle — silent, gathered", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        h.mockSend.mockClear();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("sends one data-only message for the tags settled within 2 seconds, with nothing to show", async () => {
+        const sender = new FcmSender();
+        await sender.setToken("tok");
+        sender.settle("email-1");
+        sender.settle("action-a1");
+        sender.settle("email-1");
+        expect(h.mockSend).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(h.mockSend).toHaveBeenCalledOnce();
+        const payload = h.mockSend.mock.calls[0]![0];
+        expect(payload.notification).toBeUndefined();
+        expect(payload.data).toEqual({ type: "settled", tags: "email-1,action-a1" });
+        expect(payload.android.priority).toBe("high");
+    });
+
+    it("splits a long list so each message stays small", async () => {
+        const sender = new FcmSender();
+        await sender.setToken("tok");
+        for (let i = 0; i < 300; i++) sender.settle(`email-${"x".repeat(20)}-${i}`);
+        await vi.advanceTimersByTimeAsync(2_000);
+        const calls = h.mockSend.mock.calls.map((c) => c[0].data.tags as string);
+        expect(calls.length).toBeGreaterThan(1);
+        expect(calls.every((t) => t.length <= 3000)).toBe(true);
+        expect(calls.join(",").split(",")).toHaveLength(300);
+    });
+
+    it("sends nothing without a phone", async () => {
+        const sender = new FcmSender();
+        sender.settle("email-1");
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(h.mockSend).not.toHaveBeenCalled();
     });
 });

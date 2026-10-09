@@ -122,4 +122,50 @@ export class FcmSender {
             console.error("[FCM] send error:", (e as Error).message);
         }
     }
+
+    private readonly toSettle = new Set<string>();
+    private settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * An object a notification was about is settled (read, gone, decided, expired): the phone takes that notification
+     * down, even closed — a data-only message, nothing shown (lot S). Gathered for 2 s, so a sync that settles a hundred
+     * items sends one message; split so each stays far below FCM's 4 KB.
+     */
+    settle(tag: string): void {
+        if (!this.token) return;
+        this.toSettle.add(tag);
+        this.settleTimer ??= setTimeout(() => void this.flushSettled(), SETTLE_GATHER_MS);
+    }
+
+    private async flushSettled(): Promise<void> {
+        this.settleTimer = null;
+        const tags = [...this.toSettle];
+        this.toSettle.clear();
+        const token = this.token;
+        if (!token || tags.length === 0) return;
+        const chunks: string[] = [];
+        let current = "";
+        for (const tag of tags) {
+            const next = current ? `${current},${tag}` : tag;
+            if (next.length > SETTLE_CHUNK_CHARS && current) {
+                chunks.push(current);
+                current = tag;
+            } else current = next;
+        }
+        if (current) chunks.push(current);
+        for (const chunk of chunks) {
+            try {
+                await getMessaging().send({
+                    token,
+                    data: { type: "settled", tags: chunk },
+                    android: { priority: "high" },
+                });
+            } catch (e) {
+                console.error("[FCM] settle error:", (e as Error).message);
+            }
+        }
+    }
 }
+
+const SETTLE_GATHER_MS = 2_000;
+const SETTLE_CHUNK_CHARS = 3_000;

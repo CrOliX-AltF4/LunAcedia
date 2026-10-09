@@ -14,9 +14,11 @@ import { AcediaApiServer } from "./http/api_server.js";
 import { EventStore, defaultEventStorePath } from "./store/event_store.js";
 import { FcmSender } from "./push/fcm_sender.js";
 import { createAIProvider } from "./ai/create_ai_provider.js";
+import { applyStoredAiProvider } from "./ai/ai_provider_writer.js";
 import { ActionTierStore } from "./actions/action_tier_store.js";
 import { PendingActionStore } from "./actions/pending_action_store.js";
 import { pendingActionEvent } from "./push/pending_push.js";
+import { ChangeFeed, changeEvent } from "./changes/change_feed.js";
 import { EmailClassificationStore } from "./connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "./auth/google_token_store.js";
 import { GuardRulesStore } from "./guards/guard_rules_store.js";
@@ -94,6 +96,8 @@ const guardPipeline = new GuardPipeline({
 // The box is persisted next to dedup — both must survive a restart together.
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
+// The AI set from the dashboard, kept in STORAGE_DIR, over .env — it survives image updates.
+applyStoredAiProvider();
 const ai = createAIProvider();
 const hub = new IngestionHub(
     connectors,
@@ -103,6 +107,15 @@ const hub = new IngestionHub(
     createRuleActor({ connectors, journal: ruleActions }),
 );
 const ws = new AcediaWsServer();
+// What changed, for the views that follow (lot S): the dashboard and the phones by /api/changes, the Core by the
+// WebSocket (system.change), which relays to its own views.
+const changes = new ChangeFeed();
+changes.subscribe((change) => ws.broadcast(changeEvent(change)));
+// Settled — read, gone, decided, expired: a notification about it has nothing left to say, even on a closed phone (S5).
+changes.subscribe((change) => {
+    if (!change.settled || !change.key) return;
+    fcm?.settle(change.scope === "actions" ? `action-${change.key}` : change.key);
+});
 const tierStore = new ActionTierStore();
 // Durable since M5: the writes waiting for Master survive a restart.
 const pendingStore = new PendingActionStore();
@@ -113,7 +126,10 @@ pendingStore.onCreate((p) => {
     const event = pendingActionEvent(p);
     ws.broadcast(event);
     void fcm?.send(event);
+    changes.emit("actions", p.id);
 });
+// Decided anywhere, failed or expired: the views follow.
+pendingStore.onSettle((p) => changes.emit("actions", p.id, true));
 // The agent's switch — loaded before the API serves anything.
 const agent = new AgentService(defaultAgentSettingsPath());
 await agent.load();
@@ -137,7 +153,10 @@ setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
 const inboxSync = new InboxSync({
     connectors,
     store,
-    emit: (change) => ws.broadcast(InboxSync.toWire(change)),
+    emit: (change) => {
+        ws.broadcast(InboxSync.toWire(change));
+        changes.emit("box", change.key, change.op === "removed" || change.op === "read");
+    },
     forget: (key) => hub.forget(key),
 });
 const INBOX_SYNC_MS = 60_000;
@@ -165,6 +184,7 @@ const api = new AcediaApiServer(
     topics,
     { ledger: usageLedger, alerts: usageAlerts },
     devices,
+    changes,
 );
 
 if (fcm) await fcm.load();
@@ -195,6 +215,7 @@ api.start(httpPort);
 
 hub.onEvent((event, meta) => {
     store.push(event);
+    changes.emit("box", event.dedupeKey);
     // A recovered item is back in the box only: the Core already holds it and the phone must not ring.
     if (meta?.recovered) return;
     ws.broadcast(event);

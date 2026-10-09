@@ -11,6 +11,7 @@ import type { ConnectorAction } from "../../types/connector_action.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
+import { googleClientFor } from "../../auth/google_oauth_flow.js";
 
 const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
 
@@ -74,8 +75,10 @@ export class TasksConnector implements IConnector {
 
     constructor(tokenStore?: GoogleTokenStore) {
         this.tokenStore = tokenStore;
-        this.clientId = process.env["GTASKS_CLIENT_ID"] ?? "";
-        this.clientSecret = process.env["GTASKS_CLIENT_SECRET"] ?? "";
+        // Its own pair, or GOOGLE_*: the same client « Connecter » obtains the token with.
+        const client = googleClientFor("gtasks");
+        this.clientId = client?.id ?? "";
+        this.clientSecret = client?.secret ?? "";
         this.staticRefreshToken = process.env["GTASKS_REFRESH_TOKEN"] ?? "";
         this.onlyList = process.env["GTASKS_LIST_ID"] || undefined;
         this.listId = this.onlyList ?? "@default";

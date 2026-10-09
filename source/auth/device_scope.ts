@@ -10,10 +10,8 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "GET", pattern: /^\/api\/inbox\/trash$/ },
     { method: "POST", pattern: /^\/api\/inbox\/trash\/[^/]+\/restore$/ },
     { method: "POST", pattern: /^\/api\/inbox\/[^/]+\/[^/]+$/ },
-    // The legacy event list and chat, until the app has moved to the box and the topics
-    { method: "GET", pattern: /^\/api\/events$/ },
-    { method: "POST", pattern: /^\/api\/events\/read-all$/ },
-    { method: "POST", pattern: /^\/api\/events\/.+\/read$/ },
+    // A one-turn chat with the assistant — kept: it may serve the standalone assistant's chat window. The legacy
+    // event list is closed: the app reads the box (/api/inbox) since the box screen shipped.
     { method: "POST", pattern: /^\/api\/chat$/ },
     // Topics
     { method: "GET", pattern: /^\/api\/conversations$/ },
@@ -26,6 +24,8 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "GET", pattern: /^\/api\/actions\/pending$/ },
     { method: "POST", pattern: /^\/api\/actions\/[^/]+\/(confirm|cancel)$/ },
     { method: "GET", pattern: /^\/api\/digest$/ },
+    // What changed — the app reloads what concerns it (lot S)
+    { method: "GET", pattern: /^\/api\/changes$/ },
     // Its own notifications
     { method: "POST", pattern: /^\/api\/devices\/push-token$/ },
     { method: "DELETE", pattern: /^\/api\/devices\/push-token$/ },

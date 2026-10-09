@@ -11,6 +11,7 @@ import type { ConnectorAction } from "../../types/connector_action.js";
 import { getAccessToken, clearTokenCache } from "./gmail_auth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
+import { googleClientFor } from "../../auth/google_oauth_flow.js";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 /** Trashed mails read at once by listTrash() — fast enough, gentle on the Gmail API quota. */
@@ -138,8 +139,10 @@ export class GmailConnector implements IConnector {
 
     constructor(tokenStore?: GoogleTokenStore) {
         this.tokenStore = tokenStore;
-        this.clientId = process.env["GMAIL_CLIENT_ID"] ?? "";
-        this.clientSecret = process.env["GMAIL_CLIENT_SECRET"] ?? "";
+        // Its own pair, or GOOGLE_*: the same client « Connecter » obtains the token with.
+        const client = googleClientFor("gmail");
+        this.clientId = client?.id ?? "";
+        this.clientSecret = client?.secret ?? "";
         this.staticRefreshToken = process.env["GMAIL_REFRESH_TOKEN"] ?? "";
 
         const intervalMin = parseInt(process.env["GMAIL_POLL_INTERVAL_MIN"] ?? "5", 10);

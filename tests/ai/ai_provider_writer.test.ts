@@ -5,6 +5,7 @@ import * as os from "os";
 import {
     validateAiProviderPatch,
     writeAiProviderConfig,
+    applyStoredAiProvider,
 } from "../../source/ai/ai_provider_writer.js";
 
 function makeTempDir(): string {
@@ -33,38 +34,77 @@ describe("validateAiProviderPatch", () => {
     });
 });
 
+// 2026-09-25 → 2026-10-07: the setting was written to the container's own /app/.env, not mounted — lost at every
+// image update. It now lives in STORAGE_DIR (mounted), and is applied at start.
 describe("writeAiProviderConfig", () => {
     let tmpDir: string;
+    let cwdDir: string;
     let cwdSpy: ReturnType<typeof vi.spyOn>;
+    const ENV = [
+        "AI_PROVIDER",
+        "OPENAI_API_KEY",
+        "OLLAMA_URL",
+        "AI_MODEL",
+        "STORAGE_DIR",
+        "ACEDIA_TOKEN_ENCRYPTION_ENABLED",
+        "ACEDIA_MASTER_KEY",
+    ];
 
     beforeEach(() => {
         tmpDir = makeTempDir();
-        cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
-        delete process.env["AI_PROVIDER"];
-        delete process.env["OPENAI_API_KEY"];
+        cwdDir = makeTempDir();
+        cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(cwdDir);
+        ENV.forEach((k) => delete process.env[k]);
+        process.env["STORAGE_DIR"] = tmpDir;
     });
 
     afterEach(() => {
         cwdSpy.mockRestore();
         fs.rmSync(tmpDir, { recursive: true, force: true });
-        delete process.env["AI_PROVIDER"];
+        fs.rmSync(cwdDir, { recursive: true, force: true });
+        ENV.forEach((k) => delete process.env[k]);
+    });
+
+    it("keeps the setting in STORAGE_DIR, never in the container's own .env", () => {
+        writeAiProviderConfig({ provider: "openai", apiKey: "sk-test-key" });
+        const stored = JSON.parse(fs.readFileSync(path.join(tmpDir, "ai_provider.json"), "utf8"));
+        expect(stored).toMatchObject({ AI_PROVIDER: "openai", OPENAI_API_KEY: "sk-test-key" });
+        expect(fs.existsSync(path.join(cwdDir, ".env"))).toBe(false);
+    });
+
+    it("comes back after a restart, over what .env says — the choice made in the dashboard", () => {
+        writeAiProviderConfig({ provider: "openai", apiKey: "sk-test-key", model: "gpt-x" });
+        ENV.filter((k) => k !== "STORAGE_DIR").forEach((k) => delete process.env[k]);
+        process.env["AI_PROVIDER"] = "none";
+        expect(applyStoredAiProvider()).toBe(true);
+        expect(process.env["AI_PROVIDER"]).toBe("openai");
+        expect(process.env["OPENAI_API_KEY"]).toBe("sk-test-key");
+        expect(process.env["AI_MODEL"]).toBe("gpt-x");
+    });
+
+    it("changes nothing when nothing was set from the dashboard", () => {
+        process.env["AI_PROVIDER"] = "ollama";
+        expect(applyStoredAiProvider()).toBe(false);
+        expect(process.env["AI_PROVIDER"]).toBe("ollama");
+    });
+
+    it("encrypts the key at rest when token encryption is on", () => {
+        process.env["ACEDIA_TOKEN_ENCRYPTION_ENABLED"] = "true";
+        process.env["ACEDIA_MASTER_KEY"] = "a".repeat(64);
+        writeAiProviderConfig({ provider: "openai", apiKey: "sk-secret" });
+        const raw = fs.readFileSync(path.join(tmpDir, "ai_provider.json"), "utf8");
+        expect(raw).not.toContain("sk-secret");
         delete process.env["OPENAI_API_KEY"];
+        expect(applyStoredAiProvider()).toBe(true);
+        expect(process.env["OPENAI_API_KEY"]).toBe("sk-secret");
     });
 
-    it("creates .env with AI_PROVIDER and OPENAI_API_KEY when the file does not exist", () => {
-        writeAiProviderConfig({ provider: "openai", apiKey: "sk-test-key" });
-        const content = fs.readFileSync(path.join(tmpDir, ".env"), "utf8");
-        expect(content).toContain("AI_PROVIDER=openai");
-        expect(content).toContain("OPENAI_API_KEY=sk-test-key");
-    });
-
-    it("updates an existing AI_PROVIDER line in place instead of duplicating it", () => {
-        fs.writeFileSync(path.join(tmpDir, ".env"), "AI_PROVIDER=none\nACEDIA_SECRET=x\n", "utf8");
-        writeAiProviderConfig({ provider: "openai", apiKey: "sk-test-key" });
-        const lines = fs.readFileSync(path.join(tmpDir, ".env"), "utf8").split("\n");
-        expect(lines.filter((l) => l.startsWith("AI_PROVIDER="))).toHaveLength(1);
-        expect(lines).toContain("AI_PROVIDER=openai");
-        expect(lines).toContain("ACEDIA_SECRET=x");
+    it("refuses to write the key in clear when encryption is on without a key", () => {
+        process.env["ACEDIA_TOKEN_ENCRYPTION_ENABLED"] = "true";
+        expect(() => writeAiProviderConfig({ provider: "openai", apiKey: "sk-secret" })).toThrow(
+            /master key/,
+        );
+        expect(fs.existsSync(path.join(tmpDir, "ai_provider.json"))).toBe(false);
     });
 
     it("sets process.env immediately so the change applies without a restart", () => {
@@ -83,10 +123,12 @@ describe("writeAiProviderConfig", () => {
         expect(allCalls.some((s) => s.includes("sk-super-secret-value"))).toBe(false);
     });
 
-    it("writes OLLAMA_URL for the ollama provider, defaulting when not given", () => {
+    it("keeps OLLAMA_URL for the ollama provider, defaulting when not given", () => {
         writeAiProviderConfig({ provider: "ollama" });
-        const content = fs.readFileSync(path.join(tmpDir, ".env"), "utf8");
-        expect(content).toContain("AI_PROVIDER=ollama");
-        expect(content).toContain("OLLAMA_URL=http://localhost:11434");
+        const stored = JSON.parse(fs.readFileSync(path.join(tmpDir, "ai_provider.json"), "utf8"));
+        expect(stored).toMatchObject({
+            AI_PROVIDER: "ollama",
+            OLLAMA_URL: "http://localhost:11434",
+        });
     });
 });

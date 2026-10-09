@@ -185,6 +185,22 @@ describe("TasksConnector", () => {
         );
     });
 
+    // The token stored by « Connecter » was obtained with this same client (googleClientFor): it refreshes with it.
+    it("refreshes with the shared GOOGLE_* pair when it has none of its own", async () => {
+        delete process.env["GTASKS_CLIENT_ID"];
+        delete process.env["GTASKS_CLIENT_SECRET"];
+        process.env["GOOGLE_CLIENT_ID"] = "g-id";
+        process.env["GOOGLE_CLIENT_SECRET"] = "g-secret";
+        const mockFetch = makeFetch([task("t1", "T", DUE_TODAY)]);
+        vi.stubGlobal("fetch", mockFetch);
+        const events = await new TasksConnector().poll();
+        delete process.env["GOOGLE_CLIENT_ID"];
+        delete process.env["GOOGLE_CLIENT_SECRET"];
+        expect(events).toHaveLength(1);
+        const refresh = mockFetch.mock.calls.find(([u]: [string]) => String(u).includes("oauth2"));
+        expect(String((refresh![1] as RequestInit).body)).toContain("client_id=g-id");
+    });
+
     it("should return empty array when token refresh fails", async () => {
         vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
         expect(await new TasksConnector().poll()).toHaveLength(0);
