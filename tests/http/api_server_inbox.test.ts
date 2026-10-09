@@ -98,13 +98,15 @@ describe("AcediaApiServer — inbox routes", () => {
         if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
-    async function start(connector: IConnector, events: AcediaEvent[]) {
+    async function start(connector: IConnector, events: AcediaEvent[], tiers: Record<string, string> = {}) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-inbox-"));
         const store = new EventStore();
         for (const e of events) store.push(e);
         const hub = new IngestionHub([connector], path.join(dir, "seen.json"));
         const emitted: InboxChange[] = [];
         const forgotten: string[] = [];
+        const tierStore = new ActionTierStore(path.join(dir, "t.json"), path.join(dir, "o.json"));
+        if (Object.keys(tiers).length) await tierStore.patch(tiers as never);
         const sync = new InboxSync({
             connectors: [connector],
             store,
@@ -121,7 +123,7 @@ describe("AcediaApiServer — inbox routes", () => {
             null,
             new NullAIProvider(),
             undefined,
-            new ActionTierStore(path.join(dir, "t.json"), path.join(dir, "o.json")),
+            tierStore,
             new PendingActionStore(),
             undefined,
             undefined,
@@ -134,6 +136,24 @@ describe("AcediaApiServer — inbox routes", () => {
         server.start(port);
         return { base: `http://localhost:${port}`, store, emitted, forgotten, hub };
     }
+
+    // An action carried out (the agent, a confirmation) follows the box's own path: the wire, the views and a closed
+    // phone's notification learn it — the store changed alone told nobody, and the next sync never would.
+    it("an action carried out tells everyone, like a gesture in the box", async () => {
+        const gmail = { ...fakeGmail(), executeAction: vi.fn(async () => {}) };
+        const { base, store, emitted } = await start(gmail, [mail("a"), mail("b")], {
+            mark_email_read: "auto",
+            delete_email: "auto",
+        });
+        expect((await call("POST", `${base}/api/actions`, { connector: "Gmail", action: { kind: "mark_email_read", sourceId: "a" } })).status).toBe(204);
+        expect((await call("POST", `${base}/api/actions`, { connector: "Gmail", action: { kind: "delete_email", sourceId: "b" } })).status).toBe(204);
+        expect(store.get("email-a")!.read).toBe(true);
+        expect(store.get("email-b")).toBeUndefined();
+        expect(emitted).toEqual([
+            { op: "read", key: "email-a", source: "email" },
+            { op: "removed", key: "email-b", source: "email" },
+        ]);
+    });
 
     it("lists the box, newest first, with the unread count", async () => {
         const { base } = await start(fakeGmail(), [mail("a", true), mail("b")]);
