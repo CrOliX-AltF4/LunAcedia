@@ -98,7 +98,11 @@ describe("AcediaApiServer — inbox routes", () => {
         if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
-    async function start(connector: IConnector, events: AcediaEvent[], tiers: Record<string, string> = {}) {
+    async function start(
+        connector: IConnector,
+        events: AcediaEvent[],
+        tiers: Record<string, string> = {},
+    ) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-inbox-"));
         const store = new EventStore();
         for (const e of events) store.push(e);
@@ -145,8 +149,22 @@ describe("AcediaApiServer — inbox routes", () => {
             mark_email_read: "auto",
             delete_email: "auto",
         });
-        expect((await call("POST", `${base}/api/actions`, { connector: "Gmail", action: { kind: "mark_email_read", sourceId: "a" } })).status).toBe(204);
-        expect((await call("POST", `${base}/api/actions`, { connector: "Gmail", action: { kind: "delete_email", sourceId: "b" } })).status).toBe(204);
+        expect(
+            (
+                await call("POST", `${base}/api/actions`, {
+                    connector: "Gmail",
+                    action: { kind: "mark_email_read", sourceId: "a" },
+                })
+            ).status,
+        ).toBe(204);
+        expect(
+            (
+                await call("POST", `${base}/api/actions`, {
+                    connector: "Gmail",
+                    action: { kind: "delete_email", sourceId: "b" },
+                })
+            ).status,
+        ).toBe(204);
         expect(store.get("email-a")!.read).toBe(true);
         expect(store.get("email-b")).toBeUndefined();
         expect(emitted).toEqual([

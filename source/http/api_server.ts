@@ -489,7 +489,8 @@ export class AcediaApiServer {
         }
         const sync = resolveEventSync(action);
         if (!sync) return;
-        const op = sync.effect === "remove" ? "removed" : sync.effect === "read" ? "read" : "unread";
+        const op =
+            sync.effect === "remove" ? "removed" : sync.effect === "read" ? "read" : "unread";
         const item = this.store.get(sync.dedupeKey);
         // Through the box's own path, like a gesture made in the box: the wire, the views that follow and a closed
         // phone's notification all learn it. Changing the store alone told nobody, and the next sync, finding the store
