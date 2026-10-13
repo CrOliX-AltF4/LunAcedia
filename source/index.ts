@@ -8,6 +8,7 @@ import { GcalConnector } from "./connectors/calendar/gcal_connector.js";
 import { TasksConnector } from "./connectors/tasks/tasks_connector.js";
 import { HaConnector } from "./connectors/ha/ha_connector.js";
 import type { IConnector } from "./connectors/connector_interface.js";
+import type { AcediaEvent } from "./types/acedia_event.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
@@ -36,6 +37,12 @@ import { UsageAlerts, defaultAlertsPath } from "./usage/usage_alerts.js";
 import { DeviceRegistry, defaultDevicesPath } from "./auth/device_registry.js";
 import { PlanningStore, defaultPlanningPath } from "./planning/planning_store.js";
 import { PlanningSync } from "./planning/planning_sync.js";
+import { ReminderEngine, defaultReminderJournalPath } from "./planning/reminder_engine.js";
+import {
+    ReminderSettingsStore,
+    defaultReminderSettingsPath,
+} from "./planning/reminder_settings.js";
+import { BOX_PLANNING_TYPES, reminderEvent } from "./planning/reminder_delivery.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -175,6 +182,43 @@ const planningSync = new PlanningSync({
     ...(gtasks && { tasks: gtasks }),
 });
 const PLANNING_SYNC_MS = 5 * 60_000;
+// Events and tasks are held by the planning now: they leave the box, reminders take their place (ADR-031 Q3). The
+// connectors still read their source on every poll, so their health stays true.
+const planningActive = !!(gcal || gtasks);
+if (gcal) gcal.boxItems = false;
+if (gtasks) gtasks.boxItems = false;
+const reminderSettings = new ReminderSettingsStore(defaultReminderSettingsPath());
+await reminderSettings.load();
+const DAY_MS = 86_400_000;
+const reminders = new ReminderEngine({
+    planning: () => {
+        const now = Date.now();
+        const snap = planningStore.snapshot(
+            now - DAY_MS,
+            now + 92 * DAY_MS,
+            planningSync.configured(),
+        );
+        return { events: snap.events, tasks: snap.tasks, complete: snap.complete };
+    },
+    settings: () => reminderSettings.get(),
+    // A reminder goes where a new box item goes: the box, the views that follow, the Core, a standalone phone.
+    emit: (r) => {
+        const event = reminderEvent(r, planningStore);
+        store.push(event);
+        changes.emit("box", event.dedupeKey);
+        ws.broadcast(event);
+        void fcm?.send(event);
+    },
+    // Through the box's own path: the Core drops its copy and a closed phone takes the notification down.
+    settle: (keys) => {
+        for (const key of keys) {
+            const held = store.get(key);
+            if (held) inboxSync.applyLocal({ op: "removed", key, source: held.source });
+        }
+    },
+    filePath: defaultReminderJournalPath(),
+});
+await reminders.load();
 const api = new AcediaApiServer(
     store,
     connectors,
@@ -201,6 +245,14 @@ const api = new AcediaApiServer(
     devices,
     changes,
     { store: planningStore, sync: planningSync },
+    {
+        settings: reminderSettings,
+        engine: reminders,
+        onSnoozed: (key) => {
+            const held = store.get(key);
+            if (held) inboxSync.applyLocal({ op: "removed", key, source: held.source });
+        },
+    },
 );
 
 if (fcm) await fcm.load();
@@ -225,6 +277,18 @@ await store.load();
 const recovered = hub.recoverMissing((key) => store.has(key));
 if (recovered > 0)
     console.warn(`[LunAcedia] Box: ${recovered} seen item(s) missing, re-collecting`);
+// Once: the events and tasks the box held before the planning leave it — through the box's own path, so the Core drops
+// its copies and a phone its notifications. Reminders replace them.
+if (planningActive) {
+    const { events: held } = store.query({ limit: 1000 });
+    const old = (held as AcediaEvent[]).filter((e) => BOX_PLANNING_TYPES.has(e.type));
+    for (const e of old)
+        inboxSync.applyLocal({ op: "removed", key: e.dedupeKey, source: e.source });
+    if (old.length > 0)
+        console.warn(
+            `[Planning] ${old.length} event(s)/task(s) taken out of the box — reminders replace them`,
+        );
+}
 
 ws.start(wsPort);
 api.start(httpPort);
@@ -256,6 +320,7 @@ hub.onRefresh((event) => {
 
 hub.start();
 planningSync.start(PLANNING_SYNC_MS);
+if (planningActive) reminders.start(60_000);
 
 const inboxSyncTimer = setInterval(() => void inboxSync.reconcile(), INBOX_SYNC_MS);
 
@@ -270,12 +335,14 @@ async function flushGuards(): Promise<void> {
         guardStats.flush(),
         store.flush(),
         planningStore.flush(),
+        reminders.flush(),
     ]);
 }
 
 process.on("SIGINT", () => {
     hub.stop();
     planningSync.stop();
+    reminders.stop();
     clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();
@@ -285,6 +352,7 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
     hub.stop();
     planningSync.stop();
+    reminders.stop();
     clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();

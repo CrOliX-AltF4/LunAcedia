@@ -106,7 +106,18 @@ export class TasksConnector implements IConnector {
         return this.tokenStore?.get("gtasks") ?? this.staticRefreshToken;
     }
 
+    /**
+     * False once the planning holds the tasks (lot AT4): tasks no longer go to the box — reminders do. The poll still
+     * reads the lists, so the source's health stays true (a read that fails is an error, not an empty box).
+     */
+    boxItems = true;
+
     async poll(): Promise<AcediaEvent[]> {
+        if (!this.boxItems) {
+            if ((await this.dueTasks()) === null)
+                throw new Error("the task lists could not be read");
+            return [];
+        }
         return (await this.dueTasks()) ?? [];
     }
 

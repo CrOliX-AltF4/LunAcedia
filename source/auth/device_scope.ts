@@ -24,6 +24,8 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "GET", pattern: /^\/api\/actions\/pending$/ },
     { method: "POST", pattern: /^\/api\/actions\/[^/]+\/(confirm|cancel)$/ },
     { method: "GET", pattern: /^\/api\/digest$/ },
+    // A reminder put off from the phone (lot AT4)
+    { method: "POST", pattern: /^\/api\/reminders\/snooze$/ },
     // What changed — the app reloads what concerns it (lot S)
     { method: "GET", pattern: /^\/api\/changes$/ },
     // Its own notifications

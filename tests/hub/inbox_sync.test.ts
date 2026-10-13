@@ -57,6 +57,26 @@ describe("InboxSync.reconcile", () => {
         expect(emitted).toEqual([{ op: "removed", key: "email-a", source: "email" }]);
     });
 
+    // Lot AT4: a reminder's life is the reminder engine's — the calendar's window would call it gone.
+    it("never asks a source about a reminder", async () => {
+        const reminder: AcediaEvent = {
+            ...item("rem-event_soon-primary/ev1-1", "calendar"),
+            type: "planning.reminder",
+        };
+        const calendar: IConnector & { sourceState: ReturnType<typeof vi.fn> } = {
+            slug: "calendar",
+            name: "Calendar",
+            poll: async () => [],
+            sourceState: vi.fn(
+                async () => new Map<string, SourceState>([[reminder.dedupeKey, "gone"]]),
+            ),
+        };
+        const { store, sync } = setup([reminder], [calendar]);
+        await sync.reconcile();
+        expect(calendar.sourceState).not.toHaveBeenCalled();
+        expect(store.get(reminder.dedupeKey)).toBeDefined();
+    });
+
     it("reports a read state changed at the source, both ways", async () => {
         const { store, emitted, sync } = setup(
             [item("email-a", "email", false), item("email-b", "email", true)],

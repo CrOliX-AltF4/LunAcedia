@@ -175,7 +175,18 @@ export class GcalConnector implements IConnector {
         return this.tokenStore?.get("gcal") ?? this.staticRefreshToken;
     }
 
+    /**
+     * False once the planning holds the calendar (lot AT4): events no longer go to the box — reminders do. The poll
+     * still reads the window, so the source's health stays true (a read that fails is an error, not an empty box).
+     */
+    boxItems = true;
+
     async poll(): Promise<AcediaEvent[]> {
+        if (!this.boxItems) {
+            if ((await this.window(true)) === null)
+                throw new Error("the calendar could not be read");
+            return [];
+        }
         return (await this.window(false)) ?? [];
     }
 
