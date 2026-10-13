@@ -37,6 +37,33 @@ interface CalListResponse {
 /** Pages read at most per calendar and window — 10 × 250 events is far beyond any real lookahead. */
 const MAX_PAGES = 10;
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Google's start/end for a span: `{ date }` for an all-day event (both bounds dates), `{ dateTime }` otherwise. Both
+ * bounds of the same form, the end after the start — anything else is refused before Google is asked.
+ */
+function eventSpan(
+    start: string,
+    end: string,
+    what: string,
+): { start: Record<string, string>; end: Record<string, string> } {
+    const allDay = DATE_ONLY.test(start);
+    if (allDay !== DATE_ONLY.test(end))
+        throw new Error(
+            `[GCal] ${what}: start and end must both be dates or both date-times — nothing was done`,
+        );
+    const s = Date.parse(start);
+    const e = Date.parse(end);
+    if (isNaN(s) || isNaN(e))
+        throw new Error(`[GCal] ${what}: start or end is not a date — nothing was done`);
+    if (e <= s)
+        throw new Error(`[GCal] ${what}: the end must come after the start — nothing was done`);
+    return allDay
+        ? { start: { date: start }, end: { date: end } }
+        : { start: { dateTime: start }, end: { dateTime: end } };
+}
+
 /** The event as the reader shows it: when, where, then the full description. */
 function describeEvent(ev: CalEvent): string {
     const lines: string[] = [];
@@ -351,10 +378,11 @@ export class GcalConnector implements IConnector {
 
         if (action.kind === "create_event") {
             const calId = action.fields.calendarId || "primary";
+            const span = eventSpan(action.fields.start, action.fields.end, "create_event");
             const body: Record<string, unknown> = {
                 summary: action.fields.summary,
-                start: { dateTime: action.fields.start },
-                end: { dateTime: action.fields.end },
+                start: span.start,
+                end: span.end,
             };
             if (action.fields.description) body["description"] = action.fields.description;
             if (action.fields.location) body["location"] = action.fields.location;
@@ -391,10 +419,25 @@ export class GcalConnector implements IConnector {
         }
 
         // update_event — map generic `fields` to GCal event patch body
-        const patch: Record<string, string> = {};
+        const patch: Record<string, unknown> = {};
         if (action.fields["title"]) patch["summary"] = action.fields["title"];
         if (action.fields["description"]) patch["description"] = action.fields["description"];
         if (action.fields["location"]) patch["location"] = action.fields["location"];
+        const newStart = action.fields["start"];
+        const newEnd = action.fields["end"];
+        if (newStart || newEnd) {
+            // Moving is start and end together: one alone would stretch or invert the event.
+            if (!newStart || !newEnd)
+                throw new Error(
+                    "[GCal] update_event: moving an event takes start and end together — nothing was done",
+                );
+            const span = eventSpan(newStart, newEnd, "update_event");
+            // The other form is cleared: a timed event can become all-day, and the reverse.
+            patch["start"] = { date: null, dateTime: null, ...span.start };
+            patch["end"] = { date: null, dateTime: null, ...span.end };
+        }
+        if (Object.keys(patch).length === 0)
+            throw new Error("[GCal] update_event: nothing to change — nothing was done");
         try {
             const resp = await fetch(eventUrl, {
                 method: "PATCH",

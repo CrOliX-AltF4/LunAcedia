@@ -360,7 +360,8 @@ describe("TasksConnector.executeAction — complete_task / create_task / delete_
         expect(postCall).toBeDefined();
         const body = JSON.parse(postCall![1]!.body as string) as { title: string; due: string };
         expect(body.title).toBe("Buy milk");
-        expect(body.due).toBe("2026-09-01");
+        // Google Tasks takes an RFC 3339 timestamp: a date is sent as that day at midnight UTC.
+        expect(body.due).toBe("2026-09-01T00:00:00.000Z");
     });
 
     it("create_task: uses fields.listId when given instead of the configured default", async () => {

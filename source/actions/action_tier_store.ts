@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { ActionKind, ActionTier, ActionTierConfig } from "../types/action_tier.js";
-import { DEFAULT_ACTION_TIERS, IMMUTABLE_TIERS } from "../types/action_tier.js";
+import { DEFAULT_ACTION_TIERS, IMMUTABLE_TIERS, NEVER_AUTO } from "../types/action_tier.js";
 
 const VALID_TIERS = new Set<ActionTier>(["auto", "confirm", "manual"]);
 // Derived from DEFAULT_ACTION_TIERS rather than hand-listed — a kind added to the catalog
@@ -66,6 +66,7 @@ export class ActionTierStore {
                 const value = parsed[kind];
                 // The file stores every tier: in a file older than the version marker, a former default is not a choice.
                 if (legacy && FORMER_DEFAULTS[kind] === value) continue;
+                if (value === "auto" && NEVER_AUTO.has(kind)) continue;
                 if (value && VALID_TIERS.has(value)) this.tiers[kind] = value;
             }
         } catch {
@@ -81,6 +82,7 @@ export class ActionTierStore {
                 if (
                     VALID_KINDS.has(kind) &&
                     !(kind in IMMUTABLE_TIERS) &&
+                    !(tier === "auto" && NEVER_AUTO.has(kind)) &&
                     VALID_TIERS.has(tier as ActionTier)
                 ) {
                     clean[key] = tier as ActionTier;
@@ -109,11 +111,8 @@ export class ActionTierStore {
      */
     getTier(kind: ActionKind, scope?: string): ActionTier {
         if (kind in IMMUTABLE_TIERS) return IMMUTABLE_TIERS[kind]!;
-        if (scope) {
-            const override = this.overrides[overrideKey(kind, scope)];
-            if (override) return override;
-        }
-        return this.tiers[kind];
+        const tier = (scope && this.overrides[overrideKey(kind, scope)]) || this.tiers[kind];
+        return tier === "auto" && NEVER_AUTO.has(kind) ? "confirm" : tier;
     }
 
     /** Applies only valid, mutable (kind, tier) pairs from the patch; returns the keys actually changed. */
@@ -123,6 +122,7 @@ export class ActionTierStore {
             if (!VALID_KINDS.has(kind as ActionKind)) continue;
             if (kind in IMMUTABLE_TIERS) continue;
             if (!VALID_TIERS.has(tier as ActionTier)) continue;
+            if (tier === "auto" && NEVER_AUTO.has(kind as ActionKind)) continue;
             this.tiers[kind as ActionKind] = tier as ActionTier;
             changed.push(kind as ActionKind);
         }
@@ -143,6 +143,7 @@ export class ActionTierStore {
             delete this.overrides[key];
         } else {
             if (!VALID_TIERS.has(tier as ActionTier)) return false;
+            if (tier === "auto" && NEVER_AUTO.has(kind as ActionKind)) return false;
             this.overrides[key] = tier as ActionTier;
         }
         await this.saveOverrides();

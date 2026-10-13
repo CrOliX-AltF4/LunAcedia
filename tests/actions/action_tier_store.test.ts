@@ -28,6 +28,32 @@ describe("ActionTierStore", () => {
         h.mockMkdir.mockResolvedValue(undefined);
     });
 
+    // ADR-031 Q8 (Natsume repo): deleting an event or a task always waits for Master.
+    describe("deletes of events and tasks are never auto", () => {
+        it("refuses auto when set, keeps confirm or manual", async () => {
+            const store = new ActionTierStore("/tmp/tiers.json", "/tmp/overrides.json");
+            expect(await store.patch({ delete_event: "auto", delete_task: "auto" })).toEqual([]);
+            expect(store.getTier("delete_event")).toBe("confirm");
+            expect(await store.patch({ delete_task: "manual" })).toEqual(["delete_task"]);
+            expect(store.getTier("delete_task")).toBe("manual");
+            expect(await store.patchOverride("delete_event", "primary", "auto")).toBe(false);
+        });
+
+        it("reads a stored auto as confirm — a hand-edited file cannot open it", async () => {
+            h.mockReadFile.mockImplementation((p: string) =>
+                Promise.resolve(
+                    String(p).includes("overrides")
+                        ? JSON.stringify({ "delete_task:list-a": "auto" })
+                        : JSON.stringify({ delete_event: "auto" }),
+                ),
+            );
+            const store = new ActionTierStore("/tmp/tiers.json", "/tmp/overrides.json");
+            await store.load();
+            expect(store.getTier("delete_event")).toBe("confirm");
+            expect(store.getTier("delete_task", "list-a")).toBe("confirm");
+        });
+    });
+
     it("defaults every action kind to DEFAULT_ACTION_TIERS — fail-safe, never 'auto' out of the box", () => {
         const store = new ActionTierStore("/tmp/does-not-matter.json");
         expect(store.getAll()).toEqual(DEFAULT_ACTION_TIERS);
