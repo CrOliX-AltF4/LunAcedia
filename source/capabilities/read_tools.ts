@@ -12,6 +12,7 @@ import type { EventStore } from "../store/event_store.js";
 import type { AcediaEvent, AcediaEventPriority, AcediaEventSource } from "../types/acedia_event.js";
 import { computeFreeSlots, type TimeSlot } from "../connectors/calendar/free_slots.js";
 import { validateArgs, type ObjectSchema } from "./json_schema.js";
+import type { PlanningSnapshot } from "../types/planning.js";
 import type { ToolDefinition } from "./capability_manifest.js";
 
 export interface ReadToolDeps {
@@ -23,6 +24,11 @@ export interface ReadToolDeps {
      * the background: a failure never keeps the agent from reading the mail.
      */
     markRead?: (event: AcediaEvent) => Promise<void>;
+    /**
+     * The planning over [from, to) — every event of the horizon and every task (lot AT). Absent: the agenda and tasks
+     * tools are not offered.
+     */
+    planning?: (from: number, to: number) => PlanningSnapshot;
 }
 
 export type ReadToolResult =
@@ -74,8 +80,8 @@ const SLOTS_SCHEMA: ObjectSchema = {
         hours: {
             type: "integer",
             minimum: 1,
-            maximum: 168,
-            description: "Window from now (default 24).",
+            maximum: 336,
+            description: "Window from now (default 24, up to two weeks).",
         },
         minGapMin: {
             type: "integer",
@@ -86,12 +92,62 @@ const SLOTS_SCHEMA: ObjectSchema = {
     },
 };
 
-export function readToolDefinitions(): ToolDefinition[] {
+const DAY_MS = 86_400_000;
+/** The longest period agenda reads at once — the planning holds 90 days ahead. */
+const AGENDA_MAX_DAYS = 90;
+const TASKS_LIMIT = 50;
+const DESCRIPTION_CHARS = 300;
+
+const AGENDA_SCHEMA: ObjectSchema = {
+    type: "object",
+    properties: {
+        from: {
+            type: "string",
+            description:
+                "Start: an ISO date (YYYY-MM-DD) or date-time. Default: the start of today.",
+        },
+        to: { type: "string", description: "End (excluded), same form. Default: from + days." },
+        days: {
+            type: "integer",
+            minimum: 1,
+            maximum: AGENDA_MAX_DAYS,
+            description: "Length of the period when `to` is not given (default 7).",
+        },
+    },
+};
+const TASKS_SCHEMA: ObjectSchema = {
+    type: "object",
+    properties: {
+        status: {
+            type: "string",
+            enum: ["open", "completed", "all"],
+            description: "Default open.",
+        },
+        listId: { type: "string", description: "Only this list." },
+        dueBefore: {
+            type: "string",
+            description: "Only tasks due on or before this date (YYYY-MM-DD).",
+        },
+        undated: { type: "boolean", description: "Only tasks without a due date." },
+        text: { type: "string", description: "Case-insensitive text in the title or the notes." },
+        limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 200,
+            description: "Max results (default 50).",
+        },
+    },
+};
+
+export function readToolDefinitions(opts: { planning?: boolean } = {}): ToolDefinition[] {
     return [
         {
             name: "search_events",
             description:
-                "Search LunAcedia's box: the whole mail inbox (read and unread), upcoming calendar events, tasks due, GitHub notifications and feed items. Returns compact items with the ids actions need. Filter by `unread` only when the user asks for unread items; when nothing matches, search again with fewer filters before concluding it does not exist.",
+                "Search LunAcedia's box: the whole mail inbox (read and unread), near-term calendar events and tasks, GitHub notifications and feed items. Returns compact items with the ids actions need. Filter by `unread` only when the user asks for unread items; when nothing matches, search again with fewer filters before concluding it does not exist." +
+                (opts.planning
+                    ? " For the calendar and tasks, prefer agenda and tasks: they see the whole planning."
+                    : ""),
             parameters: SEARCH_SCHEMA,
         },
         {
@@ -105,6 +161,22 @@ export function readToolDefinitions(): ToolDefinition[] {
             description: "Open slots in the calendar, from now over the next hours.",
             parameters: SLOTS_SCHEMA,
         },
+        ...(opts.planning
+            ? [
+                  {
+                      name: "agenda",
+                      description:
+                          "The calendar over a period — from 7 days back to 90 days ahead: every event with its id (what event actions take), and the overlaps between them. Use it for any question about the schedule, a date, a meeting.",
+                      parameters: AGENDA_SCHEMA,
+                  },
+                  {
+                      name: "tasks",
+                      description:
+                          "Every task of every list, whatever its due date (or none), with its id (what task actions take). Default: the open ones.",
+                      parameters: TASKS_SCHEMA,
+                  },
+              ]
+            : []),
     ];
 }
 
@@ -210,6 +282,105 @@ function freeSlots(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolR
     };
 }
 
+/** An ISO date is read as local midnight (the user's day), a date-time as is. NaN when unreadable. */
+function parseWhen(value: string): number {
+    const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (date) return new Date(Number(date[1]), Number(date[2]) - 1, Number(date[3])).getTime();
+    return Date.parse(value);
+}
+
+function startOfToday(now: number): number {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+}
+
+function agenda(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolResult {
+    if (!deps.planning) return { ok: false, error: "the planning is not available" };
+    const from =
+        typeof args["from"] === "string" ? parseWhen(args["from"]) : startOfToday(deps.now());
+    const days = (args["days"] as number | undefined) ?? 7;
+    const to = typeof args["to"] === "string" ? parseWhen(args["to"]) : from + days * DAY_MS;
+    if (isNaN(from) || isNaN(to))
+        return { ok: false, error: "from and to must be ISO dates (YYYY-MM-DD) or date-times" };
+    if (to <= from) return { ok: false, error: "to must come after from" };
+    if (to - from > AGENDA_MAX_DAYS * DAY_MS)
+        return { ok: false, error: `at most ${AGENDA_MAX_DAYS} days at once` };
+    const snap = deps.planning(from, to);
+    const events = snap.events.map((e) => ({
+        id: e.id,
+        title: e.title,
+        start: e.start,
+        end: e.end,
+        allDay: e.allDay,
+        ...(e.recurring && { recurring: true }),
+        ...(e.location && { location: e.location }),
+        ...(e.description && {
+            description:
+                e.description.length > DESCRIPTION_CHARS
+                    ? `${e.description.slice(0, DESCRIPTION_CHARS)}…`
+                    : e.description,
+        }),
+    }));
+    return {
+        ok: true,
+        result: {
+            from: new Date(from).toISOString(),
+            to: new Date(to).toISOString(),
+            events,
+            conflicts: snap.conflicts.map((c) => ({
+                eventIds: c.eventIds,
+                from: c.from,
+                to: c.to,
+            })),
+            syncedAt: snap.syncedAt,
+            complete: snap.complete,
+        },
+        // An invitation's title and description are written by someone else.
+        external: events.length > 0,
+    };
+}
+
+function tasks(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolResult {
+    if (!deps.planning) return { ok: false, error: "the planning is not available" };
+    const now = deps.now();
+    // Tasks do not depend on the period: the planning holds them all.
+    const snap = deps.planning(now, now + 1);
+    const status = (args["status"] as string | undefined) ?? "open";
+    const text = typeof args["text"] === "string" ? args["text"].toLowerCase() : "";
+    const dueBefore = args["dueBefore"] as string | undefined;
+    const matched = snap.tasks.filter(
+        (t) =>
+            (status === "all" || t.status === status) &&
+            (!args["listId"] || t.listId === args["listId"]) &&
+            (!dueBefore || (t.due !== undefined && t.due <= dueBefore)) &&
+            (args["undated"] !== true || t.due === undefined) &&
+            (!text ||
+                t.title.toLowerCase().includes(text) ||
+                (t.notes ?? "").toLowerCase().includes(text)),
+    );
+    const limit = (args["limit"] as number | undefined) ?? TASKS_LIMIT;
+    const shown = matched.slice(0, limit).map((t) => ({
+        id: t.id,
+        title: t.title,
+        list: t.listTitle,
+        ...(t.due && { due: t.due }),
+        status: t.status,
+        ...(t.notes && { notes: t.notes }),
+    }));
+    return {
+        ok: true,
+        result: {
+            total: matched.length,
+            tasks: shown,
+            syncedAt: snap.syncedAt,
+            complete: snap.complete,
+        },
+        // A note may hold text copied from a mail.
+        external: shown.some((t) => "notes" in t),
+    };
+}
+
 const TOOLS: Record<
     string,
     { schema: ObjectSchema; run: (a: Record<string, unknown>, d: ReadToolDeps) => ReadToolResult }
@@ -217,6 +388,8 @@ const TOOLS: Record<
     search_events: { schema: SEARCH_SCHEMA, run: searchEvents },
     get_event: { schema: GET_SCHEMA, run: getEvent },
     free_slots: { schema: SLOTS_SCHEMA, run: freeSlots },
+    agenda: { schema: AGENDA_SCHEMA, run: agenda },
+    tasks: { schema: TASKS_SCHEMA, run: tasks },
 };
 
 export function isReadTool(name: string): boolean {

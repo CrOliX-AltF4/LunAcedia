@@ -160,6 +160,7 @@ function systemPrompt(
         "",
         `You act for the user on their mail, calendar, tasks and GitHub. Current time: ${new Date(now).toISOString()}.`,
         "Use the read tools to find facts before answering; never invent an event, an id or a date.",
+        "For the calendar and tasks, read the planning (agenda, tasks): it holds every event up to 90 days ahead and every task, whatever its due date.",
         ...(unavailable.length > 0
             ? [
                   `Not available to you right now: ${unavailable.join("; ")}.`,
@@ -223,9 +224,10 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
     }
 
     const allowWrites = deps.allowWrites ?? true;
+    const readTools = readToolDefinitions({ planning: deps.read.planning !== undefined });
     const tools = req.readOnly
-        ? readToolDefinitions()
-        : [...readToolDefinitions(), ...actionToolDefinitions({ includeWrites: allowWrites })];
+        ? readTools
+        : [...readTools, ...actionToolDefinitions({ includeWrites: allowWrites })];
     const writeKinds = new Set<string>(
         actionCapabilities()
             .filter(isGatedWrite)
