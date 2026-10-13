@@ -112,6 +112,9 @@ describe("DeviceRegistry", () => {
                 pushToken: "fcm-token",
             });
             expect(again.list()[0]).not.toHaveProperty("tokenHash");
+            // authenticate() records the device's activity in the background: let that write land before the
+            // directory is removed (Windows refuses to remove a directory a write is still creating a file in).
+            await again.flush();
         });
     });
 });

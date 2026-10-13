@@ -8,6 +8,7 @@ import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
+import type { PlanningTask } from "../../types/planning.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
@@ -22,6 +23,7 @@ interface Task {
     notes?: string;
     status: "needsAction" | "completed";
     updated: string;
+    completed?: string;
 }
 
 interface TaskListResponse {
@@ -30,7 +32,7 @@ interface TaskListResponse {
 }
 
 interface ListsResponse {
-    items?: Array<{ id: string }>;
+    items?: Array<{ id: string; title?: string }>;
     nextPageToken?: string;
 }
 
@@ -139,7 +141,9 @@ export class TasksConnector implements IConnector {
         }
         const headers = { Authorization: `Bearer ${token}` };
 
-        const lists = this.onlyList ? [this.onlyList] : await this.allLists(headers);
+        const lists = this.onlyList
+            ? [this.onlyList]
+            : (await this.allLists(headers))?.map((l) => l.id);
         if (!lists) return null;
         const events: AcediaEvent[] = [];
         for (const listId of lists) {
@@ -152,8 +156,10 @@ export class TasksConnector implements IConnector {
     }
 
     /** The account's task lists. null when they cannot be read. */
-    private async allLists(headers: Record<string, string>): Promise<string[] | null> {
-        const ids: string[] = [];
+    private async allLists(
+        headers: Record<string, string>,
+    ): Promise<Array<{ id: string; title: string }> | null> {
+        const lists: Array<{ id: string; title: string }> = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_PAGES; page++) {
             const url =
@@ -161,11 +167,12 @@ export class TasksConnector implements IConnector {
                 (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
             const data = await this.read<ListsResponse>(url, headers, "lists");
             if (!data) return null;
-            ids.push(...(data.items ?? []).map((l) => l.id));
+            lists.push(...(data.items ?? []).map((l) => ({ id: l.id, title: l.title ?? l.id })));
             pageToken = data.nextPageToken;
-            if (!pageToken) break;
+            if (!pageToken) return lists;
         }
-        return ids;
+        console.warn(`[Tasks] more than ${MAX_PAGES} pages of lists — not read`);
+        return null;
     }
 
     /** The incomplete tasks of one list, page after page. null when it cannot be read. */
@@ -174,20 +181,85 @@ export class TasksConnector implements IConnector {
         headers: Record<string, string>,
     ): Promise<Task[] | null> {
         // No dueMax: it would leave out undated tasks. The horizon is applied here, in toEvents.
-        const base =
+        return this.readPages(
             `${TASKS_API}/lists/${listPath(listId)}/tasks` +
-            `?showCompleted=false&showHidden=false&maxResults=100`;
+                `?showCompleted=false&showHidden=false&maxResults=100`,
+            headers,
+            `list ${listId}`,
+        );
+    }
+
+    /** Every page of a task listing. null when a page cannot be read, or when there are more pages than read. */
+    private async readPages(
+        base: string,
+        headers: Record<string, string>,
+        what: string,
+    ): Promise<Task[] | null> {
         const tasks: Task[] = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_PAGES; page++) {
             const url = pageToken ? `${base}&pageToken=${encodeURIComponent(pageToken)}` : base;
-            const data = await this.read<TaskListResponse>(url, headers, `list ${listId}`);
+            const data = await this.read<TaskListResponse>(url, headers, what);
             if (!data) return null;
             tasks.push(...(data.items ?? []));
             pageToken = data.nextPageToken;
-            if (!pageToken) break;
+            if (!pageToken) return tasks;
         }
-        return tasks;
+        // Cut short: a partial picture would call the tasks it did not reach gone.
+        console.warn(`[Tasks] ${what}: more than ${MAX_PAGES} pages — not read`);
+        return null;
+    }
+
+    /**
+     * Every open task of every list read — dated or not, whatever the due date — and the tasks completed since
+     * `completedSince`, as planning objects (lot AT1). Strict: null as soon as one list cannot be read.
+     */
+    async readPlanning(completedSince: number): Promise<PlanningTask[] | null> {
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return null;
+        let token: string;
+        try {
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gtasks");
+        } catch (e) {
+            console.error("[Tasks] token refresh error:", (e as Error).message);
+            return null;
+        }
+        const headers = { Authorization: `Bearer ${token}` };
+        const lists = this.onlyList
+            ? [{ id: this.onlyList, title: this.onlyList }]
+            : await this.allLists(headers);
+        if (!lists) return null;
+        const out: PlanningTask[] = [];
+        for (const list of lists) {
+            const open = await this.listTasks(list.id, headers);
+            if (!open) return null;
+            const done = await this.readPages(
+                `${TASKS_API}/lists/${listPath(list.id)}/tasks` +
+                    `?showCompleted=true&showHidden=true&maxResults=100` +
+                    `&completedMin=${encodeURIComponent(new Date(completedSince).toISOString())}`,
+                headers,
+                `list ${list.id} (completed)`,
+            );
+            if (!done) return null;
+            const byId = new Map<string, Task>();
+            for (const t of [...open, ...done]) byId.set(t.id, t);
+            for (const t of byId.values()) {
+                const completed = t.status === "completed";
+                out.push({
+                    id: `${list.id}/${t.id}`,
+                    listId: list.id,
+                    listTitle: list.title,
+                    title: t.title || "(sans titre)",
+                    ...(t.notes && { notes: t.notes }),
+                    // Google keeps a date only: "2026-10-30T00:00:00.000Z" is the 30th.
+                    ...(t.due && { due: t.due.slice(0, 10) }),
+                    status: completed ? "completed" : "open",
+                    ...(completed && t.completed && { completedAt: Date.parse(t.completed) }),
+                    updatedAt: Date.parse(t.updated) || 0,
+                });
+            }
+        }
+        return out;
     }
 
     private async read<T>(

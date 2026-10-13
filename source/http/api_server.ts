@@ -21,6 +21,9 @@ import {
 } from "../usage/llm_usage.js";
 import type { UsageAlerts } from "../usage/usage_alerts.js";
 import { UsageRoutes } from "./usage_routes.js";
+import { PlanningRoutes } from "./planning_routes.js";
+import type { PlanningStore } from "../planning/planning_store.js";
+import type { PlanningSync } from "../planning/planning_sync.js";
 import { DeviceRoutes } from "./device_routes.js";
 import type { Device, DeviceRegistry } from "../auth/device_registry.js";
 import { isDeviceRoute } from "../auth/device_scope.js";
@@ -229,8 +232,11 @@ export class AcediaApiServer {
         devices?: DeviceRegistry,
         // What changed, for the views that follow (lot S) — absent in tests that do not exercise it.
         private readonly changes?: ChangeFeed,
+        // The planning: events and tasks as objects (lot AT) — absent in tests that do not exercise it.
+        planning?: { store: PlanningStore; sync: PlanningSync },
     ) {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
+        this.planningRoutes = planning ? new PlanningRoutes({ ...planning, json }) : null;
         this.devices = devices ?? null;
         this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
         this.inboxSync = inbox ?? null;
@@ -253,6 +259,7 @@ export class AcediaApiServer {
     }
 
     private readonly usageRoutes: UsageRoutes | null;
+    private readonly planningRoutes: PlanningRoutes | null;
     /** The returns from Google this server asked for (the callback accepts no other). */
     private readonly oauthStates = new OAuthStates();
     private readonly devices: DeviceRegistry | null;
@@ -1178,6 +1185,9 @@ export class AcediaApiServer {
         // LLM usage and its alert settings
         if (this.usageRoutes && (await this.usageRoutes.handle(method, path, url, req, res)))
             return;
+
+        // The planning: events and tasks as objects
+        if (this.planningRoutes?.handle(method, path, url, res)) return;
 
         // The pocket app's topics
         if (

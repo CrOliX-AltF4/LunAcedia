@@ -8,6 +8,7 @@ import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
+import type { PlanningEvent } from "../../types/planning.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
@@ -23,6 +24,9 @@ interface CalEvent {
     location?: string;
     start: { dateTime?: string; date?: string };
     end: { dateTime?: string; date?: string };
+    status?: "confirmed" | "tentative" | "cancelled";
+    recurringEventId?: string;
+    updated?: string;
 }
 
 interface CalListResponse {
@@ -146,6 +150,51 @@ export class GcalConnector implements IConnector {
 
     async poll(): Promise<AcediaEvent[]> {
         return (await this.window(false)) ?? [];
+    }
+
+    /**
+     * Every event of every polled calendar over [from, to), as planning objects (lot AT1). Strict: null as soon as
+     * one calendar cannot be read — the planning never applies a partial picture, which would call events gone.
+     */
+    async readPlanning(from: number, to: number): Promise<PlanningEvent[] | null> {
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return null;
+        let token: string;
+        try {
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gcal");
+        } catch (e) {
+            console.error("[GCal] token refresh error:", (e as Error).message);
+            return null;
+        }
+        const headers = { Authorization: `Bearer ${token}` };
+        const timeMin = new Date(from).toISOString();
+        const timeMax = new Date(to).toISOString();
+        const out: PlanningEvent[] = [];
+        for (const calId of this.calendars) {
+            const items = await this.fetchCalendar(calId, timeMin, timeMax, headers);
+            if (!items) return null;
+            for (const ev of items) {
+                if (ev.status === "cancelled") continue;
+                const allDay = !ev.start.dateTime;
+                const start = ev.start.dateTime ?? ev.start.date;
+                const end = ev.end.dateTime ?? ev.end.date;
+                if (!start || !end) continue;
+                out.push({
+                    id: `${calId}/${ev.id}`,
+                    calendarId: calId,
+                    title: ev.summary ?? "(sans titre)",
+                    start,
+                    end,
+                    allDay,
+                    ...(ev.location && { location: ev.location }),
+                    ...(ev.description && { description: ev.description }),
+                    recurring: ev.recurringEventId !== undefined,
+                    ...(ev.htmlLink && { url: ev.htmlLink }),
+                    updatedAt: ev.updated ? Date.parse(ev.updated) : 0,
+                });
+            }
+        }
+        return out;
     }
 
     /**
@@ -373,6 +422,40 @@ export class GcalConnector implements IConnector {
         timeMax: string,
         headers: Record<string, string>,
     ): Promise<AcediaEvent[] | null> {
+        const events = await this.fetchCalendar(calId, timeMin, timeMax, headers);
+        if (!events) return null;
+        return events.map((ev): AcediaEvent => {
+            const startRaw = ev.start.dateTime ?? ev.start.date ?? "";
+            const endRaw = ev.end.dateTime ?? ev.end.date ?? "";
+            const ts = startRaw ? new Date(startRaw).getTime() : Date.now();
+
+            return {
+                type: "calendar.upcoming",
+                ts,
+                source: "calendar",
+                title: ev.summary ?? "(no title)",
+                body: ev.description?.slice(0, 200).trim(),
+                url: ev.htmlLink,
+                priority: this.computePriority(ts),
+                dedupeKey: `cal-${ev.id}`,
+                meta: {
+                    calendarId: calId,
+                    eventId: ev.id,
+                    start: startRaw,
+                    end: endRaw,
+                    location: ev.location,
+                },
+            };
+        });
+    }
+
+    /** One calendar over [timeMin, timeMax), every page, occurrences unfolded. null = it could not be read. */
+    private async fetchCalendar(
+        calId: string,
+        timeMin: string,
+        timeMax: string,
+        headers: Record<string, string>,
+    ): Promise<CalEvent[] | null> {
         const base =
             `${GCAL_API}/calendars/${encodeURIComponent(calId)}/events` +
             `?timeMin=${encodeURIComponent(timeMin)}` +
@@ -401,31 +484,10 @@ export class GcalConnector implements IConnector {
             const data = (await resp.json()) as CalListResponse;
             events.push(...(data.items ?? []));
             pageToken = data.nextPageToken;
-            if (!pageToken) break;
+            if (!pageToken) return events;
         }
-
-        return events.map((ev): AcediaEvent => {
-            const startRaw = ev.start.dateTime ?? ev.start.date ?? "";
-            const endRaw = ev.end.dateTime ?? ev.end.date ?? "";
-            const ts = startRaw ? new Date(startRaw).getTime() : Date.now();
-
-            return {
-                type: "calendar.upcoming",
-                ts,
-                source: "calendar",
-                title: ev.summary ?? "(no title)",
-                body: ev.description?.slice(0, 200).trim(),
-                url: ev.htmlLink,
-                priority: this.computePriority(ts),
-                dedupeKey: `cal-${ev.id}`,
-                meta: {
-                    calendarId: calId,
-                    eventId: ev.id,
-                    start: startRaw,
-                    end: endRaw,
-                    location: ev.location,
-                },
-            };
-        });
+        // Cut short: a partial picture would call the events it did not reach gone.
+        console.warn(`[GCal] ${calId}: more than ${MAX_PAGES} pages — not read`);
+        return null;
     }
 }
