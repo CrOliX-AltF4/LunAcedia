@@ -284,6 +284,51 @@ describe("runAgent — bounded tool loop", () => {
         expect(r.actions[0]).toMatchObject({ kind: "archive_email", status: "refused" });
     });
 
+    // Lot AT3: with a planning, the agent sees the whole calendar and every task.
+    it("offers agenda and tasks when the planning is there, and answers from it", async () => {
+        const offered: string[][] = [];
+        const seen: string[] = [];
+        const provider: IAIProvider = {
+            mode: "openai",
+            chat: async () => "",
+            digest: async () => "",
+            chatWithTools: async (messages, tools) => {
+                offered.push(tools.map((t) => t.name));
+                const last = messages[messages.length - 1]!;
+                if (last.role === "tool") seen.push(String(last.content));
+                return offered.length === 1
+                    ? {
+                          content: null,
+                          toolCalls: [call("c1", "agenda", { from: "2026-11-01", days: 7 })],
+                      }
+                    : { content: "Art to Play le 14.", toolCalls: [] };
+            },
+        };
+        const d = deps(provider);
+        d.read.planning = () => ({
+            events: [
+                {
+                    id: "primary/e1",
+                    calendarId: "primary",
+                    title: "Art to Play",
+                    start: "2026-11-14T01:00:00+01:00",
+                    end: "2026-11-14T03:00:00+01:00",
+                    allDay: false,
+                    recurring: false,
+                    updatedAt: 1,
+                },
+            ],
+            tasks: [],
+            conflicts: [],
+            syncedAt: { calendar: NOW, tasks: NOW },
+            complete: true,
+        });
+        const r = await runAgent({ text: "qu'est-ce que j'ai en novembre ?" }, d);
+        expect(offered[0]).toEqual(expect.arrayContaining(["agenda", "tasks"]));
+        expect(seen[0]).toContain("primary/e1");
+        expect(r.status).toBe("done");
+    });
+
     it("refuses a write action while writes are off, without dispatching it", async () => {
         const { provider } = scripted([
             { content: null, toolCalls: [call("c1", "create_task", { fields: { title: "x" } })] },

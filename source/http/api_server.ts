@@ -25,6 +25,9 @@ import { PlanningRoutes } from "./planning_routes.js";
 import type { PlanningStore } from "../planning/planning_store.js";
 import type { PlanningSync } from "../planning/planning_sync.js";
 
+/** How far free_slots can look — its own maximum (two weeks). */
+const FREE_SLOTS_HORIZON_MS = 14 * 86_400_000;
+
 /** The gestures that change an event or a task — the planning reads its sources again after one. */
 const PLANNING_KINDS: ReadonlySet<ConnectorAction["kind"]> = new Set([
     "create_event",
@@ -250,6 +253,7 @@ export class AcediaApiServer {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
         this.planningRoutes = planning ? new PlanningRoutes({ ...planning, json }) : null;
         this.planningSync = planning?.sync ?? null;
+        this.planningStore = planning?.store ?? null;
         this.devices = devices ?? null;
         this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
         this.inboxSync = inbox ?? null;
@@ -275,6 +279,7 @@ export class AcediaApiServer {
     private readonly planningRoutes: PlanningRoutes | null;
     /** Read again right after a gesture on an event or a task: what Natsume just did shows at once. */
     private readonly planningSync: PlanningSync | null;
+    private readonly planningStore: PlanningStore | null;
     /** The returns from Google this server asked for (the callback accepts no other). */
     private readonly oauthStates = new OAuthStates();
     private readonly devices: DeviceRegistry | null;
@@ -301,6 +306,15 @@ export class AcediaApiServer {
                     read: {
                         store: this.store,
                         busyIntervals: () => this.calendarBusyIntervals(),
+                        ...(this.planningStore &&
+                            this.planningSync && {
+                                planning: (from: number, to: number) =>
+                                    this.planningStore!.snapshot(
+                                        from,
+                                        to,
+                                        this.planningSync!.configured(),
+                                    ),
+                            }),
                         now: () => Date.now(),
                         // Natsume read it in full: it is read at the source, and the item follows.
                         markRead: async (event) => {
@@ -475,6 +489,15 @@ export class AcediaApiServer {
     /** Busy intervals from every currently-known timed calendar.upcoming event — all-day
      *  events excluded, same reasoning as GcalConnector's conflict detection. */
     private calendarBusyIntervals(): TimeSlot[] {
+        // The planning holds the whole horizon; the box only the next hours.
+        if (this.planningStore && this.planningSync) {
+            const now = Date.now();
+            return this.planningStore
+                .snapshot(now, now + FREE_SLOTS_HORIZON_MS, this.planningSync.configured())
+                .events.filter((e) => !e.allDay)
+                .map((e) => ({ start: Date.parse(e.start), end: Date.parse(e.end) }))
+                .filter((b) => !isNaN(b.start) && !isNaN(b.end));
+        }
         const { events } = this.store.query({ source: "calendar", limit: 200 });
         return (events as AcediaEvent[])
             .filter((e) => e.type === "calendar.upcoming")

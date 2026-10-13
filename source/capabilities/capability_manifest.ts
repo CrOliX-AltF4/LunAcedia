@@ -64,9 +64,9 @@ const ISSUE = "^[^/\\s#]+/[^/\\s#]+#\\d+$";
 const MAIL_ID =
     "Gmail message id, taken from a search_events/get_event result (meta.messageId). Never invented.";
 const EVENT_ID =
-    '"<meta.calendarId>/<meta.eventId>" of an existing event, from a search result. Never invented.';
+    'The `id` of an existing event from agenda ("<calendarId>/<eventId>"), or "<meta.calendarId>/<meta.eventId>" from a search result. Never invented.';
 const TASK_ID =
-    '"<meta.listId>/<meta.taskId>" of an existing task, from a search result. Never invented.';
+    'The `id` of an existing task from tasks ("<listId>/<taskId>"), or "<meta.listId>/<meta.taskId>" from a search result. Never invented.';
 const labelParams = (description: string): ObjectSchema => ({
     type: "object",
     properties: { sourceId: id(MAIL_ID), label: id(description) },
