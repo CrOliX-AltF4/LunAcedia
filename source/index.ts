@@ -34,6 +34,8 @@ import { ConversationStore, defaultConversationDir } from "./store/conversation_
 import { defaultUsagePath, usageLedger } from "./usage/llm_usage.js";
 import { UsageAlerts, defaultAlertsPath } from "./usage/usage_alerts.js";
 import { DeviceRegistry, defaultDevicesPath } from "./auth/device_registry.js";
+import { PlanningStore, defaultPlanningPath } from "./planning/planning_store.js";
+import { PlanningSync } from "./planning/planning_sync.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -45,11 +47,15 @@ const googleTokenStore = new GoogleTokenStore();
 await googleTokenStore.load();
 
 const connectors: IConnector[] = [];
+const gcal =
+    process.env["GCAL_ENABLED"] === "true" ? new GcalConnector(googleTokenStore) : undefined;
+const gtasks =
+    process.env["GTASKS_ENABLED"] === "true" ? new TasksConnector(googleTokenStore) : undefined;
 if (process.env["GITHUB_ENABLED"] === "true") connectors.push(new GitHubConnector());
 if (process.env["RSS_ENABLED"] === "true") connectors.push(new RssConnector());
 if (process.env["GMAIL_ENABLED"] === "true") connectors.push(new GmailConnector(googleTokenStore));
-if (process.env["GCAL_ENABLED"] === "true") connectors.push(new GcalConnector(googleTokenStore));
-if (process.env["GTASKS_ENABLED"] === "true") connectors.push(new TasksConnector(googleTokenStore));
+if (gcal) connectors.push(gcal);
+if (gtasks) connectors.push(gtasks);
 if (process.env["HA_ENABLED"] === "true") connectors.push(new HaConnector());
 
 if (connectors.length === 0) {
@@ -160,6 +166,15 @@ const inboxSync = new InboxSync({
     forget: (key) => hub.forget(key),
 });
 const INBOX_SYNC_MS = 60_000;
+// The planning: every event of the horizon and every task, as objects (lot AT, ADR-031 in the Natsume repo).
+const planningStore = new PlanningStore(defaultPlanningPath());
+await planningStore.load();
+const planningSync = new PlanningSync({
+    store: planningStore,
+    ...(gcal && { calendar: gcal }),
+    ...(gtasks && { tasks: gtasks }),
+});
+const PLANNING_SYNC_MS = 5 * 60_000;
 const api = new AcediaApiServer(
     store,
     connectors,
@@ -185,6 +200,7 @@ const api = new AcediaApiServer(
     { ledger: usageLedger, alerts: usageAlerts },
     devices,
     changes,
+    { store: planningStore, sync: planningSync },
 );
 
 if (fcm) await fcm.load();
@@ -239,6 +255,7 @@ hub.onRefresh((event) => {
 });
 
 hub.start();
+planningSync.start(PLANNING_SYNC_MS);
 
 const inboxSyncTimer = setInterval(() => void inboxSync.reconcile(), INBOX_SYNC_MS);
 
@@ -248,11 +265,17 @@ console.warn(
 if (fcm) console.warn("[LunAcedia] FCM push enabled");
 
 async function flushGuards(): Promise<void> {
-    await Promise.all([guardJournal.flush(), guardStats.flush(), store.flush()]);
+    await Promise.all([
+        guardJournal.flush(),
+        guardStats.flush(),
+        store.flush(),
+        planningStore.flush(),
+    ]);
 }
 
 process.on("SIGINT", () => {
     hub.stop();
+    planningSync.stop();
     clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();
@@ -261,6 +284,7 @@ process.on("SIGINT", () => {
 });
 process.on("SIGTERM", () => {
     hub.stop();
+    planningSync.stop();
     clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();
