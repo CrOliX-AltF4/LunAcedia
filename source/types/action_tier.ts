@@ -26,6 +26,15 @@ export const IMMUTABLE_TIERS: Partial<ActionTierConfig> = {
 };
 
 /**
+ * Never "auto": deleting an event or a task always waits for Master, whatever is set (CrOliX, 2026-10-13, ADR-031
+ * Q8 in the Natsume repo). "confirm" or "manual" can be chosen; "auto" is refused when set and read as "confirm".
+ */
+export const NEVER_AUTO: ReadonlySet<ActionKind> = new Set<ActionKind>([
+    "delete_event",
+    "delete_task",
+]);
+
+/**
  * Fail-safe defaults. Trivial/reversible/no-external-effect actions default to "confirm" too
  * (not "auto") on first install — "auto" is something CrOliX opts into per action kind via
  * PATCH /api/config/tiers or the dashboard, never assumed. merge_pr is fixed at "manual"

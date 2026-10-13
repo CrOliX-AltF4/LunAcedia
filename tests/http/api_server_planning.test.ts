@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { AgentService } from "../../source/agent/agent_service.js";
 import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { PlanningStore } from "../../source/planning/planning_store.js";
 import { PlanningSync } from "../../source/planning/planning_sync.js";
+import type { IConnector } from "../../source/connectors/connector_interface.js";
 
 // GET /api/planning through the real server: behind the admin secret like every non-device route.
 
@@ -28,7 +29,14 @@ describe("AcediaApiServer — planning", () => {
         if (dir) await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
-    async function start(withPlanning: boolean) {
+    async function start(
+        withPlanning: boolean,
+        opts: {
+            connectors?: IConnector[];
+            tiers?: Record<string, string>;
+            sync?: PlanningSync;
+        } = {},
+    ) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-planning-"));
         const store = new PlanningStore();
         store.replaceTasks(
@@ -44,15 +52,21 @@ describe("AcediaApiServer — planning", () => {
             ],
             Date.now(),
         );
-        const sync = new PlanningSync({ store, tasks: { readPlanning: async () => [] } });
+        const sync =
+            opts.sync ?? new PlanningSync({ store, tasks: { readPlanning: async () => [] } });
+        const tiers = new ActionTierStore(
+            path.join(dir, "tiers.json"),
+            path.join(dir, "overrides.json"),
+        );
+        if (opts.tiers) await tiers.patch(opts.tiers);
         server = new AcediaApiServer(
             new EventStore(),
-            [],
+            opts.connectors ?? [],
             new IngestionHub([]),
             null,
             new NullAIProvider(),
             "s3cret",
-            new ActionTierStore(path.join(dir, "tiers.json"), path.join(dir, "overrides.json")),
+            tiers,
             new PendingActionStore(),
             undefined,
             undefined,
@@ -89,5 +103,31 @@ describe("AcediaApiServer — planning", () => {
             headers: { Authorization: "Bearer s3cret" },
         });
         expect(res.status).toBe(404);
+    });
+
+    it("reads the planning again right after a gesture on a task — what Natsume did shows at once", async () => {
+        const sync = new PlanningSync({ store: new PlanningStore() });
+        const spy = vi.spyOn(sync, "syncNow").mockResolvedValue();
+        const tasks: IConnector = {
+            slug: "tasks",
+            name: "Tasks",
+            poll: async () => [],
+            executeAction: async () => {},
+        };
+        const base = await start(true, {
+            connectors: [tasks],
+            tiers: { create_task: "auto" },
+            sync,
+        });
+        const res = await fetch(`${base}/api/actions`, {
+            method: "POST",
+            headers: { Authorization: "Bearer s3cret", "Content-Type": "application/json" },
+            body: JSON.stringify({
+                connector: "Tasks",
+                action: { kind: "create_task", fields: { title: "Appeler le garage" } },
+            }),
+        });
+        expect(res.status).toBe(204);
+        expect(spy).toHaveBeenCalledTimes(1);
     });
 });

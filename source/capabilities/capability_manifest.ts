@@ -300,7 +300,8 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             {
                 kind: "create_event",
                 label: "Créer un événement",
-                description: "Create a calendar event. Times are ISO 8601 with a timezone offset.",
+                description:
+                    "Create a calendar event. Times are ISO 8601 with a timezone offset; for an all-day event, start and end are dates (YYYY-MM-DD), end being the day after the last day.",
                 params: {
                     type: "object",
                     properties: {
@@ -334,15 +335,23 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
             },
             {
                 kind: "update_event",
-                label: "Modifier un événement",
-                description: "Change fields of an existing calendar event (e.g. its title).",
+                label: "Modifier ou déplacer un événement",
+                description:
+                    "Change an existing calendar event: its title, description, location, or move it — start and end together (ISO 8601 with offset, or dates for an all-day event).",
                 params: {
                     type: "object",
                     properties: {
                         sourceId: ref(EVENT_ID, PAIR),
                         fields: {
                             type: "object",
-                            description: "Fields to change.",
+                            description: "Only the fields to change.",
+                            properties: {
+                                title: { type: "string", minLength: 1 },
+                                description: { type: "string" },
+                                location: { type: "string" },
+                                start: { type: "string", minLength: 1, description: "New start." },
+                                end: { type: "string", minLength: 1, description: "New end." },
+                            },
                             additionalProperties: { type: "string" },
                         },
                     },
@@ -394,9 +403,46 @@ export const CAPABILITY_MANIFESTS: readonly CapabilityManifest[] = [
                 category: "write",
             },
             {
+                kind: "update_task",
+                label: "Modifier une tâche",
+                description:
+                    "Change an existing task: its title, notes, due date (YYYY-MM-DD, or an empty string to remove it) or its list (listId moves it).",
+                params: {
+                    type: "object",
+                    properties: {
+                        sourceId: ref(TASK_ID, PAIR),
+                        fields: {
+                            type: "object",
+                            description: "Only the fields to change.",
+                            properties: {
+                                title: { type: "string", minLength: 1 },
+                                notes: { type: "string" },
+                                due: { type: "string" },
+                                listId: { type: "string", minLength: 1 },
+                            },
+                        },
+                    },
+                    required: ["sourceId", "fields"],
+                },
+                defaultTier: "confirm",
+                risk: "medium",
+                agentAllowed: true,
+                category: "write",
+            },
+            {
                 kind: "complete_task",
                 label: "Terminer une tâche",
                 description: "Mark a task as completed.",
+                params: sourceOnly(TASK_ID, PAIR),
+                defaultTier: "confirm",
+                risk: "low",
+                agentAllowed: true,
+                category: "write",
+            },
+            {
+                kind: "reopen_task",
+                label: "Rouvrir une tâche",
+                description: "Mark a completed task as not done again.",
                 params: sourceOnly(TASK_ID, PAIR),
                 defaultTier: "confirm",
                 risk: "low",

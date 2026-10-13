@@ -360,9 +360,19 @@ export class TasksConnector implements IConnector {
         if (
             action.kind !== "complete_task" &&
             action.kind !== "create_task" &&
-            action.kind !== "delete_task"
+            action.kind !== "delete_task" &&
+            action.kind !== "update_task" &&
+            action.kind !== "reopen_task"
         )
             throw new Error(`[Tasks] "${action.kind}" is not a task action — nothing was done`);
+        // Checked before a token is spent: a request that cannot be right is refused as is.
+        if (action.kind === "update_task") {
+            const f = action.fields;
+            if (f.title === undefined && f.notes === undefined && f.due === undefined && !f.listId)
+                throw new Error("[Tasks] update_task: nothing to change — nothing was done");
+            if (f.due) dueToGoogle(f.due);
+        }
+        if (action.kind === "create_task" && action.fields.due) dueToGoogle(action.fields.due);
         // Never a quiet return: the caller would count the action as done and drop its notification.
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken)
@@ -380,7 +390,7 @@ export class TasksConnector implements IConnector {
         if (action.kind === "create_task") {
             const listId = action.fields.listId || this.listId;
             const body: Record<string, unknown> = { title: action.fields.title };
-            if (action.fields.due) body["due"] = action.fields.due;
+            if (action.fields.due) body["due"] = dueToGoogle(action.fields.due);
             if (action.fields.notes) body["notes"] = action.fields.notes;
             try {
                 const resp = await fetch(`${TASKS_API}/lists/${listPath(listId)}/tasks`, {
@@ -414,16 +424,63 @@ export class TasksConnector implements IConnector {
             return;
         }
 
+        if (action.kind === "update_task") {
+            const f = action.fields;
+            let target = listId;
+            try {
+                // Another list: the task is moved first (same id), then changed where it now lives.
+                if (f.listId && f.listId !== listId) {
+                    const resp = await fetch(
+                        `${taskUrl}/move?destinationTasklist=${encodeURIComponent(f.listId)}`,
+                        { method: "POST", headers },
+                    );
+                    await assertHttpOk(resp, "[Tasks] update_task (move)");
+                    target = f.listId;
+                }
+                const patch: Record<string, unknown> = {};
+                if (f.title !== undefined) patch["title"] = f.title;
+                if (f.notes !== undefined) patch["notes"] = f.notes;
+                // "" takes the date off.
+                if (f.due !== undefined) patch["due"] = f.due ? dueToGoogle(f.due) : null;
+                if (Object.keys(patch).length > 0) {
+                    const resp = await fetch(
+                        `${TASKS_API}/lists/${listPath(target)}/tasks/${encodeURIComponent(taskId)}`,
+                        { method: "PATCH", headers, body: JSON.stringify(patch) },
+                    );
+                    await assertHttpOk(resp, "[Tasks] update_task");
+                }
+            } catch (e) {
+                console.error("[Tasks] update_task error:", (e as Error).message);
+                throw e;
+            }
+            return;
+        }
+
+        const reopen = action.kind === "reopen_task";
         try {
             const resp = await fetch(taskUrl, {
                 method: "PATCH",
                 headers,
-                body: JSON.stringify({ status: "completed" }),
+                body: JSON.stringify(
+                    reopen ? { status: "needsAction", completed: null } : { status: "completed" },
+                ),
             });
-            await assertHttpOk(resp, "[Tasks] complete_task");
+            await assertHttpOk(resp, `[Tasks] ${action.kind}`);
         } catch (e) {
-            console.error("[Tasks] complete_task error:", (e as Error).message);
+            console.error(`[Tasks] ${action.kind} error:`, (e as Error).message);
             throw e;
         }
     }
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The due date as Google Tasks takes it: an RFC 3339 timestamp, of which only the date is kept. A date
+ * ("2026-10-30") is sent as that day at midnight UTC; a timestamp is sent as is. Anything else is refused.
+ */
+function dueToGoogle(due: string): string {
+    if (DATE_ONLY.test(due) && !isNaN(Date.parse(due))) return `${due}T00:00:00.000Z`;
+    if (!DATE_ONLY.test(due) && !isNaN(Date.parse(due))) return due;
+    throw new Error(`[Tasks] "${due}" is not a date — nothing was done`);
 }
