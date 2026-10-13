@@ -13,6 +13,11 @@ export type AcediaEventType =
     | "rss.item"
     | "ha.state_changed"
     | "tasks.due"
+    /**
+     * A reminder about an event or a task of the planning (lot AT4) — in the box, with the gestures of its object.
+     * meta { reminder: true, rule, objectKind, objectId, at, and the object's ids (calendarId/eventId or listId/taskId) }.
+     */
+    | "planning.reminder"
     | "system.heartbeat"
     /** A spend alert on LunAcedia's own LLM — pushed to the phone, never put in the box. */
     | "system.llm_spend"

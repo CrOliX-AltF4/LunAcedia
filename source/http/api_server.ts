@@ -22,6 +22,7 @@ import {
 import type { UsageAlerts } from "../usage/usage_alerts.js";
 import { UsageRoutes } from "./usage_routes.js";
 import { PlanningRoutes } from "./planning_routes.js";
+import { ReminderRoutes, type ReminderRouteDeps } from "./reminder_routes.js";
 import type { PlanningStore } from "../planning/planning_store.js";
 import type { PlanningSync } from "../planning/planning_sync.js";
 
@@ -249,9 +250,14 @@ export class AcediaApiServer {
         private readonly changes?: ChangeFeed,
         // The planning: events and tasks as objects (lot AT) — absent in tests that do not exercise it.
         planning?: { store: PlanningStore; sync: PlanningSync },
+        // The reminders: settings, journal, snooze (lot AT4) — absent in tests that do not exercise them.
+        reminders?: Omit<ReminderRouteDeps, "readBody" | "json">,
     ) {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
         this.planningRoutes = planning ? new PlanningRoutes({ ...planning, json }) : null;
+        this.reminderRoutes = reminders
+            ? new ReminderRoutes({ ...reminders, readBody, json })
+            : null;
         this.planningSync = planning?.sync ?? null;
         this.planningStore = planning?.store ?? null;
         this.devices = devices ?? null;
@@ -277,6 +283,7 @@ export class AcediaApiServer {
 
     private readonly usageRoutes: UsageRoutes | null;
     private readonly planningRoutes: PlanningRoutes | null;
+    private readonly reminderRoutes: ReminderRoutes | null;
     /** Read again right after a gesture on an event or a task: what Natsume just did shows at once. */
     private readonly planningSync: PlanningSync | null;
     private readonly planningStore: PlanningStore | null;
@@ -1227,6 +1234,8 @@ export class AcediaApiServer {
 
         // The planning: events and tasks as objects
         if (this.planningRoutes?.handle(method, path, url, res)) return;
+        if (this.reminderRoutes && (await this.reminderRoutes.handle(method, path, url, req, res)))
+            return;
 
         // The pocket app's topics
         if (

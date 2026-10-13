@@ -206,3 +206,32 @@ describe("GcalConnector.readPlanning", () => {
         expect(await new GcalConnector().readPlanning(FROM, TO)).toBeNull();
     });
 });
+
+describe("GcalConnector — no box items once the planning holds the calendar (AT4)", () => {
+    it("still reads the source on a poll, gives the box nothing, and fails loudly when the read fails", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch({
+                primary: [
+                    {
+                        items: [
+                            {
+                                id: "a",
+                                start: { dateTime: new Date(Date.now() + 3_600_000).toISOString() },
+                                end: { dateTime: new Date(Date.now() + 7_200_000).toISOString() },
+                            },
+                        ],
+                    },
+                ],
+                work: [{ items: [] }],
+            }),
+        );
+        const c = new GcalConnector();
+        expect((await c.poll()).length).toBeGreaterThan(0);
+        c.boxItems = false;
+        expect(await c.poll()).toEqual([]);
+
+        vi.stubGlobal("fetch", makeFetch({ primary: [{ items: [] }] })); // "work" answers 500
+        await expect(c.poll()).rejects.toThrow("could not be read");
+    });
+});

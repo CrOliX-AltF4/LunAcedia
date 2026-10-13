@@ -153,6 +153,35 @@ describe("ReminderEngine", () => {
         expect(e.tick().map((r) => r.title)).toEqual(["Toujours sans date, depuis 7 j — Ranger"]);
     });
 
+    it("takes down the reminders the planning no longer calls for — a task done, a date moved (O21)", () => {
+        const clock = { now: local(2026, 10, 30, 9, 0) };
+        const world = {
+            events: [] as PlanningEvent[],
+            tasks: [task("Dossier", { due: "2026-10-30" })],
+            complete: true,
+        };
+        const settle = vi.fn();
+        const e = new ReminderEngine({
+            planning: () => world,
+            settings: () => DEFAULT_REMINDER_SETTINGS,
+            emit: vi.fn(),
+            settle,
+            now: () => clock.now,
+        });
+        const [day] = e.tick();
+        // Before the first read after a restart: nothing is judged.
+        world.tasks = [];
+        world.complete = false;
+        e.tick();
+        expect(settle).not.toHaveBeenCalled();
+        // The task given another date: its reminder of today has nothing left to say.
+        world.tasks = [task("Dossier", { due: "2026-11-05" })];
+        world.complete = true;
+        e.tick();
+        expect(settle).toHaveBeenCalledWith([day!.key]);
+        expect(e.journal()[0]!.settledAt).toBe(clock.now);
+    });
+
     it("sends nothing while the general switch is off", () => {
         const clock = { now: local(2026, 10, 20, 13, 0) };
         const { e } = engine({ events: [ev("A", local(2026, 10, 20, 14, 0))], tasks: [] }, clock, {

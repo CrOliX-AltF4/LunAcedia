@@ -39,6 +39,8 @@ export interface ReminderEngineDeps {
     settings: () => ReminderSettings;
     /** Sends one reminder (to the box, the Core, the phone). */
     emit: (reminder: DueReminder) => void;
+    /** Takes down reminders the planning no longer calls for (their object done, deleted, moved or past). */
+    settle?: (keys: string[]) => void;
     filePath?: string;
     now?: () => number;
     /** A reminder due longer ago than this when first seen is not sent (after a long downtime, it is stale). */
@@ -100,6 +102,7 @@ export class ReminderEngine {
         this.trackUndated(tasks, now, complete);
         const settings = this.deps.settings();
         const sent: DueReminder[] = [];
+        const settled: string[] = [];
         if (settings.enabled) {
             const known = new Set(this.entries.map((e) => e.baseKey));
             const catchUp = this.deps.catchUpMs ?? DEFAULT_CATCH_UP_MS;
@@ -122,9 +125,22 @@ export class ReminderEngine {
                 this.record(again, key, now);
                 sent.push({ ...again, key });
             }
+            // What the planning no longer calls for has nothing left to say: the task was done or given another date,
+            // the event moved, deleted or past. Judged on a complete planning only — before the first read after a
+            // restart, everything would look gone.
+            if (complete) {
+                const plannedKeys = new Set(planned.map((p) => p.key));
+                for (const e of this.entries) {
+                    if (e.settledAt || plannedKeys.has(e.baseKey)) continue;
+                    e.settledAt = now;
+                    e.snoozedUntil = undefined;
+                    settled.push(e.key);
+                }
+            }
         }
         this.prune(now);
-        if (sent.length > 0) this.persist();
+        if (sent.length > 0 || settled.length > 0) this.persist();
+        if (settled.length > 0) this.deps.settle?.(settled);
         for (const r of sent) this.deps.emit(r);
         return sent;
     }

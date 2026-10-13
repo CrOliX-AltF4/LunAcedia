@@ -185,3 +185,31 @@ describe("TasksConnector.readPlanning", () => {
         expect(await new TasksConnector().readPlanning(SINCE)).toBeNull();
     });
 });
+
+describe("TasksConnector — no box items once the planning holds the tasks (AT4)", () => {
+    it("still reads the lists on a poll, gives the box nothing, and fails loudly when the read fails", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch({
+                lists: [{ id: "list-a" }],
+                open: {
+                    "list-a": [
+                        {
+                            id: "t",
+                            title: "x",
+                            status: "needsAction",
+                            updated: "2026-10-12T08:00:00.000Z",
+                        },
+                    ],
+                },
+            }),
+        );
+        const c = new TasksConnector();
+        expect(await c.poll()).toHaveLength(1);
+        c.boxItems = false;
+        expect(await c.poll()).toEqual([]);
+
+        vi.stubGlobal("fetch", makeFetch({ lists: "fail" }));
+        await expect(c.poll()).rejects.toThrow("could not be read");
+    });
+});
