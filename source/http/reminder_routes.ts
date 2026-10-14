@@ -1,5 +1,5 @@
 /**
- * The reminders (lot AT4, ADR-031 in the Natsume repo) — law 3: Master sees what was sent and sets or stops it.
+ * The reminders — Master sees what was sent and sets or stops it.
  *
  *   GET  /api/config/reminders       ReminderSettings
  *   PUT  /api/config/reminders       a partial ReminderSettings → the settings (400 saying which field is wrong)

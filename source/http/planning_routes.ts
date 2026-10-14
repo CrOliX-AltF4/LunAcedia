@@ -1,5 +1,5 @@
 /**
- * The planning, read (lot AT1, ADR-031 in the Natsume repo).
+ * The planning, read.
  *
  *   GET /api/planning?from=&to=   PlanningSnapshot — the events that overlap [from, to), every task held, the
  *                                 conflicts between the events shown. `from`/`to`: ISO dates or date-times;

@@ -17,7 +17,7 @@ describe("reminder settings", () => {
         await fs.rm(dir, { recursive: true, force: true });
     });
 
-    it("starts from ADR-031 Q2", () => {
+    it("starts from the default rules", () => {
         expect(new ReminderSettingsStore().get()).toEqual(DEFAULT_REMINDER_SETTINGS);
         expect(DEFAULT_REMINDER_SETTINGS.quietStart).toBe("22:00");
         expect(DEFAULT_REMINDER_SETTINGS.rules.event_soon.minutesBefore).toBe(60);

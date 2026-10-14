@@ -173,7 +173,7 @@ const inboxSync = new InboxSync({
     forget: (key) => hub.forget(key),
 });
 const INBOX_SYNC_MS = 60_000;
-// The planning: every event of the horizon and every task, as objects (lot AT, ADR-031 in the Natsume repo).
+// The planning: every event of the horizon and every task, as objects.
 const planningStore = new PlanningStore(defaultPlanningPath());
 await planningStore.load();
 const planningSync = new PlanningSync({
@@ -182,7 +182,7 @@ const planningSync = new PlanningSync({
     ...(gtasks && { tasks: gtasks }),
 });
 const PLANNING_SYNC_MS = 5 * 60_000;
-// Events and tasks are held by the planning now: they leave the box, reminders take their place (ADR-031 Q3). The
+// Events and tasks are held by the planning now: they leave the box, reminders take their place. The
 // connectors still read their source on every poll, so their health stays true.
 const planningActive = !!(gcal || gtasks);
 if (gcal) gcal.boxItems = false;

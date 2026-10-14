@@ -3,8 +3,8 @@ import type { PlanningStore } from "./planning_store.js";
 import type { DueReminder } from "./reminder_rules.js";
 
 /**
- * What the box held about events and tasks before the planning (lot AT4, ADR-031 Q3): events and tasks leave the box,
- * reminders take their place. Taken out once at start-up, with the parity list in ADR-031 §9.
+ * What the box held about events and tasks before the planning: events and tasks leave the box,
+ * reminders take their place. Taken out once at start-up, once a parity check showed nothing the box did is lost.
  */
 export const BOX_PLANNING_TYPES: ReadonlySet<AcediaEventType> = new Set<AcediaEventType>([
     "calendar.upcoming",

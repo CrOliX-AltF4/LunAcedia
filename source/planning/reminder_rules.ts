@@ -2,7 +2,7 @@ import type { AcediaEventPriority } from "../types/acedia_event.js";
 import type { PlanningEvent, PlanningTask } from "../types/planning.js";
 
 /**
- * When to remind Master of an event or a task (lot AT4, ADR-031 D3/Q2 in the Natsume repo). Deterministic: the code
+ * When to remind Master of an event or a task. Deterministic: the code
  * decides when, never the LLM. Times are the server's local time (TZ).
  */
 export type ReminderRule =
@@ -39,7 +39,7 @@ export interface ReminderSettings {
     };
 }
 
-/** ADR-031 Q2, as validated by CrOliX on 2026-10-13. */
+/** The default reminder rules. */
 export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
     enabled: true,
     quietStart: "22:00",

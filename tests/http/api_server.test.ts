@@ -755,7 +755,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
             dedupeKey: "task-abc",
         });
         const conn = makeConnector("Tasks", async () => {});
-        // Deleting a task is never "auto" (ADR-031 Q8): it goes through its confirmation.
+        // Deleting a task is never "auto": it goes through its confirmation.
         const server = makeServer(store, [conn], nullAI, SECRET, tmpTierStore());
         server.start(port);
         const create = await post(

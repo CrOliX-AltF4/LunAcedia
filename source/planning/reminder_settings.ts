@@ -69,7 +69,7 @@ export function mergeReminderSettings(current: ReminderSettings, patch: unknown)
     return { ok: true, value: next };
 }
 
-/** The reminder settings, kept in STORAGE_DIR. A missing or unreadable file means the defaults (ADR-031 Q2). */
+/** The reminder settings, kept in STORAGE_DIR. A missing or unreadable file means the defaults. */
 export class ReminderSettingsStore {
     private settings: ReminderSettings = structuredClone(DEFAULT_REMINDER_SETTINGS);
 

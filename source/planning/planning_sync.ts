@@ -4,7 +4,7 @@ import type { PlanningDiff, PlanningStore } from "./planning_store.js";
 const DAY_MS = 86_400_000;
 
 /**
- * What the planning holds (ADR-031 Q1): the calendar from 7 days back (what just ended) to 90 days ahead; every open
+ * What the planning holds: the calendar from 7 days back (what just ended) to 90 days ahead; every open
  * task, dated or not; the tasks completed in the last 14 days.
  */
 export const PLANNING_HORIZON = { pastDays: 7, futureDays: 90, completedDays: 14 } as const;

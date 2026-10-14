@@ -1,6 +1,6 @@
 /**
- * The planning: calendar events and tasks held as objects to manage over the whole horizon (lot AT, ADR-031 in the
- * Natsume repo) — not as notifications. The box keeps the flow to sort; the planning keeps what Master organises.
+ * The planning: calendar events and tasks held as objects to manage over the whole horizon —
+ * not as notifications. The box keeps the flow to sort; the planning keeps what Master organises.
  *
  * Wire contract: served by GET /api/planning and mirrored by hand in the Core (contract test there, Rule 3).
  * Facts only, as at the source: no interpretation, no LLM output.

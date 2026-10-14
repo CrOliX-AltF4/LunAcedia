@@ -28,7 +28,7 @@ describe("ActionTierStore", () => {
         h.mockMkdir.mockResolvedValue(undefined);
     });
 
-    // ADR-031 Q8 (Natsume repo): deleting an event or a task always waits for Master.
+    // Deleting an event or a task always waits for Master.
     describe("deletes of events and tasks are never auto", () => {
         it("refuses auto when set, keeps confirm or manual", async () => {
             const store = new ActionTierStore("/tmp/tiers.json", "/tmp/overrides.json");

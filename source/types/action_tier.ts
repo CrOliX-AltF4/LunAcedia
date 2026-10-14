@@ -26,8 +26,7 @@ export const IMMUTABLE_TIERS: Partial<ActionTierConfig> = {
 };
 
 /**
- * Never "auto": deleting an event or a task always waits for Master, whatever is set (CrOliX, 2026-10-13, ADR-031
- * Q8 in the Natsume repo). "confirm" or "manual" can be chosen; "auto" is refused when set and read as "confirm".
+ * Never "auto": deleting an event or a task always waits for Master, whatever is set. "confirm" or "manual" can be chosen; "auto" is refused when set and read as "confirm".
  */
 export const NEVER_AUTO: ReadonlySet<ActionKind> = new Set<ActionKind>([
     "delete_event",

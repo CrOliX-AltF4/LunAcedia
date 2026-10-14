@@ -47,7 +47,7 @@ function taskOrder(a: PlanningTask, b: PlanningTask): number {
 }
 
 /**
- * The planning: every event of the horizon and every task, as objects (lot AT, ADR-031 D1). A read of a source is
+ * The planning: every event of the horizon and every task, as objects. A read of a source is
  * applied whole — the source IS the truth, what it no longer lists is gone — and only after a complete read (the
  * sync never applies a partial one). Persisted to one file; writes are chained so they land in order.
  */

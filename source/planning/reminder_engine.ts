@@ -52,7 +52,7 @@ const KEEP_MS = 30 * DAY_MS;
 const DEFAULT_CATCH_UP_MS = 2 * 60 * 60_000;
 
 /**
- * Sends each reminder the planning calls for, once, when it is due (lot AT4, ADR-031 D3). Runs on a minute timer;
+ * Sends each reminder the planning calls for, once, when it is due. Runs on a minute timer;
  * the journal survives a restart, so nothing is sent twice and nothing due during a short downtime is lost.
  */
 export class ReminderEngine {
