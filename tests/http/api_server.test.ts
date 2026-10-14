@@ -755,15 +755,16 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
             dedupeKey: "task-abc",
         });
         const conn = makeConnector("Tasks", async () => {});
-        const tierStore = tmpTierStore();
-        await tierStore.patch({ delete_task: "auto" });
-        const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
+        // Deleting a task is never "auto": it goes through its confirmation.
+        const server = makeServer(store, [conn], nullAI, SECRET, tmpTierStore());
         server.start(port);
-        const res = await post(
+        const create = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Tasks", action: { kind: "delete_task", sourceId: "listX/abc" } },
             AUTH,
         );
+        const id = (create.body as { id: string }).id;
+        const res = await post(`http://localhost:${port}/api/actions/${id}/confirm`, {}, AUTH);
         server.stop();
         expect(res.status).toBe(204);
         expect(store.get("task-abc")).toBeUndefined();

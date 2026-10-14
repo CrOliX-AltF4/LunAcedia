@@ -31,6 +31,7 @@ export function resolveEventSync(
             return { dedupeKey: `email-${action.sourceId}`, effect: "remove" };
 
         case "complete_task":
+        case "update_task":
             return { dedupeKey: `task-${taskIdFrom(action.sourceId)}`, effect: "read" };
         case "delete_task":
             return { dedupeKey: `task-${taskIdFrom(action.sourceId)}`, effect: "remove" };

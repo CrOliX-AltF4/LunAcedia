@@ -88,7 +88,9 @@ function gmail(executed: ConnectorAction[]): IConnector {
     };
 }
 
-describe("AcediaApiServer — topics", () => {
+// Many HTTP round trips with writes to disk per test: under a full parallel run on Windows, 5 s was not always enough
+// (timeouts seen 2026-10-13, never a wrong result).
+describe("AcediaApiServer — topics", { timeout: 15_000 }, () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
     let agent: AgentService;

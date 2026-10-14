@@ -112,6 +112,9 @@ describe("DeviceRegistry", () => {
                 pushToken: "fcm-token",
             });
             expect(again.list()[0]).not.toHaveProperty("tokenHash");
+            // authenticate() records the device's activity in the background: let that write land before the
+            // directory is removed (Windows refuses to remove a directory a write is still creating a file in).
+            await again.flush();
         });
     });
 });
@@ -129,6 +132,7 @@ describe("isDeviceRoute", () => {
             ["GET", "/api/actions/pending"],
             ["POST", "/api/actions/a1/confirm"],
             ["GET", "/api/digest"],
+            ["POST", "/api/reminders/snooze"],
             ["GET", "/api/changes"],
             ["POST", "/api/devices/push-token"],
             ["PUT", "/api/agent/settings"],
@@ -146,6 +150,8 @@ describe("isDeviceRoute", () => {
             ["POST", "/api/intent"],
             ["GET", "/api/usage"],
             ["PUT", "/api/config/usage-alerts"],
+            ["PUT", "/api/config/reminders"],
+            ["GET", "/api/planning"],
             ["GET", "/api/devices"],
             ["POST", "/api/devices/pairing-code"],
             ["DELETE", "/api/devices/abc"],

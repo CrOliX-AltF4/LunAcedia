@@ -8,6 +8,7 @@ import { CONNECTOR_REGISTRY } from "../connector_registry.js";
 import type { ConnectorSlug } from "../connector_registry.js";
 import type { AcediaEvent } from "../../types/acedia_event.js";
 import type { ConnectorAction } from "../../types/connector_action.js";
+import type { PlanningTask } from "../../types/planning.js";
 import { getGoogleToken, clearGoogleTokenCache } from "../../auth/google_oauth.js";
 import type { GoogleTokenStore } from "../../auth/google_token_store.js";
 import { assertHttpOk } from "../connector_http.js";
@@ -22,6 +23,7 @@ interface Task {
     notes?: string;
     status: "needsAction" | "completed";
     updated: string;
+    completed?: string;
 }
 
 interface TaskListResponse {
@@ -30,7 +32,7 @@ interface TaskListResponse {
 }
 
 interface ListsResponse {
-    items?: Array<{ id: string }>;
+    items?: Array<{ id: string; title?: string }>;
     nextPageToken?: string;
 }
 
@@ -104,7 +106,18 @@ export class TasksConnector implements IConnector {
         return this.tokenStore?.get("gtasks") ?? this.staticRefreshToken;
     }
 
+    /**
+     * False once the planning holds the tasks (lot AT4): tasks no longer go to the box — reminders do. The poll still
+     * reads the lists, so the source's health stays true (a read that fails is an error, not an empty box).
+     */
+    boxItems = true;
+
     async poll(): Promise<AcediaEvent[]> {
+        if (!this.boxItems) {
+            if ((await this.dueTasks()) === null)
+                throw new Error("the task lists could not be read");
+            return [];
+        }
         return (await this.dueTasks()) ?? [];
     }
 
@@ -139,7 +152,9 @@ export class TasksConnector implements IConnector {
         }
         const headers = { Authorization: `Bearer ${token}` };
 
-        const lists = this.onlyList ? [this.onlyList] : await this.allLists(headers);
+        const lists = this.onlyList
+            ? [this.onlyList]
+            : (await this.allLists(headers))?.map((l) => l.id);
         if (!lists) return null;
         const events: AcediaEvent[] = [];
         for (const listId of lists) {
@@ -152,8 +167,10 @@ export class TasksConnector implements IConnector {
     }
 
     /** The account's task lists. null when they cannot be read. */
-    private async allLists(headers: Record<string, string>): Promise<string[] | null> {
-        const ids: string[] = [];
+    private async allLists(
+        headers: Record<string, string>,
+    ): Promise<Array<{ id: string; title: string }> | null> {
+        const lists: Array<{ id: string; title: string }> = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_PAGES; page++) {
             const url =
@@ -161,11 +178,12 @@ export class TasksConnector implements IConnector {
                 (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
             const data = await this.read<ListsResponse>(url, headers, "lists");
             if (!data) return null;
-            ids.push(...(data.items ?? []).map((l) => l.id));
+            lists.push(...(data.items ?? []).map((l) => ({ id: l.id, title: l.title ?? l.id })));
             pageToken = data.nextPageToken;
-            if (!pageToken) break;
+            if (!pageToken) return lists;
         }
-        return ids;
+        console.warn(`[Tasks] more than ${MAX_PAGES} pages of lists — not read`);
+        return null;
     }
 
     /** The incomplete tasks of one list, page after page. null when it cannot be read. */
@@ -174,20 +192,85 @@ export class TasksConnector implements IConnector {
         headers: Record<string, string>,
     ): Promise<Task[] | null> {
         // No dueMax: it would leave out undated tasks. The horizon is applied here, in toEvents.
-        const base =
+        return this.readPages(
             `${TASKS_API}/lists/${listPath(listId)}/tasks` +
-            `?showCompleted=false&showHidden=false&maxResults=100`;
+                `?showCompleted=false&showHidden=false&maxResults=100`,
+            headers,
+            `list ${listId}`,
+        );
+    }
+
+    /** Every page of a task listing. null when a page cannot be read, or when there are more pages than read. */
+    private async readPages(
+        base: string,
+        headers: Record<string, string>,
+        what: string,
+    ): Promise<Task[] | null> {
         const tasks: Task[] = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_PAGES; page++) {
             const url = pageToken ? `${base}&pageToken=${encodeURIComponent(pageToken)}` : base;
-            const data = await this.read<TaskListResponse>(url, headers, `list ${listId}`);
+            const data = await this.read<TaskListResponse>(url, headers, what);
             if (!data) return null;
             tasks.push(...(data.items ?? []));
             pageToken = data.nextPageToken;
-            if (!pageToken) break;
+            if (!pageToken) return tasks;
         }
-        return tasks;
+        // Cut short: a partial picture would call the tasks it did not reach gone.
+        console.warn(`[Tasks] ${what}: more than ${MAX_PAGES} pages — not read`);
+        return null;
+    }
+
+    /**
+     * Every open task of every list read — dated or not, whatever the due date — and the tasks completed since
+     * `completedSince`, as planning objects (lot AT1). Strict: null as soon as one list cannot be read.
+     */
+    async readPlanning(completedSince: number): Promise<PlanningTask[] | null> {
+        const refreshToken = this.refreshToken();
+        if (!this.clientId || !this.clientSecret || !refreshToken) return null;
+        let token: string;
+        try {
+            token = await getGoogleToken(this.clientId, this.clientSecret, refreshToken, "gtasks");
+        } catch (e) {
+            console.error("[Tasks] token refresh error:", (e as Error).message);
+            return null;
+        }
+        const headers = { Authorization: `Bearer ${token}` };
+        const lists = this.onlyList
+            ? [{ id: this.onlyList, title: this.onlyList }]
+            : await this.allLists(headers);
+        if (!lists) return null;
+        const out: PlanningTask[] = [];
+        for (const list of lists) {
+            const open = await this.listTasks(list.id, headers);
+            if (!open) return null;
+            const done = await this.readPages(
+                `${TASKS_API}/lists/${listPath(list.id)}/tasks` +
+                    `?showCompleted=true&showHidden=true&maxResults=100` +
+                    `&completedMin=${encodeURIComponent(new Date(completedSince).toISOString())}`,
+                headers,
+                `list ${list.id} (completed)`,
+            );
+            if (!done) return null;
+            const byId = new Map<string, Task>();
+            for (const t of [...open, ...done]) byId.set(t.id, t);
+            for (const t of byId.values()) {
+                const completed = t.status === "completed";
+                out.push({
+                    id: `${list.id}/${t.id}`,
+                    listId: list.id,
+                    listTitle: list.title,
+                    title: t.title || "(sans titre)",
+                    ...(t.notes && { notes: t.notes }),
+                    // Google keeps a date only: "2026-10-30T00:00:00.000Z" is the 30th.
+                    ...(t.due && { due: t.due.slice(0, 10) }),
+                    status: completed ? "completed" : "open",
+                    ...(completed && t.completed && { completedAt: Date.parse(t.completed) }),
+                    updatedAt: Date.parse(t.updated) || 0,
+                });
+            }
+        }
+        return out;
     }
 
     private async read<T>(
@@ -288,9 +371,19 @@ export class TasksConnector implements IConnector {
         if (
             action.kind !== "complete_task" &&
             action.kind !== "create_task" &&
-            action.kind !== "delete_task"
+            action.kind !== "delete_task" &&
+            action.kind !== "update_task" &&
+            action.kind !== "reopen_task"
         )
             throw new Error(`[Tasks] "${action.kind}" is not a task action — nothing was done`);
+        // Checked before a token is spent: a request that cannot be right is refused as is.
+        if (action.kind === "update_task") {
+            const f = action.fields;
+            if (f.title === undefined && f.notes === undefined && f.due === undefined && !f.listId)
+                throw new Error("[Tasks] update_task: nothing to change — nothing was done");
+            if (f.due) dueToGoogle(f.due);
+        }
+        if (action.kind === "create_task" && action.fields.due) dueToGoogle(action.fields.due);
         // Never a quiet return: the caller would count the action as done and drop its notification.
         const refreshToken = this.refreshToken();
         if (!this.clientId || !this.clientSecret || !refreshToken)
@@ -308,7 +401,7 @@ export class TasksConnector implements IConnector {
         if (action.kind === "create_task") {
             const listId = action.fields.listId || this.listId;
             const body: Record<string, unknown> = { title: action.fields.title };
-            if (action.fields.due) body["due"] = action.fields.due;
+            if (action.fields.due) body["due"] = dueToGoogle(action.fields.due);
             if (action.fields.notes) body["notes"] = action.fields.notes;
             try {
                 const resp = await fetch(`${TASKS_API}/lists/${listPath(listId)}/tasks`, {
@@ -342,16 +435,63 @@ export class TasksConnector implements IConnector {
             return;
         }
 
+        if (action.kind === "update_task") {
+            const f = action.fields;
+            let target = listId;
+            try {
+                // Another list: the task is moved first (same id), then changed where it now lives.
+                if (f.listId && f.listId !== listId) {
+                    const resp = await fetch(
+                        `${taskUrl}/move?destinationTasklist=${encodeURIComponent(f.listId)}`,
+                        { method: "POST", headers },
+                    );
+                    await assertHttpOk(resp, "[Tasks] update_task (move)");
+                    target = f.listId;
+                }
+                const patch: Record<string, unknown> = {};
+                if (f.title !== undefined) patch["title"] = f.title;
+                if (f.notes !== undefined) patch["notes"] = f.notes;
+                // "" takes the date off.
+                if (f.due !== undefined) patch["due"] = f.due ? dueToGoogle(f.due) : null;
+                if (Object.keys(patch).length > 0) {
+                    const resp = await fetch(
+                        `${TASKS_API}/lists/${listPath(target)}/tasks/${encodeURIComponent(taskId)}`,
+                        { method: "PATCH", headers, body: JSON.stringify(patch) },
+                    );
+                    await assertHttpOk(resp, "[Tasks] update_task");
+                }
+            } catch (e) {
+                console.error("[Tasks] update_task error:", (e as Error).message);
+                throw e;
+            }
+            return;
+        }
+
+        const reopen = action.kind === "reopen_task";
         try {
             const resp = await fetch(taskUrl, {
                 method: "PATCH",
                 headers,
-                body: JSON.stringify({ status: "completed" }),
+                body: JSON.stringify(
+                    reopen ? { status: "needsAction", completed: null } : { status: "completed" },
+                ),
             });
-            await assertHttpOk(resp, "[Tasks] complete_task");
+            await assertHttpOk(resp, `[Tasks] ${action.kind}`);
         } catch (e) {
-            console.error("[Tasks] complete_task error:", (e as Error).message);
+            console.error(`[Tasks] ${action.kind} error:`, (e as Error).message);
             throw e;
         }
     }
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The due date as Google Tasks takes it: an RFC 3339 timestamp, of which only the date is kept. A date
+ * ("2026-10-30") is sent as that day at midnight UTC; a timestamp is sent as is. Anything else is refused.
+ */
+function dueToGoogle(due: string): string {
+    if (DATE_ONLY.test(due) && !isNaN(Date.parse(due))) return `${due}T00:00:00.000Z`;
+    if (!DATE_ONLY.test(due) && !isNaN(Date.parse(due))) return due;
+    throw new Error(`[Tasks] "${due}" is not a date — nothing was done`);
 }

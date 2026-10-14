@@ -66,7 +66,8 @@ export type ConnectorAction =
           action: RuleSourceKind;
           label?: string;
       }
-    // Google Calendar
+    // Google Calendar — `start`/`end`: an ISO date-time with its offset, or a date (YYYY-MM-DD) for an all-day event
+    // (`end` is then the day after the last one, as Google counts).
     | {
           kind: "create_event";
           fields: {
@@ -78,6 +79,7 @@ export type ConnectorAction =
               calendarId?: string;
           };
       }
+    // `fields`: title, description, location, start, end — moving an event is changing start and end together.
     | { kind: "update_event"; sourceId: string; fields: Record<string, string> }
     | { kind: "delete_event"; sourceId: string }
     // Google Tasks
@@ -85,7 +87,14 @@ export type ConnectorAction =
           kind: "create_task";
           fields: { title: string; due?: string; notes?: string; listId?: string };
       }
+    // `due`: a date (YYYY-MM-DD), "" to take the date off; `listId`: moves the task to that list.
+    | {
+          kind: "update_task";
+          sourceId: string;
+          fields: { title?: string; due?: string; notes?: string; listId?: string };
+      }
     | { kind: "complete_task"; sourceId: string }
+    | { kind: "reopen_task"; sourceId: string }
     | { kind: "delete_task"; sourceId: string }
     // GitHub — sourceId is always "{owner}/{repo}#{number}" for existing issues/PRs
     | { kind: "comment_issue"; sourceId: string; body: string }

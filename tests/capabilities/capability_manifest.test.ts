@@ -10,7 +10,8 @@ import { DEFAULT_ACTION_TIERS, ACTION_RISK } from "../../source/types/action_tie
 // The values in force before the manifest existed (v0.9.0) — deriving them from the manifest must
 // change nothing for an existing install. Deliberate changes since, each with its decision:
 //   delete_email manual → confirm, high → medium: it is Gmail's trash, kept 30 days (CrOliX, 2026-10-06);
-//   mark_spam, unmark_spam, star_email, unstar_email, label_email, unlabel_email, bulk_email, create_rule: added the same day.
+//   mark_spam, unmark_spam, star_email, unstar_email, label_email, unlabel_email, bulk_email, create_rule: added the same day;
+//   update_task, reopen_task: added with the planning (lot AT2, 2026-10-13), confirm like every write.
 const HISTORICAL_TIERS = {
     reply: "confirm",
     archive_email: "confirm",
@@ -30,6 +31,8 @@ const HISTORICAL_TIERS = {
     delete_event: "confirm",
     create_task: "confirm",
     complete_task: "confirm",
+    update_task: "confirm",
+    reopen_task: "confirm",
     delete_task: "confirm",
     comment_issue: "confirm",
     add_label: "confirm",
@@ -44,6 +47,7 @@ const HISTORICAL_RISK = {
     mark_email_unread: "low",
     archive_email: "low",
     complete_task: "low",
+    reopen_task: "low",
     mark_notification_read: "low",
     mark_spam: "low",
     unmark_spam: "low",
@@ -62,6 +66,7 @@ const HISTORICAL_RISK = {
     create_issue: "medium",
     open_pr: "medium",
     update_event: "medium",
+    update_task: "medium",
     delete_event: "high",
     delete_task: "high",
     close_issue: "high",
