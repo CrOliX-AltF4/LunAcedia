@@ -59,7 +59,7 @@ jobs:
         # merged without a new version does not ship on its own — said here, so it is never forgotten silently.
         if: startsWith(github.event.pull_request.title, 'feat') || startsWith(github.event.pull_request.title, 'fix')
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
               with:
                   fetch-depth: 0
 
