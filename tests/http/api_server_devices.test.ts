@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -13,8 +13,6 @@ import { DeviceRegistry } from "../../source/auth/device_registry.js";
 
 // End to end: pairing, a device token limited to the mobile routes, revocation; the admin secret unchanged.
 
-let PORT = 50_200 + Math.floor(Math.random() * 300);
-const nextPort = () => PORT++;
 const SECRET = "admin-secret-of-this-test";
 
 async function call(
@@ -54,7 +52,7 @@ describe("AcediaApiServer — paired devices", () => {
         server = new AcediaApiServer(
             new EventStore(),
             [],
-            new IngestionHub([]),
+            hubOnBox([]).hub,
             null,
             new NullAIProvider(),
             SECRET,
@@ -70,8 +68,8 @@ describe("AcediaApiServer — paired devices", () => {
             undefined,
             new DeviceRegistry(path.join(dir, "devices.json")),
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return `http://localhost:${port}`;
     }
 

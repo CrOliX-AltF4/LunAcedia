@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -18,8 +18,6 @@ import type { ConnectorAction } from "../../source/types/connector_action.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // A port range of its own: test files run in parallel and must never collide with the other API tests.
-let PORT = 48_200 + Math.floor(Math.random() * 300);
-const nextPort = () => PORT++;
 
 // Decodes arbitrary JSON responses so each test can assert on the field it cares about.
 async function call(
@@ -95,7 +93,7 @@ describe("AcediaApiServer — bulk_email", () => {
         server = new AcediaApiServer(
             store,
             [gmail],
-            new IngestionHub([gmail]),
+            hubOnBox([gmail]).hub,
             null,
             new NullAIProvider(),
             undefined,
@@ -107,8 +105,8 @@ describe("AcediaApiServer — bulk_email", () => {
             { pipeline, rules, journal, stats },
             agent,
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return { base: `http://localhost:${port}`, store, executed, rules };
     }
 

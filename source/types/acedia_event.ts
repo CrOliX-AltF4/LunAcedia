@@ -61,4 +61,7 @@ export interface AcediaEvent {
     /** Why it has its priority, in words (« Gmail : important », « VIP », « règle « … » », « CI rouge sur main ») — what a
      *  client shows. Absent: the source's plain default. */
     priorityReason?: string;
+    /** On the wire only, never stored: whether this new item rings the phone (LunAcedia's rule, notify_policy.ts) —
+     *  a hub relays it as it is, it never decides. */
+    notify?: boolean;
 }

@@ -10,8 +10,11 @@ import { HaConnector } from "./connectors/ha/ha_connector.js";
 import type { IConnector } from "./connectors/connector_interface.js";
 import type { AcediaEvent } from "./types/acedia_event.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
+import { ItemLifecycle } from "./hub/item_lifecycle.js";
+import { notifyFilterFromEnv, rings } from "./push/notify_policy.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
+import { adoptLegacyDedup, legacyDedupPath } from "./store/dedup_migration.js";
 import { EventStore, defaultEventStorePath } from "./store/event_store.js";
 import { FcmSender } from "./push/fcm_sender.js";
 import { createAIProvider } from "./ai/create_ai_provider.js";
@@ -106,19 +109,12 @@ const guardPipeline = new GuardPipeline({
     vipSenders: () => emailClassificationStore.getAll().vipSenders,
 });
 
-// The box is persisted next to dedup — both must survive a restart together.
+// The box: the items held, and the keys gone that must not come back — one state, one file.
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
 // The AI set from the dashboard, kept in STORAGE_DIR, over .env — it survives image updates.
 applyStoredAiProvider();
 const ai = createAIProvider();
-const hub = new IngestionHub(
-    connectors,
-    undefined,
-    guardPipeline,
-    (key) => store.has(key),
-    createRuleActor({ connectors, journal: ruleActions }),
-);
 const ws = new AcediaWsServer();
 // What changed, for the views that follow (lot S): the dashboard and the phones by /api/changes, the Core by the
 // WebSocket (system.change), which relays to its own views.
@@ -162,17 +158,27 @@ const sweepDevices = async (): Promise<void> => {
 };
 await sweepDevices();
 setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
-// The sync rule: every item follows its source object; changes go to the Core on the wire.
-const inboxSync = new InboxSync({
-    connectors,
+// What rings the phone: one rule, applied here whoever sends the notification (LunAcedia standalone, the hub wired).
+const notifyFilter = notifyFilterFromEnv();
+// The life of a box item: every path that changes one goes through here, which tells the views, the Core and the phone.
+const lifecycle = new ItemLifecycle({
     store,
-    emit: (change) => {
-        ws.broadcast(InboxSync.toWire(change));
-        changes.emit("box", change.key, change.op === "removed" || change.op === "read");
-    },
-    forget: (key) => hub.forget(key),
+    changes,
+    broadcast: (event) => ws.broadcast(event),
+    rings: (event) => rings(event, notifyFilter),
+    push: (event) => void fcm?.send(event),
 });
+// Collection: polls the sources and asks the box what it already knows.
+const hub = new IngestionHub(
+    connectors,
+    lifecycle,
+    guardPipeline,
+    createRuleActor({ connectors, journal: ruleActions }),
+);
+// What the sources say of the items held: read, unread or gone elsewhere.
+const inboxSync = new InboxSync({ connectors, store, life: lifecycle });
 const INBOX_SYNC_MS = 60_000;
+const GONE_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
 // The planning: every event of the horizon and every task, as objects.
 const planningStore = new PlanningStore(defaultPlanningPath());
 await planningStore.load();
@@ -202,19 +208,10 @@ const reminders = new ReminderEngine({
     },
     settings: () => reminderSettings.get(),
     // A reminder goes where a new box item goes: the box, the views that follow, the Core, a standalone phone.
-    emit: (r) => {
-        const event = reminderEvent(r, planningStore);
-        store.push(event);
-        changes.emit("box", event.dedupeKey);
-        ws.broadcast(event);
-        void fcm?.send(event);
-    },
+    emit: (r) => lifecycle.collected(reminderEvent(r, planningStore), "reminder"),
     // Through the box's own path: the Core drops its copy and a closed phone takes the notification down.
     settle: (keys) => {
-        for (const key of keys) {
-            const held = store.get(key);
-            if (held) inboxSync.applyLocal({ op: "removed", key, source: held.source });
-        }
+        for (const key of keys) lifecycle.changed(key, "removed", "settled");
     },
     filePath: defaultReminderJournalPath(),
 });
@@ -239,7 +236,7 @@ const api = new AcediaApiServer(
         ruleActions,
     },
     agent,
-    inboxSync,
+    lifecycle,
     topics,
     { ledger: usageLedger, alerts: usageAlerts },
     devices,
@@ -248,10 +245,7 @@ const api = new AcediaApiServer(
     {
         settings: reminderSettings,
         engine: reminders,
-        onSnoozed: (key) => {
-            const held = store.get(key);
-            if (held) inboxSync.applyLocal({ op: "removed", key, source: held.source });
-        },
+        onSnoozed: (key) => void lifecycle.changed(key, "removed", "snoozed"),
     },
 );
 
@@ -270,20 +264,19 @@ usageAlerts.watch(usageLedger, (alert) => {
     });
 });
 await tierStore.load();
-await hub.load();
 await store.load();
-// Whatever dedup still calls "seen" but the box lost (first run with a persisted box, an unreadable
-// file) is collected again, quietly — see the onEvent handler below.
-const recovered = hub.recoverMissing((key) => store.has(key));
-if (recovered > 0)
-    console.warn(`[LunAcedia] Box: ${recovered} seen item(s) missing, re-collecting`);
+// Once: dedup used to live in a file of its own — its keys the box does not hold become gone.
+const adopted = await adoptLegacyDedup(store, legacyDedupPath(), defaultEventStorePath());
+if (adopted !== null)
+    console.warn(`[LunAcedia] Box: dedup merged into the box (${adopted} gone key(s) kept)`);
+// A key gone for a week may come back if its source still lists it (a held item is never forgotten).
+lifecycle.forgetGoneBefore(Date.now() - GONE_KEPT_MS);
 // Once: the events and tasks the box held before the planning leave it — through the box's own path, so the Core drops
 // its copies and a phone its notifications. Reminders replace them.
 if (planningActive) {
     const { events: held } = store.query({ limit: 1000 });
     const old = (held as AcediaEvent[]).filter((e) => BOX_PLANNING_TYPES.has(e.type));
-    for (const e of old)
-        inboxSync.applyLocal({ op: "removed", key: e.dedupeKey, source: e.source });
+    for (const e of old) lifecycle.changed(e.dedupeKey, "removed", "planning");
     if (old.length > 0)
         console.warn(
             `[Planning] ${old.length} event(s)/task(s) taken out of the box — reminders replace them`,
@@ -291,32 +284,12 @@ if (planningActive) {
 }
 
 ws.start(wsPort);
-api.start(httpPort);
+void api.start(httpPort);
 
-hub.onEvent((event, meta) => {
-    store.push(event);
-    changes.emit("box", event.dedupeKey);
-    // A recovered item is back in the box only: the Core already holds it and the phone must not ring.
-    if (meta?.recovered) return;
-    ws.broadcast(event);
-    // The inbox now holds read mail too: only something new and unread is pushed.
-    if (!event.read) void fcm?.send(event);
-});
-
-// A known item whose content changed at the source (moved event, new due date): the box is
-// updated and the Core refreshes its copy by key through an "updated" sync message — never the event itself,
-// which the Core would announce as news. A backlog item was never sent to the Core, so its refresh is not either.
-hub.onRefresh((event) => {
-    const updated = store.refresh(event);
-    if (!updated || updated.meta?.["backlog"] === true) return;
-    const { title, body, priority, ts } = updated;
-    inboxSync.applyLocal({
-        op: "updated",
-        key: updated.dedupeKey,
-        source: updated.source,
-        item: { title, body, priority, ts },
-    });
-});
+// Backlog is stored, never announced: what was already there before is news to no one.
+hub.onEvent((event, meta) => lifecycle.collected(event, meta?.backlog ? "backlog" : "new"));
+// A known item whose content changed at the source (moved event, new due date).
+hub.onRefresh((event) => lifecycle.refreshed(event));
 
 hub.start();
 planningSync.start(PLANNING_SYNC_MS);

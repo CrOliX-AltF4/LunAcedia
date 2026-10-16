@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -19,9 +19,6 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // The pocket app's topics: one conversation = one topic, answered by the default agent
 // with the topic's earlier turns, D2 held across them.
-
-let PORT = 49_200 + Math.floor(Math.random() * 400);
-const nextPort = () => PORT++;
 
 async function call(
     method: string,
@@ -125,7 +122,7 @@ describe("AcediaApiServer — topics", { timeout: 15_000 }, () => {
         server = new AcediaApiServer(
             store,
             connectors,
-            new IngestionHub(connectors),
+            hubOnBox(connectors).hub,
             null,
             opts.ai ?? new NullAIProvider(),
             undefined,
@@ -139,8 +136,8 @@ describe("AcediaApiServer — topics", { timeout: 15_000 }, () => {
             undefined,
             new ConversationStore(path.join(dir, "conversations")),
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return `http://localhost:${port}`;
     }
 

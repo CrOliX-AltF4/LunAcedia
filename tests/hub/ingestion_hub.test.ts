@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
+import type { IngestionHub } from "../../source/hub/ingestion_hub.js";
+import { EventStore } from "../../source/store/event_store.js";
+import { hubOnBox } from "./recording_lifecycle.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
@@ -30,7 +32,7 @@ describe("IngestionHub", () => {
 
     it("should dispatch event to registered handler on start", async () => {
         const connector = makeConnector([baseEvent]);
-        hub = new IngestionHub([connector]);
+        hub = hubOnBox([connector]).hub;
 
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
@@ -43,7 +45,7 @@ describe("IngestionHub", () => {
 
     it("should not dispatch the same dedupeKey twice", async () => {
         const connector = makeConnector([baseEvent, baseEvent]);
-        hub = new IngestionHub([connector]);
+        hub = hubOnBox([connector]).hub;
 
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
@@ -57,7 +59,7 @@ describe("IngestionHub", () => {
         const e1 = { ...baseEvent, dedupeKey: "key-1" };
         const e2 = { ...baseEvent, dedupeKey: "key-2" };
         const connector = makeConnector([e1, e2]);
-        hub = new IngestionHub([connector]);
+        hub = hubOnBox([connector]).hub;
 
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
@@ -69,7 +71,7 @@ describe("IngestionHub", () => {
 
     it("should allow unsubscribing a handler", async () => {
         const connector = makeConnector([]);
-        hub = new IngestionHub([connector]);
+        hub = hubOnBox([connector]).hub;
 
         const received: AcediaEvent[] = [];
         const unsub = hub.onEvent((e) => received.push(e));
@@ -88,7 +90,7 @@ describe("IngestionHub", () => {
             name: "BrokenConnector",
             poll: vi.fn().mockRejectedValue(new Error("network error")),
         };
-        hub = new IngestionHub([connector]);
+        hub = hubOnBox([connector]).hub;
         hub.start();
 
         await new Promise((r) => setTimeout(r, 50));
@@ -98,7 +100,7 @@ describe("IngestionHub", () => {
 
     it("should not start twice", async () => {
         const connector = makeConnector([baseEvent]);
-        hub = new IngestionHub([connector]);
+        hub = hubOnBox([connector]).hub;
 
         hub.start();
         hub.start(); // second call is a no-op
@@ -110,7 +112,7 @@ describe("IngestionHub", () => {
     describe("getConnectorHealth()", () => {
         it("reports connected: false before any poll has run", () => {
             const connector = makeConnector([]);
-            hub = new IngestionHub([connector]);
+            hub = hubOnBox([connector]).hub;
 
             expect(hub.getConnectorHealth()).toEqual([
                 {
@@ -125,7 +127,7 @@ describe("IngestionHub", () => {
 
         it("reports connected: true after a poll succeeds — not just because the connector is enabled", async () => {
             const connector = makeConnector([baseEvent]);
-            hub = new IngestionHub([connector]);
+            hub = hubOnBox([connector]).hub;
             hub.start();
 
             await new Promise((r) => setTimeout(r, 50));
@@ -141,7 +143,7 @@ describe("IngestionHub", () => {
                 name: "BrokenConnector",
                 poll: vi.fn().mockRejectedValue(new Error("invalid_grant")),
             };
-            hub = new IngestionHub([connector]);
+            hub = hubOnBox([connector]).hub;
             hub.start();
 
             await new Promise((r) => setTimeout(r, 50));
@@ -160,7 +162,7 @@ describe("IngestionHub", () => {
         describe("pollOne()", () => {
             it("returns { ok: true } and records success without waiting for the scheduled interval", async () => {
                 const connector = makeConnector([baseEvent]);
-                hub = new IngestionHub([connector]);
+                hub = hubOnBox([connector]).hub;
 
                 const result = await hub.pollOne("github");
 
@@ -174,7 +176,7 @@ describe("IngestionHub", () => {
                     name: "Broken",
                     poll: vi.fn().mockRejectedValue(new Error("invalid_grant")),
                 };
-                hub = new IngestionHub([connector]);
+                hub = hubOnBox([connector]).hub;
 
                 const result = await hub.pollOne("email");
 
@@ -182,7 +184,7 @@ describe("IngestionHub", () => {
             });
 
             it("returns { ok: false, error: 'Unknown connector' } for a slug not in the hub", async () => {
-                hub = new IngestionHub([makeConnector([])]);
+                hub = hubOnBox([makeConnector([])]).hub;
 
                 const result = await hub.pollOne("nope");
 
@@ -191,7 +193,7 @@ describe("IngestionHub", () => {
 
             it("dispatches events found during the forced poll like any other poll", async () => {
                 const connector = makeConnector([baseEvent]);
-                hub = new IngestionHub([connector]);
+                hub = hubOnBox([connector]).hub;
                 const received: AcediaEvent[] = [];
                 hub.onEvent((e) => received.push(e));
 
@@ -207,7 +209,7 @@ describe("IngestionHub", () => {
                 .mockResolvedValueOnce([baseEvent])
                 .mockRejectedValueOnce(new Error("token expired"));
             const connector: IConnector = { slug: "email", name: "Flaky", poll };
-            hub = new IngestionHub([connector]);
+            hub = hubOnBox([connector]).hub;
             hub.start(); // initial sweep — succeeds
 
             await new Promise((r) => setTimeout(r, 50));
@@ -223,254 +225,109 @@ describe("IngestionHub", () => {
         });
     });
 
-    describe("dedup persistence", () => {
-        let seenPath: string;
+    it("takes neither a key the box holds nor one it remembers as gone for news after a restart", async () => {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), "hub-restart-"));
+        const file = path.join(dir, "inbox_store.json");
+        const before = new EventStore(1000, file);
+        before.push({ ...baseEvent, dedupeKey: "held" });
+        before.markGone("expired");
+        await before.flush();
 
-        afterEach(async () => {
-            await fs.rm(seenPath, { force: true });
-        });
-
-        it("persists a seen dedupeKey to disk on dispatch", async () => {
-            seenPath = path.join(
-                os.tmpdir(),
-                `dedup-seen-${Math.random().toString(36).slice(2)}.json`,
-            );
-            const connector = makeConnector([baseEvent]);
-            hub = new IngestionHub([connector], seenPath);
-            hub.start();
-
-            // saveSeen() is fire-and-forget: wait for the write itself, not a fixed delay (slow CI runners).
-            await vi.waitFor(
-                async () => {
-                    const raw = await fs.readFile(seenPath, "utf-8");
-                    expect(JSON.parse(raw)).toEqual({ [baseEvent.dedupeKey]: baseEvent.ts });
-                },
-                { timeout: 2000, interval: 20 },
-            );
-        });
-
-        it("load() restores dedup state so a previously-seen event isn't redispatched after restart", async () => {
-            seenPath = path.join(
-                os.tmpdir(),
-                `dedup-seen-${Math.random().toString(36).slice(2)}.json`,
-            );
-            await fs.writeFile(
-                seenPath,
-                JSON.stringify({ [baseEvent.dedupeKey]: baseEvent.ts }),
-                "utf-8",
-            );
-
-            const connector = makeConnector([baseEvent]);
-            hub = new IngestionHub([connector], seenPath);
-            await hub.load();
-
-            const received: AcediaEvent[] = [];
-            hub.onEvent((e) => received.push(e));
-            hub.start();
-
-            await new Promise((r) => setTimeout(r, 50));
-            expect(received).toHaveLength(0);
-        });
-
-        it("load() is a no-op when the file is absent (first run)", async () => {
-            seenPath = path.join(
-                os.tmpdir(),
-                `dedup-seen-missing-${Math.random().toString(36).slice(2)}.json`,
-            );
-            const connector = makeConnector([baseEvent]);
-            hub = new IngestionHub([connector], seenPath);
-
-            await expect(hub.load()).resolves.toBeUndefined();
-
-            const received: AcediaEvent[] = [];
-            hub.onEvent((e) => received.push(e));
-            hub.start();
-
-            await new Promise((r) => setTimeout(r, 50));
-            expect(received).toHaveLength(1);
-        });
-    });
-});
-
-// An item removed because its source object is gone must come back if the object does
-// (a mail restored from the trash, a GitHub thread with new activity).
-describe("IngestionHub.forget", () => {
-    it("lets a forgotten key be dispatched again", async () => {
-        const e = {
-            type: "email.received" as const,
-            ts: Date.now(),
-            source: "email" as const,
-            title: "t",
-            priority: "normal" as const,
-            dedupeKey: "email-a",
-        };
-        const polls = [[e], [e]];
-        const connector = {
-            slug: "email" as const,
-            name: "Gmail",
-            poll: async () => polls.shift() ?? [],
-        };
-        const hub = new IngestionHub(
-            [connector],
-            path.join(os.tmpdir(), `seen-${Date.now()}-${Math.random()}.json`),
-        );
-        const seen: string[] = [];
-        hub.onEvent((ev) => seen.push(ev.dedupeKey));
-        await hub.pollOne("email");
-        hub.forget("email-a");
-        await hub.pollOne("email");
-        expect(seen).toEqual(["email-a", "email-a"]);
-    });
-});
-
-// Live NAS check 2026-09-28: after a restart the box was empty while dedup still said "seen", so the
-// mail already in the inbox never came back. recoverMissing() re-collects what the box lost — quietly:
-// it is not new, the Core already holds it and the phone must not ring for it.
-describe("IngestionHub.recoverMissing — what the box lost comes back, quietly", () => {
-    let hub: IngestionHub;
-    let seenPath: string;
-
-    afterEach(async () => {
-        hub.stop();
-        await fs.rm(seenPath, { force: true });
-    });
-
-    const mail = (id: string): AcediaEvent => ({
-        ...baseEvent,
-        source: "email",
-        dedupeKey: `email-${id}`,
-    });
-
-    it("forgets only the seen keys the box no longer holds, and marks their return as recovered", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
-        const now = Date.now();
-        await fs.writeFile(
-            seenPath,
-            JSON.stringify({ "email-kept": now, "email-lost": now }),
-            "utf-8",
-        );
-
-        const connector = makeConnector([mail("kept"), mail("lost"), mail("new")]);
-        hub = new IngestionHub([connector], seenPath);
-        await hub.load();
-        expect(hub.recoverMissing((key) => key === "email-kept")).toBe(1);
-
-        const received: Array<{ key: string; recovered: boolean }> = [];
-        hub.onEvent((e, meta) =>
-            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
-        );
-        hub.start();
-
-        await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 2000, interval: 20 });
-        expect(received).toEqual([
-            { key: "email-lost", recovered: true },
-            { key: "email-new", recovered: false },
-        ]);
-    });
-
-    it("recovers a key once: its next sighting is ordinary dedup again", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
-        await fs.writeFile(seenPath, JSON.stringify({ "email-lost": Date.now() }), "utf-8");
-
-        const connector = makeConnector([mail("lost")]);
-        hub = new IngestionHub([connector], seenPath);
-        await hub.load();
-        hub.recoverMissing(() => false);
-
+        const store = new EventStore(1000, file);
+        await store.load();
+        const listed = ["held", "expired", "new"].map((k) => ({ ...baseEvent, dedupeKey: k }));
+        hub = hubOnBox([makeConnector(listed)], { store }).hub;
         const received: string[] = [];
         hub.onEvent((e) => received.push(e.dedupeKey));
         await hub.pollOne("github");
-        await hub.pollOne("github");
-        expect(received).toEqual(["email-lost"]);
+        expect(received).toEqual(["new"]);
+        await fs.rm(dir, { recursive: true, force: true });
     });
 });
 
-// Live NAS check 2026-09-28: STORAGE_DIR was never set in the image, so dedup lived in the container and
-// died with it; moving it to the volume means one start with no dedup file. That first sweep — like a
-// fresh install's — is the backlog, not news: it fills the box without ringing the phone or the Core.
-describe("IngestionHub — the first sweep without a dedup file is quiet", () => {
+// An item removed because its source object is gone comes back if the object does (a mail restored from the trash, a
+// GitHub thread with new activity); an expired one, still in its feed, does not.
+describe("IngestionHub — what left the box", () => {
+    const mail = { ...baseEvent, source: "email" as const, dedupeKey: "email-a" };
+    const rss = { ...baseEvent, source: "rss" as const, dedupeKey: "rss-a" };
+
+    it("collects again an item removed from the box, never an expired one", async () => {
+        const connector = { slug: "email" as const, name: "Gmail", poll: async () => [mail, rss] };
+        const { hub, life } = hubOnBox([connector]);
+        const received: string[] = [];
+        hub.onEvent((e) => received.push(e.dedupeKey));
+        await hub.pollOne("email");
+        life.changed("email-a", "removed", "gesture");
+        life.changed("rss-a", "removed", "expired");
+        await hub.pollOne("email");
+        expect(received).toEqual(["email-a", "rss-a", "email-a"]);
+    });
+});
+
+// Live NAS check 2026-09-28: a fresh box — first run, storage moved — makes the first sweep the backlog, not news:
+// it fills the box without ringing the phone or the Core.
+describe("IngestionHub — the first sweep of a fresh box is backlog", () => {
     let hub: IngestionHub;
-    let seenPath: string;
+    let dir: string;
 
     afterEach(async () => {
         hub.stop();
-        await fs.rm(seenPath, { force: true });
+        await fs.rm(dir, { recursive: true, force: true });
     });
 
-    it("flags the first sweep's events as recovered, and later ones as new", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
+    async function boxAt(existing: boolean): Promise<EventStore> {
+        dir = await fs.mkdtemp(path.join(os.tmpdir(), "hub-fresh-"));
+        const file = path.join(dir, "inbox_store.json");
+        if (existing)
+            await fs.writeFile(file, JSON.stringify({ version: 2, items: [], gone: {} }), "utf-8");
+        const store = new EventStore(1000, file);
+        await store.load();
+        return store;
+    }
+
+    it("flags the first sweep's events as backlog, and later ones as new", async () => {
         const poll = vi
             .fn()
             .mockResolvedValueOnce([{ ...baseEvent, dedupeKey: "backlog-1" }])
             .mockResolvedValue([{ ...baseEvent, dedupeKey: "fresh-1" }]);
-        hub = new IngestionHub([{ slug: "github", name: "Mock", poll }], seenPath);
-        await hub.load();
+        hub = hubOnBox([{ slug: "github", name: "Mock", poll }], { store: await boxAt(false) }).hub;
 
-        const received: Array<{ key: string; recovered: boolean }> = [];
+        const received: Array<{ key: string; backlog: boolean }> = [];
         hub.onEvent((e, meta) =>
-            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
+            received.push({ key: e.dedupeKey, backlog: meta?.backlog === true }),
         );
         hub.start();
         await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000, interval: 20 });
         await hub.pollOne("github");
 
         expect(received).toEqual([
-            { key: "backlog-1", recovered: true },
-            { key: "fresh-1", recovered: false },
+            { key: "backlog-1", backlog: true },
+            { key: "fresh-1", backlog: false },
         ]);
     });
 
-    it("stores a backlog event without announcing it (C7)", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
-        await fs.writeFile(seenPath, "{}", "utf-8");
-        hub = new IngestionHub(
-            [
-                makeConnector([
-                    { ...baseEvent, dedupeKey: "old", meta: { backlog: true } },
-                    { ...baseEvent, dedupeKey: "new" },
-                ]),
-            ],
-            seenPath,
-        );
-        await hub.load();
+    it("stores a backlog event without announcing it (C7), and is not quiet when the box existed", async () => {
+        const listed = [
+            { ...baseEvent, dedupeKey: "old", meta: { backlog: true } },
+            { ...baseEvent, dedupeKey: "new" },
+        ];
+        hub = hubOnBox([makeConnector(listed)], { store: await boxAt(true) }).hub;
 
-        const received: Array<{ key: string; recovered: boolean }> = [];
+        const received: Array<{ key: string; backlog: boolean }> = [];
         hub.onEvent((e, meta) =>
-            received.push({ key: e.dedupeKey, recovered: meta?.recovered === true }),
+            received.push({ key: e.dedupeKey, backlog: meta?.backlog === true }),
         );
         hub.start();
         await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 2000, interval: 20 });
         expect(received).toEqual([
-            { key: "old", recovered: true },
-            { key: "new", recovered: false },
+            { key: "old", backlog: true },
+            { key: "new", backlog: false },
         ]);
-    });
-
-    it("is not quiet when a dedup file exists", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
-        await fs.writeFile(seenPath, "{}", "utf-8");
-        hub = new IngestionHub([makeConnector([baseEvent])], seenPath);
-        await hub.load();
-
-        const received: boolean[] = [];
-        hub.onEvent((_e, meta) => received.push(meta?.recovered === true));
-        hub.start();
-        await vi.waitFor(() => expect(received).toEqual([false]), { timeout: 2000, interval: 20 });
     });
 });
 
-describe("IngestionHub — refresh and held keys", () => {
-    let hub: IngestionHub;
-    let seenPath: string;
-
-    afterEach(async () => {
-        hub.stop();
-        await fs.rm(seenPath, { force: true });
-    });
-
-    it("hands an already-dispatched item collected again to the refresh handlers, never as news", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
-        await fs.writeFile(seenPath, "{}", "utf-8");
+describe("IngestionHub — refresh", () => {
+    it("hands an item the box holds, collected again, to the refresh handlers — never as news", async () => {
         const poll = vi
             .fn()
             .mockResolvedValueOnce([{ ...baseEvent, dedupeKey: "cal-1", title: "v1" }])
@@ -478,8 +335,7 @@ describe("IngestionHub — refresh and held keys", () => {
                 { ...baseEvent, dedupeKey: "cal-1", title: "v2" },
                 { ...baseEvent, dedupeKey: "cal-2" },
             ]);
-        hub = new IngestionHub([{ slug: "calendar", name: "Mock", poll }], seenPath);
-        await hub.load();
+        const { hub } = hubOnBox([{ slug: "calendar", name: "Mock", poll }]);
         const news: string[] = [];
         const refreshed: string[] = [];
         hub.onEvent((e) => news.push(e.dedupeKey));
@@ -490,30 +346,6 @@ describe("IngestionHub — refresh and held keys", () => {
 
         expect(news).toEqual(["cal-1", "cal-2"]);
         expect(refreshed).toEqual(["cal-1:v2"]);
-    });
-
-    it("never forgets, past the TTL, a key the box still holds", async () => {
-        seenPath = path.join(os.tmpdir(), `dedup-seen-${Math.random().toString(36).slice(2)}.json`);
-        const old = Date.now() - 30 * 24 * 60 * 60 * 1000;
-        await fs.writeFile(seenPath, JSON.stringify({ held: old, gone: old }), "utf-8");
-        const poll = vi.fn().mockResolvedValue([
-            { ...baseEvent, dedupeKey: "held" },
-            { ...baseEvent, dedupeKey: "gone" },
-        ]);
-        hub = new IngestionHub(
-            [{ slug: "tasks", name: "Mock", poll }],
-            seenPath,
-            undefined,
-            (key) => key === "held",
-        );
-        await hub.load();
-        const news: string[] = [];
-        hub.onEvent((e) => news.push(e.dedupeKey));
-        hub.start();
-        await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
-        await new Promise((r) => setTimeout(r, 20));
-
-        expect(news).toEqual(["gone"]);
     });
 });
 
@@ -528,7 +360,7 @@ describe("IngestionHub.isReady", () => {
                 release = r;
             }),
         );
-        hub = new IngestionHub([{ slug: "email", name: "Mock", poll }]);
+        hub = hubOnBox([{ slug: "email", name: "Mock", poll }]).hub;
         expect(hub.isReady()).toBe(false);
         hub.start();
         expect(hub.isReady()).toBe(false);

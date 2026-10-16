@@ -4,8 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { AcediaEvent, AcediaEventPriority } from "../types/acedia_event.js";
-
-const FILTER_DEFAULT: AcediaEventPriority[] = ["urgent"];
+import { notifyFilterFromEnv } from "./notify_policy.js";
 
 function resolveTokenPath(): string {
     const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
@@ -23,7 +22,7 @@ export class FcmSender {
     private readonly tokenPath: string;
 
     constructor(filter?: AcediaEventPriority[], tokenPath?: string) {
-        this.filter = filter ?? FILTER_DEFAULT;
+        this.filter = filter ?? notifyFilterFromEnv(undefined);
         this.tokenPath = tokenPath ?? resolveTokenPath();
     }
 
@@ -50,13 +49,7 @@ export class FcmSender {
             return null;
         }
 
-        const rawFilter = process.env["ACEDIA_FCM_FILTER"] ?? "urgent";
-        const filter = rawFilter
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s): s is AcediaEventPriority => ["urgent", "normal", "info"].includes(s));
-
-        return new FcmSender(filter.length > 0 ? filter : FILTER_DEFAULT);
+        return new FcmSender(notifyFilterFromEnv());
     }
 
     /**

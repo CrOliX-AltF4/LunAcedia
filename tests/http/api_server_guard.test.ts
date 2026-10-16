@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -17,8 +17,6 @@ import type { GuardServices } from "../../source/guards/guard_services.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // A port range of its own: test files run in parallel and must never collide with the other API tests.
-let PORT = 47_000 + Math.floor(Math.random() * 400);
-const nextPort = () => PORT++;
 
 function mail(id: string, from: string, extra: Partial<AcediaEvent> = {}): AcediaEvent {
     return {
@@ -40,11 +38,11 @@ const dropShop = {
 };
 
 // Decodes arbitrary JSON responses so each test can assert on the field it cares about.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function call(
     method: string,
     url: string,
     body?: unknown,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<{ status: number; body: any }> {
     const res = await fetch(url, {
         method,
@@ -80,10 +78,10 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         const ruleActions = new RuleActionJournal(path.join(dir, "guard_actions.jsonl"));
         const guards: GuardServices = { pipeline, rules, journal, stats, ruleActions };
         const store = new EventStore();
-        const hub = new IngestionHub([], path.join(dir, "seen.json"), pipeline);
+        const hub = hubOnBox([], { store, guard: pipeline }).hub;
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
-        const port = nextPort();
+        let port = 0;
         server = new AcediaApiServer(
             store,
             [],
@@ -98,7 +96,7 @@ describe("AcediaApiServer — ingestion guard routes", () => {
             undefined,
             withGuards ? guards : undefined,
         );
-        server.start(port);
+        port = await server.start(0);
         return { base: `http://localhost:${port}`, guards, store, received };
     }
 

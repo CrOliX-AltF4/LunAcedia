@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
+import type { IngestionHub } from "../../source/hub/ingestion_hub.js";
+import { hubOnBox } from "./recording_lifecycle.js";
 import { GuardJournal } from "../../source/guards/guard_journal.js";
 import { GuardPipeline } from "../../source/guards/guard_pipeline.js";
 import { GuardRulesStore } from "../../source/guards/guard_rules_store.js";
@@ -44,7 +45,7 @@ describe("IngestionHub — guard stage", () => {
     let pending: Array<() => Promise<void>> = [];
     afterEach(async () => {
         hub?.stop();
-        // The journal appends and the hub persists `seen` asynchronously: let them land before deleting the directory.
+        // The journal appends asynchronously: let it land before deleting the directory.
         await Promise.all(pending.map((f) => f()));
         pending = [];
         await new Promise((r) => setTimeout(r, 20));
@@ -79,13 +80,7 @@ describe("IngestionHub — guard stage", () => {
             poll: vi.fn().mockResolvedValue(events),
             setSettledFilter: settledFilter,
         };
-        hub = new IngestionHub(
-            [connector],
-            path.join(dir, "seen.json"),
-            pipeline,
-            undefined,
-            ruleActor,
-        );
+        hub = hubOnBox([connector], { guard: pipeline, ruleActor }).hub;
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
         return { hub, received, journal, pipeline, rulesStore, connector, settledFilter };
@@ -174,7 +169,7 @@ describe("IngestionHub — guard stage", () => {
             name: "Mock",
             poll: vi.fn().mockResolvedValue([mail("11", "promo@shop.com")]),
         };
-        hub = new IngestionHub([plain], path.join(dir, "seen.json"));
+        hub = hubOnBox([plain]).hub;
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
         await hub.pollOne("email");

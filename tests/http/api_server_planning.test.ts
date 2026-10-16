@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -14,9 +14,6 @@ import { PlanningSync } from "../../source/planning/planning_sync.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 
 // GET /api/planning through the real server: behind the admin secret like every non-device route.
-
-let PORT = 50_600 + Math.floor(Math.random() * 200);
-const nextPort = () => PORT++;
 
 describe("AcediaApiServer — planning", () => {
     let dir: string;
@@ -62,7 +59,7 @@ describe("AcediaApiServer — planning", () => {
         server = new AcediaApiServer(
             new EventStore(),
             opts.connectors ?? [],
-            new IngestionHub([]),
+            hubOnBox([]).hub,
             null,
             new NullAIProvider(),
             "s3cret",
@@ -80,8 +77,8 @@ describe("AcediaApiServer — planning", () => {
             undefined,
             withPlanning ? { store, sync } : undefined,
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return `http://localhost:${port}`;
     }
 
