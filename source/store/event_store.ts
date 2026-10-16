@@ -155,14 +155,6 @@ export class EventStore {
         return undefined;
     }
 
-    stats(): Record<string, number> {
-        const counts: Record<string, number> = {};
-        for (const e of this.buf) {
-            counts[e.source] = (counts[e.source] ?? 0) + 1;
-        }
-        return counts;
-    }
-
     markRead(dedupeKey: string): void {
         for (let i = this.buf.length - 1; i >= 0; i--) {
             if (this.buf[i]!.dedupeKey === dedupeKey) {
@@ -171,13 +163,6 @@ export class EventStore {
                 return;
             }
         }
-    }
-
-    markAllRead(): void {
-        for (const e of this.buf) {
-            e.read = true;
-        }
-        this.persist();
     }
 
     markUnread(dedupeKey: string): void {
@@ -201,23 +186,7 @@ export class EventStore {
         }
     }
 
-    /** Drops every already-read event — the "vider les lus" bulk action. Unread events are
-     *  never touched, no matter how old. Returns the number removed, for UI feedback. */
-    removeAllRead(): number {
-        const before = this.buf.length;
-        for (let i = this.buf.length - 1; i >= 0; i--) {
-            if (this.buf[i]!.read) this.buf.splice(i, 1);
-        }
-        const removed = before - this.buf.length;
-        if (removed > 0) this.persist();
-        return removed;
-    }
-
     get size(): number {
         return this.buf.length;
-    }
-
-    get unreadCount(): number {
-        return this.buf.filter((e) => !e.read).length;
     }
 }

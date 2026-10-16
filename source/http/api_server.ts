@@ -135,14 +135,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                  Authenticated: it doubles as the app's connection test.
  *   GET  /api/events               ?source= &priority= &since= &limit= &offset= &unread=true
  *   GET  /api/events/:dedupeKey
- *   POST /api/events/read-all      → 204
  *   POST /api/events/held          body: { keys: string[] } (≤ 2000) → { held: { [key]: { read } }, ready } — which of
  *                                  these keys the box still holds; a key absent from `held` is gone
  *                                  (a hub reconciles its copies against the box; ready=false
  *                                  while the initial sweep runs — nothing may be removed on that answer)
- *   POST /api/events/clear-read    → 200 { removed: number } — drops every already-read event
- *   POST /api/events/:dedupeKey/read → 204
- *   GET  /api/stats
  *   POST /api/connectors/:slug/reconnect  → { ok: boolean, error?: string }
  *   POST /api/actions              body: ConnectorAction & { connector: string }
  *                                  → 204 (auto tier, executed) | 202 { id } (confirm tier, pending)
@@ -901,12 +897,6 @@ export class AcediaApiServer {
             return json(res, 200, result);
         }
 
-        // POST /api/events/read-all
-        if (method === "POST" && path === "/api/events/read-all") {
-            this.store.markAllRead();
-            return json(res, 204, null);
-        }
-
         // GET /api/identity — the assistant's name the mobile app shows: ASSISTANT_NAME, else
         // "LunAcedia". Standalone is a product of its own — never "Natsume" here.
         if (method === "GET" && path === "/api/identity") {
@@ -941,35 +931,12 @@ export class AcediaApiServer {
             return json(res, 200, { held, ready: this.hub.isReady() });
         }
 
-        // POST /api/events/clear-read
-        if (method === "POST" && path === "/api/events/clear-read") {
-            const removed = this.store.removeAllRead();
-            return json(res, 200, { removed });
-        }
-
-        // POST /api/events/:dedupeKey/read
-        const readMatch = path.match(/^\/api\/events\/(.+)\/read$/);
-        if (method === "POST" && readMatch) {
-            const key = decodeURIComponent(readMatch[1]!);
-            this.store.markRead(key);
-            return json(res, 204, null);
-        }
-
         // GET /api/events/:dedupeKey
         const eventMatch = path.match(/^\/api\/events\/(.+)$/);
         if (method === "GET" && eventMatch) {
             const key = decodeURIComponent(eventMatch[1]!);
             const event = this.store.get(key);
             return event ? json(res, 200, event) : json(res, 404, { error: "Not found" });
-        }
-
-        // GET /api/stats
-        if (method === "GET" && path === "/api/stats") {
-            return json(res, 200, {
-                bySource: this.store.stats(),
-                total: this.store.size,
-                unread: this.store.unreadCount,
-            });
         }
 
         // POST /api/connectors/:slug/reconnect

@@ -92,16 +92,6 @@ describe("EventStore", () => {
         expect(total).toBe(2);
     });
 
-    it("should return stats by source", () => {
-        const store = new EventStore();
-        store.push(makeEvent({ source: "email", dedupeKey: "e1" }));
-        store.push(makeEvent({ source: "email", dedupeKey: "e2" }));
-        store.push(makeEvent({ source: "calendar", dedupeKey: "c1" }));
-        const stats = store.stats();
-        expect(stats["email"]).toBe(2);
-        expect(stats["calendar"]).toBe(1);
-    });
-
     it("should return the last pushed event for duplicate dedupeKey", () => {
         const store = new EventStore();
         const first = makeEvent({ dedupeKey: "dup", title: "First" });
@@ -192,45 +182,6 @@ describe("EventStore.remove", () => {
         const { events, total } = store.query();
         expect(events).toHaveLength(0);
         expect(total).toBe(0);
-    });
-});
-
-describe("EventStore.removeAllRead", () => {
-    it("drops only the read events, keeps unread ones, and returns the count removed", () => {
-        const store = new EventStore();
-        store.push(makeEvent({ dedupeKey: "e1", read: true }));
-        store.push(makeEvent({ dedupeKey: "e2", read: false }));
-        store.push(makeEvent({ dedupeKey: "e3", read: true }));
-        const removed = store.removeAllRead();
-        expect(removed).toBe(2);
-        expect(store.get("e1")).toBeUndefined();
-        expect(store.get("e2")).toBeDefined();
-        expect(store.get("e3")).toBeUndefined();
-        expect(store.size).toBe(1);
-    });
-
-    it("returns 0 and does nothing when nothing is read", () => {
-        const store = new EventStore();
-        store.push(makeEvent({ dedupeKey: "e1", read: false }));
-        expect(store.removeAllRead()).toBe(0);
-        expect(store.size).toBe(1);
-    });
-});
-
-describe("EventStore.markAllRead", () => {
-    it("should mark all events as read", () => {
-        const store = new EventStore();
-        store.push(makeEvent({ dedupeKey: "e1" }));
-        store.push(makeEvent({ dedupeKey: "e2" }));
-        store.push(makeEvent({ dedupeKey: "e3" }));
-        store.markAllRead();
-        const { events } = store.query({ unread: true });
-        expect(events).toHaveLength(0);
-    });
-
-    it("should not throw on empty store", () => {
-        const store = new EventStore();
-        expect(() => store.markAllRead()).not.toThrow();
     });
 });
 

@@ -358,24 +358,6 @@ describe("AcediaApiServer — GET /api/events/:dedupeKey", () => {
     });
 });
 
-describe("AcediaApiServer — GET /api/stats", () => {
-    it("should return stats by source", async () => {
-        const port = nextPort();
-        const store = new EventStore();
-        const server = makeServer(store);
-        server.start(port);
-        store.push(makeEvent({ source: "email", dedupeKey: "e1" }));
-        store.push(makeEvent({ source: "email", dedupeKey: "e2" }));
-        store.push(makeEvent({ source: "github", dedupeKey: "g1", type: "github.push" }));
-        const res = await get(`http://localhost:${port}/api/stats`, AUTH);
-        server.stop();
-        const body = res.body as { bySource: Record<string, number>; total: number };
-        expect(body.bySource["email"]).toBe(2);
-        expect(body.bySource["github"]).toBe(1);
-        expect(body.total).toBe(3);
-    });
-});
-
 describe("AcediaApiServer — POST /api/actions", () => {
     it("defaults to the 'confirm' tier — queues instead of executing immediately", async () => {
         const port = nextPort();
@@ -1934,7 +1916,7 @@ describe("AcediaApiServer — GET /api/proposals", () => {
         server.start(port);
         await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
-        expect(store.unreadCount).toBe(1);
+        expect(store.query({ unread: true }).total).toBe(1);
     });
 
     it("should return 502 when AI provider throws", async () => {
@@ -1975,90 +1957,6 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
         const res = await get(`http://localhost:${port}/api/nonexistent`, AUTH);
         server.stop();
         expect(res.status).toBe(404);
-    });
-});
-
-describe("AcediaApiServer — POST /api/events/:dedupeKey/read", () => {
-    it("should return 204 and mark the event as read", async () => {
-        const port = nextPort();
-        const store = new EventStore();
-        const server = makeServer(store);
-        server.start(port);
-        store.push(makeEvent({ dedupeKey: "email-read-me", title: "Read me" }));
-        const res = await post(`http://localhost:${port}/api/events/email-read-me/read`, {}, AUTH);
-        server.stop();
-        expect(res.status).toBe(204);
-        expect(store.get("email-read-me")?.read).toBe(true);
-    });
-
-    it("should return 204 even for unknown dedupeKey (idempotent)", async () => {
-        const port = nextPort();
-        const server = makeServer(new EventStore());
-        server.start(port);
-        const res = await post(`http://localhost:${port}/api/events/no-such-key/read`, {}, AUTH);
-        server.stop();
-        expect(res.status).toBe(204);
-    });
-
-    it("should return 401 without auth", async () => {
-        const port = nextPort();
-        const server = makeServer(new EventStore());
-        server.start(port);
-        const res = await post(`http://localhost:${port}/api/events/e1/read`, {}, {});
-        server.stop();
-        expect(res.status).toBe(401);
-    });
-});
-
-describe("AcediaApiServer — POST /api/events/read-all", () => {
-    it("should return 204 and mark all events as read", async () => {
-        const port = nextPort();
-        const store = new EventStore();
-        const server = makeServer(store);
-        server.start(port);
-        store.push(makeEvent({ dedupeKey: "e1" }));
-        store.push(makeEvent({ dedupeKey: "e2" }));
-        const res = await post(`http://localhost:${port}/api/events/read-all`, {}, AUTH);
-        server.stop();
-        expect(res.status).toBe(204);
-        expect(store.get("e1")?.read).toBe(true);
-        expect(store.get("e2")?.read).toBe(true);
-    });
-
-    it("should return 401 without auth", async () => {
-        const port = nextPort();
-        const server = makeServer(new EventStore());
-        server.start(port);
-        const res = await post(`http://localhost:${port}/api/events/read-all`, {}, {});
-        server.stop();
-        expect(res.status).toBe(401);
-    });
-});
-
-describe("AcediaApiServer — POST /api/events/clear-read", () => {
-    it("should drop only read events and report how many were removed", async () => {
-        const port = nextPort();
-        const store = new EventStore();
-        const server = makeServer(store);
-        server.start(port);
-        store.push(makeEvent({ dedupeKey: "e1" }));
-        store.push(makeEvent({ dedupeKey: "e2" }));
-        store.markRead("e1");
-        const res = await post(`http://localhost:${port}/api/events/clear-read`, {}, AUTH);
-        server.stop();
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({ removed: 1 });
-        expect(store.get("e1")).toBeUndefined();
-        expect(store.get("e2")).toBeDefined();
-    });
-
-    it("should return 401 without auth", async () => {
-        const port = nextPort();
-        const server = makeServer(new EventStore());
-        server.start(port);
-        const res = await post(`http://localhost:${port}/api/events/clear-read`, {}, {});
-        server.stop();
-        expect(res.status).toBe(401);
     });
 });
 
@@ -2144,7 +2042,7 @@ describe("AcediaApiServer — GET /api/events?unread=true", () => {
 
     it("should return empty list when all events are read and unread=true", async () => {
         store.push(makeEvent({ dedupeKey: "e1" }));
-        store.markAllRead();
+        store.markRead("e1");
         const res = await get(`http://localhost:${port}/api/events?unread=true`, AUTH);
         const body = res.body as { events: AcediaEvent[]; total: number };
         expect(body.events).toHaveLength(0);
