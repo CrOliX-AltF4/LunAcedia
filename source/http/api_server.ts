@@ -469,13 +469,19 @@ export class AcediaApiServer {
         return json(res, 404, { error: "Not found" });
     }
 
-    start(port: number): void {
+    /** Listens on `port` (0: any free port — tests) and resolves with the port actually bound. */
+    start(port: number): Promise<number> {
         this.server = http.createServer((req, res) => {
             // Every LLM call a request makes is counted under its caller and purpose.
             void withUsageContext(usageContextOf(req.url), () => this.handle(req, res));
         });
-        this.server.listen(port, () => {
-            console.warn(`[LunAcedia] HTTP API listening on port ${port}`);
+        const server = this.server;
+        return new Promise((resolve) => {
+            server.listen(port, () => {
+                const bound = (server.address() as { port: number }).port;
+                console.warn(`[LunAcedia] HTTP API listening on port ${bound}`);
+                resolve(bound);
+            });
         });
     }
 

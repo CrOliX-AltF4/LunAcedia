@@ -284,7 +284,7 @@ if (planningActive) {
 }
 
 ws.start(wsPort);
-api.start(httpPort);
+void api.start(httpPort);
 
 // Backlog is stored, never announced: what was already there before is news to no one.
 hub.onEvent((event, meta) => lifecycle.collected(event, meta?.backlog ? "backlog" : "new"));

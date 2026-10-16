@@ -15,9 +15,6 @@ import type { IConnector } from "../../source/connectors/connector_interface.js"
 
 // GET /api/planning through the real server: behind the admin secret like every non-device route.
 
-let PORT = 50_600 + Math.floor(Math.random() * 200);
-const nextPort = () => PORT++;
-
 describe("AcediaApiServer — planning", () => {
     let dir: string;
     let server: AcediaApiServer | undefined;
@@ -80,8 +77,8 @@ describe("AcediaApiServer — planning", () => {
             undefined,
             withPlanning ? { store, sync } : undefined,
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return `http://localhost:${port}`;
     }
 

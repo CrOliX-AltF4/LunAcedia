@@ -19,9 +19,6 @@ import type { AcediaEvent } from "../../source/types/acedia_event.js";
 // Master's own gestures act at the source, directly (D1), are journaled, and the item
 // follows (R8): same path as a change seen at the source.
 
-let PORT = 48_700 + Math.floor(Math.random() * 300);
-const nextPort = () => PORT++;
-
 async function call(
     method: string,
     url: string,
@@ -125,8 +122,8 @@ describe("AcediaApiServer — inbox routes", () => {
             new AgentService(),
             life,
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return { base: `http://localhost:${port}`, store, emitted, hub };
     }
 

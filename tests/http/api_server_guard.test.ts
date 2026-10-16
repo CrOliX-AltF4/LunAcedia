@@ -17,8 +17,6 @@ import type { GuardServices } from "../../source/guards/guard_services.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // A port range of its own: test files run in parallel and must never collide with the other API tests.
-let PORT = 47_000 + Math.floor(Math.random() * 400);
-const nextPort = () => PORT++;
 
 function mail(id: string, from: string, extra: Partial<AcediaEvent> = {}): AcediaEvent {
     return {
@@ -83,7 +81,7 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         const hub = hubOnBox([], { store, guard: pipeline }).hub;
         const received: AcediaEvent[] = [];
         hub.onEvent((e) => received.push(e));
-        const port = nextPort();
+        let port = 0;
         server = new AcediaApiServer(
             store,
             [],
@@ -98,7 +96,7 @@ describe("AcediaApiServer — ingestion guard routes", () => {
             undefined,
             withGuards ? guards : undefined,
         );
-        server.start(port);
+        port = await server.start(0);
         return { base: `http://localhost:${port}`, guards, store, received };
     }
 

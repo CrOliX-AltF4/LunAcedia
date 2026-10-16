@@ -148,12 +148,6 @@ function patch(
 
 const SECRET = "test-secret";
 const AUTH = { Authorization: `Bearer ${SECRET}` };
-let PORT = 14000;
-
-function nextPort() {
-    return PORT++;
-}
-
 function makeConnector(
     name: string,
     executeAction?: (a: ConnectorAction) => Promise<void>,
@@ -202,9 +196,9 @@ function makeServer(
 
 describe("AcediaApiServer — /api/health", () => {
     it("should return 200 without auth", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/health`);
         server.stop();
         expect(res.status).toBe(200);
@@ -212,9 +206,9 @@ describe("AcediaApiServer — /api/health", () => {
     });
 
     it("should include the package.json version in health response", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/health`);
         server.stop();
         expect((res.body as Record<string, unknown>)["version"]).toBe(
@@ -223,19 +217,19 @@ describe("AcediaApiServer — /api/health", () => {
     });
 
     it("should include ai mode in health response", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/health`);
         server.stop();
         expect((res.body as Record<string, unknown>)["ai"]).toBe("none");
     });
 
     it("should report a configured-but-never-polled connector as not connected, not just 'enabled'", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn = makeConnector("Gmail");
         const server = makeServer(new EventStore(), [conn]);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/health`);
         server.stop();
         expect(res.body).toMatchObject({
@@ -254,25 +248,25 @@ describe("AcediaApiServer — /api/health", () => {
 
 describe("AcediaApiServer — auth", () => {
     it("should return 401 without bearer token when secret is set", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/events`);
         server.stop();
         expect(res.status).toBe(401);
     });
 
     it("should return 200 with correct bearer token", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/events`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
     });
 
     it("should allow requests without auth when no secret is configured", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = new AcediaApiServer(
             new EventStore(),
             [],
@@ -283,7 +277,7 @@ describe("AcediaApiServer — auth", () => {
             new ActionTierStore(),
             new PendingActionStore(null),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/events`);
         server.stop();
         expect(res.status).toBe(200);
@@ -295,11 +289,10 @@ describe("AcediaApiServer — GET /api/events", () => {
     let store: EventStore;
     let server: AcediaApiServer;
 
-    beforeEach(() => {
-        port = nextPort();
+    beforeEach(async () => {
         store = new EventStore();
         server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
     });
     afterEach(() => server.stop());
 
@@ -338,19 +331,19 @@ describe("AcediaApiServer — GET /api/events", () => {
 
 describe("AcediaApiServer — GET /api/events/:dedupeKey", () => {
     it("should return 404 for unknown key", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/events/no-such-key`, AUTH);
         server.stop();
         expect(res.status).toBe(404);
     });
 
     it("should return the event for a known key", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         const server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
         store.push(makeEvent({ dedupeKey: "email-42", title: "Found it" }));
         const res = await get(`http://localhost:${port}/api/events/email-42`, AUTH);
         server.stop();
@@ -361,14 +354,14 @@ describe("AcediaApiServer — GET /api/events/:dedupeKey", () => {
 
 describe("AcediaApiServer — POST /api/actions", () => {
     it("defaults to the 'confirm' tier — queues instead of executing immediately", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let called = false;
         const conn = makeConnector("Gmail", async () => {
             called = true;
         });
         const server = makeServer(store, [conn]);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -381,7 +374,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("executes immediately when the action kind's tier is 'auto'", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let called = false;
         const conn = makeConnector("Gmail", async () => {
@@ -390,7 +383,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ reply: "auto" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -405,7 +398,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
     // so dispatchAction's try/catch never fired and a broken action reported success (204)
     // to the caller — see source/connectors/connector_http.ts.
     it("returns 500 instead of a false success when the connector's executeAction throws", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         const conn = makeConnector("Gmail", async () => {
             throw new Error("[Gmail] reply send returned 401");
@@ -413,7 +406,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ reply: "auto" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -428,7 +421,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("rejects with 403 once the action kind hits its cooldown, even on 'auto' tier", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let calls = 0;
         const conn = makeConnector("Gmail", async () => {
@@ -446,7 +439,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
             undefined,
             new ActionCooldownTracker(5 * 60_000, 1),
         );
-        server.start(port);
+        port = await server.start(0);
         const body = {
             connector: "Gmail",
             action: { kind: "reply", sourceId: "msg1", body: "Hi" },
@@ -460,7 +453,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("rejects with 403 when the action kind's tier is 'manual'", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let called = false;
         const conn = makeConnector("Gmail", async () => {
@@ -469,7 +462,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ reply: "manual" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -481,14 +474,14 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("confirm tier: POST /api/actions/:id/confirm executes the pending action", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let called: ConnectorAction | null = null;
         const conn = makeConnector("Gmail", async (a) => {
             called = a;
         });
         const server = makeServer(store, [conn]);
-        server.start(port);
+        port = await server.start(0);
         const create = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -502,13 +495,13 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("says what became of each action: confirmed, failed with its reason, cancelled", async () => {
-        const port = nextPort();
+        let port = 0;
         let fail = false;
         const conn = makeConnector("Gmail", async () => {
             if (fail) throw new Error("[Gmail] reply send returned 401");
         });
         const server = makeServer(new EventStore(), [conn]);
-        server.start(port);
+        port = await server.start(0);
         const base = `http://localhost:${port}`;
         const propose = async () =>
             (
@@ -549,7 +542,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("confirm tier: POST /api/actions/:id/confirm rejects with 429 once the kind hits its cooldown", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let calls = 0;
         const conn = makeConnector("Gmail", async () => {
@@ -566,7 +559,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
             undefined,
             cooldown,
         );
-        server.start(port);
+        port = await server.start(0);
         const body = {
             connector: "Gmail",
             action: { kind: "reply", sourceId: "msg1", body: "Hi" },
@@ -594,14 +587,14 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("confirm tier: POST /api/actions/:id/cancel discards the pending action without executing it", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         let called = false;
         const conn = makeConnector("Gmail", async () => {
             called = true;
         });
         const server = makeServer(store, [conn]);
-        server.start(port);
+        port = await server.start(0);
         const create = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -621,9 +614,9 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("returns 404 confirming an unknown or already-resolved pending action id", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions/does-not-exist/confirm`,
             {},
@@ -634,9 +627,9 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("should return 404 when connector not found", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "NoSuchConnector", action: { kind: "complete_task", sourceId: "x" } },
@@ -647,10 +640,10 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("should return 400 when connector does not support actions", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn = makeConnector("ReadOnly");
         const server = makeServer(new EventStore(), [conn]);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "ReadOnly", action: { kind: "complete_task", sourceId: "x" } },
@@ -661,9 +654,9 @@ describe("AcediaApiServer — POST /api/actions", () => {
     });
 
     it("should return 400 for missing body fields", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/actions`, {}, AUTH);
         server.stop();
         expect(res.status).toBe(400);
@@ -675,7 +668,7 @@ describe("AcediaApiServer — POST /api/actions", () => {
 // kept showing up as if nothing had happened. See source/store/event_sync.ts.
 describe("AcediaApiServer — EventStore sync after action execution", () => {
     it("delete_email removes the matching buffered event ('auto' tier, direct execute path)", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push({
             type: "email.received",
@@ -689,7 +682,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ delete_email: "auto" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "delete_email", sourceId: "msg1" } },
@@ -701,7 +694,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
     });
 
     it("mark_email_read marks the matching event read, without removing it", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push({
             type: "email.received",
@@ -715,7 +708,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ mark_email_read: "auto" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "mark_email_read", sourceId: "msg1" } },
@@ -727,7 +720,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
     });
 
     it("delete_task removes the matching event, resolving '{listId}/{taskId}' to the bare taskId", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push({
             type: "task.due",
@@ -740,7 +733,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
         const conn = makeConnector("Tasks", async () => {});
         // Deleting a task is never "auto": it goes through its confirmation.
         const server = makeServer(store, [conn], nullAI, SECRET, tmpTierStore());
-        server.start(port);
+        port = await server.start(0);
         const create = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Tasks", action: { kind: "delete_task", sourceId: "listX/abc" } },
@@ -754,7 +747,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
     });
 
     it("reply has no derivable mapping — the buffered event is untouched", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push({
             type: "email.received",
@@ -768,7 +761,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ reply: "auto" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -780,7 +773,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
     });
 
     it("syncs after execution via the confirm-tier path too (POST /api/actions/:id/confirm)", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push({
             type: "email.received",
@@ -796,7 +789,7 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
         const tierStore = tmpTierStore();
         await tierStore.patch({ delete_email: "confirm" });
         const server = makeServer(store, [conn], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         const create = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "delete_email", sourceId: "msg1" } },
@@ -814,9 +807,9 @@ describe("AcediaApiServer — EventStore sync after action execution", () => {
 // source checked again at the moment of confirming.
 describe("AcediaApiServer — pending writes (M5a)", () => {
     it("says when a pending action expires and where it came from", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore(), [makeConnector("Gmail", async () => {})]);
-        server.start(port);
+        port = await server.start(0);
         const before = Date.now();
         const res = await post(
             `http://localhost:${port}/api/actions`,
@@ -837,7 +830,7 @@ describe("AcediaApiServer — pending writes (M5a)", () => {
     });
 
     it("refuses to confirm a kind set to manual since it was queued", async () => {
-        const port = nextPort();
+        let port = 0;
         let called = false;
         const tiers = tmpTierStore();
         const server = makeServer(
@@ -847,7 +840,7 @@ describe("AcediaApiServer — pending writes (M5a)", () => {
             SECRET,
             tiers,
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -865,13 +858,13 @@ describe("AcediaApiServer — pending writes (M5a)", () => {
     });
 
     it("says why a confirmed action failed at the source", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore(), [
             makeConnector("Gmail", async () => {
                 throw new Error("[Gmail] mail no longer exists");
             }),
         ]);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -890,10 +883,10 @@ describe("AcediaApiServer — pending writes (M5a)", () => {
 
 describe("AcediaApiServer — GET /api/actions/pending", () => {
     it("lists a pending action created via POST /api/actions (confirm tier)", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn = makeConnector("Gmail", async () => {});
         const server = makeServer(new EventStore(), [conn]);
-        server.start(port);
+        port = await server.start(0);
         await post(
             `http://localhost:${port}/api/actions`,
             { connector: "Gmail", action: { kind: "reply", sourceId: "msg1", body: "Hi" } },
@@ -918,9 +911,9 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
     }
 
     it("GET returns the default tiers when nothing was ever patched", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore(), [], nullAI, SECRET, tmpTierStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/config/tiers`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -928,13 +921,13 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
     });
 
     it("PATCH updates a tier and it takes effect on the very next POST /api/actions", async () => {
-        const port = nextPort();
+        let port = 0;
         let called = false;
         const conn = makeConnector("Tasks", async () => {
             called = true;
         });
         const server = makeServer(new EventStore(), [conn], nullAI, SECRET, tmpTierStore());
-        server.start(port);
+        port = await server.start(0);
         const patchRes = await patch(
             `http://localhost:${port}/api/config/tiers`,
             { complete_task: "auto" },
@@ -953,9 +946,9 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
     });
 
     it("PATCH ignores unknown action kinds and invalid tier values", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore(), [], nullAI, SECRET, tmpTierStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await patch(
             `http://localhost:${port}/api/config/tiers`,
             { notAKind: "auto", reply: "not-a-real-tier" },
@@ -969,9 +962,9 @@ describe("AcediaApiServer — GET/PATCH /api/config/tiers", () => {
 
 describe("AcediaApiServer — GET /api/config/risk", () => {
     it("returns the static ACTION_RISK map", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/config/risk`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -984,9 +977,9 @@ describe("AcediaApiServer — GET /api/config/risk", () => {
 // what a client needs to show and set the tiers without a copy of its own — LunAcedia's own words.
 describe("AcediaApiServer — GET /api/config/actions", () => {
     it("lists every action with its label, connector, tier, risk, and whether its tier is locked", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/config/actions`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1018,7 +1011,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     }
 
     it("GET returns an empty map when nothing was ever set", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(
             new EventStore(),
             [],
@@ -1026,7 +1019,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
             SECRET,
             tmpTierStoreWithOverrides(),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/config/tier-overrides`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1034,7 +1027,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     });
 
     it("PATCH sets a scoped override that takes effect on the very next POST /api/actions", async () => {
-        const port = nextPort();
+        let port = 0;
         let called = false;
         const conn = makeConnector("Tasks", async () => {
             called = true;
@@ -1046,7 +1039,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
             SECRET,
             tmpTierStoreWithOverrides(),
         );
-        server.start(port);
+        port = await server.start(0);
         const patchRes = await patch(
             `http://localhost:${port}/api/config/tier-overrides`,
             { kind: "reply", scope: "boss@corp.com", tier: "manual" },
@@ -1061,7 +1054,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     });
 
     it("an email reply from an overridden sender is refused even though 'reply' defaults to confirm", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push({
             type: "email.received",
@@ -1074,7 +1067,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
         });
         const conn = makeConnector("Gmail", async () => {});
         const server = makeServer(store, [conn], nullAI, SECRET, tmpTierStoreWithOverrides());
-        server.start(port);
+        port = await server.start(0);
         await patch(
             `http://localhost:${port}/api/config/tier-overrides`,
             { kind: "reply", scope: "boss@corp.com", tier: "manual" },
@@ -1090,7 +1083,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     });
 
     it("a GitHub action on an overridden repo is refused via the sourceId-derived scope", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn = makeConnector("GitHub", async () => {});
         const server = makeServer(
             new EventStore(),
@@ -1099,7 +1092,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
             SECRET,
             tmpTierStoreWithOverrides(),
         );
-        server.start(port);
+        port = await server.start(0);
         await patch(
             `http://localhost:${port}/api/config/tier-overrides`,
             { kind: "close_issue", scope: "owner/repo", tier: "manual" },
@@ -1115,10 +1108,10 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     });
 
     it("tier: null removes an existing override", async () => {
-        const port = nextPort();
+        let port = 0;
         const tierStore = tmpTierStoreWithOverrides();
         const server = makeServer(new EventStore(), [], nullAI, SECRET, tierStore);
-        server.start(port);
+        port = await server.start(0);
         await patch(
             `http://localhost:${port}/api/config/tier-overrides`,
             { kind: "reply", scope: "boss@corp.com", tier: "manual" },
@@ -1135,7 +1128,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     });
 
     it("PATCH rejects an unknown kind with 400", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(
             new EventStore(),
             [],
@@ -1143,7 +1136,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
             SECRET,
             tmpTierStoreWithOverrides(),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await patch(
             `http://localhost:${port}/api/config/tier-overrides`,
             { kind: "notAKind", scope: "x", tier: "manual" },
@@ -1154,7 +1147,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
     });
 
     it("PATCH rejects a malformed body with 400", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(
             new EventStore(),
             [],
@@ -1162,7 +1155,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/tier-overrides", () => {
             SECRET,
             tmpTierStoreWithOverrides(),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await patch(
             `http://localhost:${port}/api/config/tier-overrides`,
             { kind: "reply" },
@@ -1184,16 +1177,16 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
     }
 
     it("returns 503 when no classification store is wired", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/config/email-rules`, AUTH);
         server.stop();
         expect(res.status).toBe(503);
     });
 
     it("GET returns empty lists by default", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(
             new EventStore(),
             [],
@@ -1202,7 +1195,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
             new ActionTierStore(),
             tmpClassificationStore(),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/config/email-rules`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1210,7 +1203,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
     });
 
     it("PATCH updates the config and GET reflects it afterwards", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(
             new EventStore(),
             [],
@@ -1219,7 +1212,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
             new ActionTierStore(),
             tmpClassificationStore(),
         );
-        server.start(port);
+        port = await server.start(0);
         const patchRes = await patch(
             `http://localhost:${port}/api/config/email-rules`,
             { vipSenders: ["boss@corp.com"] },
@@ -1234,7 +1227,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
 
     // One way to set a priority: keywords are guard rules now — a client still sending them is told so, not ignored.
     it("PATCH refuses keywords and changes nothing", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = tmpClassificationStore();
         const server = makeServer(
             new EventStore(),
@@ -1244,7 +1237,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
             new ActionTierStore(),
             store,
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await patch(
             `http://localhost:${port}/api/config/email-rules`,
             { vipSenders: ["a@b.c"], urgentKeywords: ["deadline"] },
@@ -1260,7 +1253,7 @@ describe("AcediaApiServer — GET/PATCH /api/config/email-rules", () => {
 // Lot S: one stream of changes — what changed, never the content — for the dashboard and paired phones.
 describe("AcediaApiServer — GET /api/changes", () => {
     it("streams the server's changes to an authenticated caller, and refuses anyone else", async () => {
-        const port = nextPort();
+        let port = 0;
         const feed = new ChangeFeed(() => 9);
         const server = new AcediaApiServer(
             new EventStore(),
@@ -1282,7 +1275,7 @@ describe("AcediaApiServer — GET /api/changes", () => {
             undefined,
             feed,
         );
-        server.start(port);
+        port = await server.start(0);
         expect((await fetch(`http://localhost:${port}/api/changes`)).status).toBe(401);
         const controller = new AbortController();
         const resp = await fetch(`http://localhost:${port}/api/changes`, {
@@ -1332,9 +1325,9 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
     }
 
     it("start: redirects to Google's consent screen without requiring auth", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore(), [], nullAI, undefined);
-        server.start(port);
+        port = await server.start(0);
         const res = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
         );
@@ -1348,9 +1341,9 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
     it("start: consents with the connector's own client — the one it will refresh the token with", async () => {
         process.env["GMAIL_CLIENT_ID"] = "gm-id";
         process.env["GMAIL_CLIENT_SECRET"] = "gm-secret";
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
         );
@@ -1359,9 +1352,9 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
     });
 
     it("start: returns 400 for an unknown connector", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/start?connector=dropbox`,
         );
@@ -1371,9 +1364,9 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
 
     it("start: returns 503 when neither the connector's pair nor GOOGLE_* is configured", async () => {
         delete process.env["GOOGLE_CLIENT_ID"];
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
         );
@@ -1388,7 +1381,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
             ok: true,
             json: () => Promise.resolve({ refresh_token: "rt-abc" }),
         });
-        const port = nextPort();
+        let port = 0;
         const tokenStore = tmpTokenStore();
         const server = makeServer(
             new EventStore(),
@@ -1399,7 +1392,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
             undefined,
             tokenStore,
         );
-        server.start(port);
+        port = await server.start(0);
         const start = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/start?connector=gmail`,
         );
@@ -1427,7 +1420,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
     it("callback: refuses a return it did not ask for — nothing exchanged, nothing stored", async () => {
         const exchange = vi.fn();
         vi.stubGlobal("fetch", exchange);
-        const port = nextPort();
+        let port = 0;
         const tokenStore = tmpTokenStore();
         const server = makeServer(
             new EventStore(),
@@ -1438,7 +1431,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
             undefined,
             tokenStore,
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/callback?code=abc&state=gmail`,
         );
@@ -1449,9 +1442,9 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
     });
 
     it("callback: shows an error page and does not throw when Google reports an error", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await getNoRedirect(
             `http://localhost:${port}/api/oauth/google/callback?error=access_denied&state=gmail`,
         );
@@ -1466,7 +1459,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
         process.env["GMAIL_CLIENT_ID"] = "gm-id";
         process.env["GMAIL_CLIENT_SECRET"] = "gm-secret";
         process.env["GMAIL_REFRESH_TOKEN"] = "rt-env";
-        const port = nextPort();
+        let port = 0;
         const tokenStore = tmpTokenStore();
         await tokenStore.set("gcal", "rt-xyz");
         const gmail: IConnector = {
@@ -1490,7 +1483,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
             undefined,
             tokenStore,
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/oauth/google/status`, AUTH);
         server.stop();
         const body = res.body as Record<string, Record<string, unknown>>;
@@ -1509,7 +1502,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
 
 describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
     it("should return 200 and ok:true when the poll succeeds", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn: IConnector = { slug: "github", name: "GitHub", poll: async () => [] };
         const hub = hubOnBox([conn]).hub;
         const server = new AcediaApiServer(
@@ -1522,7 +1515,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             new ActionTierStore(),
             new PendingActionStore(null),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/connectors/github/reconnect`,
             {},
@@ -1534,7 +1527,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
     });
 
     it("should return 502 and the connector's error when the poll fails", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn: IConnector = {
             slug: "email",
             name: "Gmail",
@@ -1553,7 +1546,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             new ActionTierStore(),
             new PendingActionStore(null),
         );
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/connectors/email/reconnect`, {}, AUTH);
         server.stop();
         expect(res.status).toBe(502);
@@ -1561,16 +1554,16 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
     });
 
     it("should return 404 for an unknown connector slug", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/connectors/nope/reconnect`, {}, AUTH);
         server.stop();
         expect(res.status).toBe(404);
     });
 
     it("should update getConnectorHealth() immediately, not wait for the next scheduled poll", async () => {
-        const port = nextPort();
+        let port = 0;
         const conn: IConnector = { slug: "rss", name: "RSS", poll: async () => [] };
         const hub = hubOnBox([conn]).hub;
         const server = new AcediaApiServer(
@@ -1583,7 +1576,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
             new ActionTierStore(),
             new PendingActionStore(null),
         );
-        server.start(port);
+        port = await server.start(0);
         expect(hub.getConnectorHealth()[0]!.lastSuccessAt).toBeNull();
         await post(`http://localhost:${port}/api/connectors/rss/reconnect`, {}, AUTH);
         server.stop();
@@ -1593,23 +1586,23 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
 
 describe("AcediaApiServer — POST /api/chat", () => {
     it("should return 503 when AI provider is none", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/chat`, { text: "hello" }, AUTH);
         server.stop();
         expect(res.status).toBe(503);
     });
 
     it("should return AI response when provider is configured", async () => {
-        const port = nextPort();
+        let port = 0;
         const mockAI: IAIProvider = {
             mode: "openai",
             chat: vi.fn().mockResolvedValue("Butler response"),
             digest: vi.fn().mockResolvedValue(""),
         };
         const server = makeServer(new EventStore(), [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/chat`, { text: "What's up?" }, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1617,35 +1610,35 @@ describe("AcediaApiServer — POST /api/chat", () => {
     });
 
     it("should return 400 when text is missing", async () => {
-        const port = nextPort();
+        let port = 0;
         const mockAI: IAIProvider = { mode: "openai", chat: vi.fn(), digest: vi.fn() };
         const server = makeServer(new EventStore(), [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/chat`, {}, AUTH);
         server.stop();
         expect(res.status).toBe(400);
     });
 
     it("should return 502 when AI provider throws", async () => {
-        const port = nextPort();
+        let port = 0;
         const mockAI: IAIProvider = {
             mode: "openai",
             chat: vi.fn().mockRejectedValue(new Error("Network error")),
             digest: vi.fn(),
         };
         const server = makeServer(new EventStore(), [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/chat`, { text: "hello" }, AUTH);
         server.stop();
         expect(res.status).toBe(502);
     });
 
     it("should prepend context facts to the query sent to the AI provider", async () => {
-        const port = nextPort();
+        let port = 0;
         const chatSpy = vi.fn().mockResolvedValue("Butler response");
         const mockAI: IAIProvider = { mode: "openai", chat: chatSpy, digest: vi.fn() };
         const server = makeServer(new EventStore(), [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         await post(
             `http://localhost:${port}/api/chat`,
             { text: "Any urgent mail?", context: ["Boss is on leave until Friday"] },
@@ -1658,14 +1651,14 @@ describe("AcediaApiServer — POST /api/chat", () => {
     });
 
     it("should log the caller identity when provided", async () => {
-        const port = nextPort();
+        let port = 0;
         const mockAI: IAIProvider = {
             mode: "openai",
             chat: vi.fn().mockResolvedValue("ok"),
             digest: vi.fn(),
         };
         const server = makeServer(new EventStore(), [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         await post(
             `http://localhost:${port}/api/chat`,
@@ -1681,12 +1674,12 @@ describe("AcediaApiServer — POST /api/chat", () => {
 
 describe("AcediaApiServer — GET /api/digest", () => {
     it("nothing unread: nothing to summarize, the model is not called", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1", read: true }));
         const digest = vi.fn();
         const server = makeServer(store, [], { mode: "openai", chat: vi.fn(), digest });
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1695,7 +1688,7 @@ describe("AcediaApiServer — GET /api/digest", () => {
     });
 
     it("lists the unread urgent items itself, with their reason, and summarizes only the other unread ones", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(
             makeEvent({
@@ -1710,7 +1703,7 @@ describe("AcediaApiServer — GET /api/digest", () => {
         store.push(makeEvent({ dedupeKey: "n2", priority: "normal", read: true }));
         const digest = vi.fn().mockResolvedValue("Une newsletter.");
         const server = makeServer(store, [], { mode: "openai", chat: vi.fn(), digest });
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1723,12 +1716,12 @@ describe("AcediaApiServer — GET /api/digest", () => {
     });
 
     it("without an AI provider, still lists the urgent items — just no summary", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "u1", title: "Urgent", priority: "urgent" }));
         store.push(makeEvent({ dedupeKey: "n1", priority: "normal" }));
         const server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1740,7 +1733,7 @@ describe("AcediaApiServer — GET /api/digest", () => {
     });
 
     it("should return digest from AI provider", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1" }));
         const mockAI: IAIProvider = {
@@ -1749,7 +1742,7 @@ describe("AcediaApiServer — GET /api/digest", () => {
             digest: vi.fn().mockResolvedValue("Today you have 1 email."),
         };
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1760,7 +1753,7 @@ describe("AcediaApiServer — GET /api/digest", () => {
     });
 
     it("should return 502 when AI provider throws", async () => {
-        const port = nextPort();
+        let port = 0;
         const mockAI: IAIProvider = {
             mode: "openai",
             chat: vi.fn(),
@@ -1769,7 +1762,7 @@ describe("AcediaApiServer — GET /api/digest", () => {
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1" }));
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/digest`, AUTH);
         server.stop();
         expect(res.status).toBe(502);
@@ -1778,9 +1771,9 @@ describe("AcediaApiServer — GET /api/digest", () => {
 
 describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
     it("returns the whole default window as free when there are no calendar events", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/calendar/free-slots`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1789,7 +1782,7 @@ describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
     });
 
     it("excludes busy timed calendar events from the free slots", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         const start = new Date(Date.now() + 2 * 3_600_000).toISOString();
         const end = new Date(Date.now() + 3 * 3_600_000).toISOString();
@@ -1802,7 +1795,7 @@ describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
             }),
         );
         const server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/calendar/free-slots?minGapMin=5`, AUTH);
         server.stop();
         const slots = res.body as { start: string; end: string }[];
@@ -1811,7 +1804,7 @@ describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
     });
 
     it("ignores all-day events (date-only, no time component)", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(
             makeEvent({
@@ -1822,7 +1815,7 @@ describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
             }),
         );
         const server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/calendar/free-slots`, AUTH);
         server.stop();
         const slots = res.body as { start: string; end: string }[];
@@ -1832,16 +1825,16 @@ describe("AcediaApiServer — GET /api/calendar/free-slots", () => {
 
 describe("AcediaApiServer — GET /api/proposals", () => {
     it("should return 503 when AI provider is none", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         expect(res.status).toBe(503);
     });
 
     it("only sends urgent/conflict unread events to the AI, not routine ones", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1", priority: "info", title: "Newsletter" }));
         store.push(makeEvent({ dedupeKey: "e2", priority: "urgent", title: "Server down" }));
@@ -1856,7 +1849,7 @@ describe("AcediaApiServer — GET /api/proposals", () => {
         const chatSpy = vi.fn().mockResolvedValue("1. Restart the server. 2. Decline one meeting.");
         const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -1870,7 +1863,7 @@ describe("AcediaApiServer — GET /api/proposals", () => {
     });
 
     it("passes open calendar slots to the AI when a conflict is present", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(
             makeEvent({
@@ -1883,7 +1876,7 @@ describe("AcediaApiServer — GET /api/proposals", () => {
         const chatSpy = vi.fn().mockResolvedValue("Move the second meeting to the open slot.");
         const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         const promptSent = chatSpy.mock.calls[0]![0] as string;
@@ -1891,13 +1884,13 @@ describe("AcediaApiServer — GET /api/proposals", () => {
     });
 
     it("does not include a slots block when there is no conflict, even with free calendar time", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1", priority: "urgent", title: "Server down" }));
         const chatSpy = vi.fn().mockResolvedValue("Restart it.");
         const mockAI: IAIProvider = { mode: "natsume", chat: chatSpy, digest: vi.fn() };
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         const promptSent = chatSpy.mock.calls[0]![0] as string;
@@ -1905,7 +1898,7 @@ describe("AcediaApiServer — GET /api/proposals", () => {
     });
 
     it("does not mark events as read — proposals are read-only", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1", priority: "urgent", title: "Urgent thing" }));
         const mockAI: IAIProvider = {
@@ -1914,14 +1907,14 @@ describe("AcediaApiServer — GET /api/proposals", () => {
             digest: vi.fn(),
         };
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         expect(store.query({ unread: true }).total).toBe(1);
     });
 
     it("should return 502 when AI provider throws", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         store.push(makeEvent({ dedupeKey: "e1", priority: "urgent" }));
         const mockAI: IAIProvider = {
@@ -1930,7 +1923,7 @@ describe("AcediaApiServer — GET /api/proposals", () => {
             digest: vi.fn(),
         };
         const server = makeServer(store, [], mockAI);
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/proposals`, AUTH);
         server.stop();
         expect(res.status).toBe(502);
@@ -1939,9 +1932,9 @@ describe("AcediaApiServer — GET /api/proposals", () => {
 
 describe("AcediaApiServer — /api/devices/push-token", () => {
     it("should return 503 when FCM is not configured", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/devices/push-token`,
             { token: "abc" },
@@ -1957,7 +1950,7 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acedia-fcm-"));
         const fcm = new FcmSender(["urgent"], path.join(dir, "fcm_token"));
         await fcm.setToken("phone-a");
-        const port = nextPort();
+        let port = 0;
         const server = new AcediaApiServer(
             new EventStore(),
             [],
@@ -1968,7 +1961,7 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
             new ActionTierStore(),
             new PendingActionStore(null),
         );
-        server.start(port);
+        port = await server.start(0);
         const release = (token: string) =>
             fetch(`http://localhost:${port}/api/devices/push-token`, {
                 method: "DELETE",
@@ -1984,9 +1977,9 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
     });
 
     it("should return 404 for unknown routes", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/nonexistent`, AUTH);
         server.stop();
         expect(res.status).toBe(404);
@@ -1995,10 +1988,10 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
 
 describe("AcediaApiServer — POST /api/events/held", () => {
     it("reports which keys the box still holds, with their read state", async () => {
-        const port = nextPort();
+        let port = 0;
         const store = new EventStore();
         const server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
         store.push(makeEvent({ dedupeKey: "e1" }));
         store.push(makeEvent({ dedupeKey: "e2" }));
         store.markRead("e2");
@@ -2016,9 +2009,9 @@ describe("AcediaApiServer — POST /api/events/held", () => {
     });
 
     it("refuses a body that is not a bounded list of keys", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const bad = await post(`http://localhost:${port}/api/events/held`, { keys: [1] }, AUTH);
         const big = await post(
             `http://localhost:${port}/api/events/held`,
@@ -2031,9 +2024,9 @@ describe("AcediaApiServer — POST /api/events/held", () => {
     });
 
     it("should return 401 without auth", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(`http://localhost:${port}/api/events/held`, { keys: [] }, {});
         server.stop();
         expect(res.status).toBe(401);
@@ -2045,11 +2038,10 @@ describe("AcediaApiServer — GET /api/events?unread=true", () => {
     let store: EventStore;
     let server: AcediaApiServer;
 
-    beforeEach(() => {
-        port = nextPort();
+    beforeEach(async () => {
         store = new EventStore();
         server = makeServer(store);
-        server.start(port);
+        port = await server.start(0);
     });
     afterEach(() => server.stop());
 
@@ -2104,9 +2096,9 @@ describe("AcediaApiServer — POST /api/config/ai-provider", () => {
     });
 
     it("configures openai and the change is live immediately (no restart)", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/config/ai-provider`,
             { provider: "openai", apiKey: "sk-test-key" },
@@ -2122,9 +2114,9 @@ describe("AcediaApiServer — POST /api/config/ai-provider", () => {
     });
 
     it("returns 400 for openai without an apiKey", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/config/ai-provider`,
             { provider: "openai" },
@@ -2135,9 +2127,9 @@ describe("AcediaApiServer — POST /api/config/ai-provider", () => {
     });
 
     it("requires auth like every other route", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await post(
             `http://localhost:${port}/api/config/ai-provider`,
             { provider: "openai", apiKey: "sk-x" },
@@ -2154,9 +2146,9 @@ describe("AcediaApiServer — GET /api/identity", () => {
     });
 
     it("names the assistant LunAcedia by default — never Natsume", async () => {
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const res = await get(`http://localhost:${port}/api/identity`, AUTH);
         server.stop();
         expect(res.status).toBe(200);
@@ -2165,9 +2157,9 @@ describe("AcediaApiServer — GET /api/identity", () => {
 
     it("uses ASSISTANT_NAME when set, and requires the token", async () => {
         process.env["ASSISTANT_NAME"] = "Alfred";
-        const port = nextPort();
+        let port = 0;
         const server = makeServer(new EventStore());
-        server.start(port);
+        port = await server.start(0);
         const ok = await get(`http://localhost:${port}/api/identity`, AUTH);
         const anon = await get(`http://localhost:${port}/api/identity`, {});
         server.stop();

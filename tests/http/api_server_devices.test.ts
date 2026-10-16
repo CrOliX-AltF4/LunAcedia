@@ -13,8 +13,6 @@ import { DeviceRegistry } from "../../source/auth/device_registry.js";
 
 // End to end: pairing, a device token limited to the mobile routes, revocation; the admin secret unchanged.
 
-let PORT = 50_200 + Math.floor(Math.random() * 300);
-const nextPort = () => PORT++;
 const SECRET = "admin-secret-of-this-test";
 
 async function call(
@@ -70,8 +68,8 @@ describe("AcediaApiServer — paired devices", () => {
             undefined,
             new DeviceRegistry(path.join(dir, "devices.json")),
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return `http://localhost:${port}`;
     }
 

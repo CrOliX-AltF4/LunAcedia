@@ -14,9 +14,6 @@ import type { IAIProvider } from "../../source/ai/ai_provider.js";
 
 // GET /api/usage and the alert settings; and every request's LLM calls land under the right caller.
 
-let PORT = 49_800 + Math.floor(Math.random() * 200);
-const nextPort = () => PORT++;
-
 async function call(
     method: string,
     url: string,
@@ -73,8 +70,8 @@ describe("AcediaApiServer — usage", () => {
             undefined,
             { ledger, alerts },
         );
-        const port = nextPort();
-        server.start(port);
+        let port = 0;
+        port = await server.start(0);
         return `http://localhost:${port}`;
     }
 
