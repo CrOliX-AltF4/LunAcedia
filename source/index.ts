@@ -11,6 +11,7 @@ import type { IConnector } from "./connectors/connector_interface.js";
 import type { AcediaEvent } from "./types/acedia_event.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
 import { ItemLifecycle } from "./hub/item_lifecycle.js";
+import { notifyFilterFromEnv, rings } from "./push/notify_policy.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
 import { adoptLegacyDedup, legacyDedupPath } from "./store/dedup_migration.js";
@@ -157,11 +158,14 @@ const sweepDevices = async (): Promise<void> => {
 };
 await sweepDevices();
 setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
+// What rings the phone: one rule, applied here whoever sends the notification (LunAcedia standalone, the hub wired).
+const notifyFilter = notifyFilterFromEnv();
 // The life of a box item: every path that changes one goes through here, which tells the views, the Core and the phone.
 const lifecycle = new ItemLifecycle({
     store,
     changes,
     broadcast: (event) => ws.broadcast(event),
+    rings: (event) => rings(event, notifyFilter),
     push: (event) => void fcm?.send(event),
 });
 // Collection: polls the sources and asks the box what it already knows.

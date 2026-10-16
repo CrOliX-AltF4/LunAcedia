@@ -194,7 +194,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   GET  /api/digest               { response, count, urgent }: unread items, urgent ones listed by the code
  *   GET  /api/proposals            suggest next actions for unread urgent/conflict items (requires AI_PROVIDER != none)
  *   POST /api/devices/push-token   body: { token: string }
- *   DELETE /api/devices/push-token
+ *   DELETE /api/devices/push-token body?: { token } — a device stops its own notifications; the hub (body: the
+ *                                  token a phone just registered with it) takes that phone's notifications over
  */
 /**
  * The usage context of a request: who is asking and for what, from its route. An agent request declares
@@ -1458,7 +1459,18 @@ export class AcediaApiServer {
                 if (this.fcm && this.fcm.getToken() === caller.device.pushToken)
                     await this.fcm.setToken(null);
                 await this.devices?.setPushToken(caller.device.id, null);
-            } else if (this.fcm) await this.fcm.setToken(null);
+            } else if (this.fcm) {
+                // From the hub: a phone registered with it — only that phone's token is let go, never another one.
+                let body: unknown = null;
+                try {
+                    body = await readBody(req);
+                } catch {
+                    /* no body: let go of whatever token is held */
+                }
+                const token = (body as { token?: unknown } | null)?.token;
+                if (typeof token !== "string" || this.fcm.getToken() === token)
+                    await this.fcm.setToken(null);
+            }
             return json(res, 204, null);
         }
 

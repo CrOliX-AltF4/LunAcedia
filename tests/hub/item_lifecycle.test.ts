@@ -31,15 +31,29 @@ describe("ItemLifecycle — collected", () => {
         life.collected(item("m1"), "new");
         expect(store.has("m1")).toBe(true);
         expect(views.map((v) => [v.scope, v.key, !!v.settled])).toEqual([["box", "m1", false]]);
-        expect(sent.map((e) => e.dedupeKey)).toEqual(["m1"]);
+        expect(sent.map((e) => [e.dedupeKey, e.notify])).toEqual([["m1", true]]);
         expect(rung.map((e) => e.dedupeKey)).toEqual(["m1"]);
+        expect(store.get("m1")).not.toHaveProperty("notify"); // the decision travels, it is not stored
     });
 
     it("a new item already read: the Core is told, the phone stays silent", () => {
         const { sent, rung, life } = setup();
         life.collected(item("m1", { read: true }), "new");
-        expect(sent).toHaveLength(1);
+        expect(sent.map((e) => e.notify)).toEqual([false]);
         expect(rung).toHaveLength(0);
+    });
+
+    // One rule for both modes: the hub relays `notify`, so a wired phone rings for exactly what a standalone one does.
+    it("an item below the phone's priorities: the Core is told it does not ring, the phone stays silent", () => {
+        const store = new EventStore();
+        const { sent, rung, life } = recordingLifecycle(store, ["urgent"]);
+        life.collected(item("m1", { priority: "info" }), "new");
+        life.collected(item("m2", { priority: "urgent" }), "new");
+        expect(sent.map((e) => [e.dedupeKey, e.notify])).toEqual([
+            ["m1", false],
+            ["m2", true],
+        ]);
+        expect(rung.map((e) => e.dedupeKey)).toEqual(["m2"]);
     });
 
     it("a backlog item is in the box only — news to no one", () => {

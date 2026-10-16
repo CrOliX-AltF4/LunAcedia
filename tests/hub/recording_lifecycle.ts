@@ -4,7 +4,8 @@ import { EventStore } from "../../source/store/event_store.js";
 import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import type { GuardPipeline } from "../../source/guards/guard_pipeline.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
-import type { AcediaEvent } from "../../source/types/acedia_event.js";
+import type { AcediaEvent, AcediaEventPriority } from "../../source/types/acedia_event.js";
+import { rings } from "../../source/push/notify_policy.js";
 
 type RuleActor = ConstructorParameters<typeof IngestionHub>[3];
 
@@ -12,7 +13,10 @@ type RuleActor = ConstructorParameters<typeof IngestionHub>[3];
  * A real ItemLifecycle whose effects are recorded: the changes told to the Core (as `{op, key, source}`), the new
  * items sent to it, the phone rung, the views told.
  */
-export function recordingLifecycle(store: EventStore) {
+export function recordingLifecycle(
+    store: EventStore,
+    ringing: AcediaEventPriority[] = ["urgent", "normal", "info"],
+) {
     const emitted: InboxChange[] = [];
     const sent: AcediaEvent[] = [];
     const rung: AcediaEvent[] = [];
@@ -32,6 +36,8 @@ export function recordingLifecycle(store: EventStore) {
                 ...(m.item && { item: m.item }),
             });
         },
+        // Every priority rings here, unless a test says otherwise: what matters is the read state and the cause.
+        rings: (e) => rings(e, ringing),
         push: (e) => rung.push(e),
     });
     return { life, emitted, sent, rung, views };

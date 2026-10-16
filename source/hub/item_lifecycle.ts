@@ -57,7 +57,9 @@ export interface ItemLifecycleDeps {
     changes: Pick<ChangeFeed, "emit">;
     /** Sends to the Core (the WebSocket): a new item, or a change message. */
     broadcast: (event: AcediaEvent) => void;
-    /** Rings the phone (FCM); filtered by priority and token downstream. */
+    /** Whether a new item rings the phone (notify_policy.ts) — decided here once, for LunAcedia and for a hub. */
+    rings: (event: AcediaEvent) => boolean;
+    /** Rings the phone registered with LunAcedia (FCM) — a wired phone is registered with the hub instead. */
     push: (event: AcediaEvent) => void;
 }
 
@@ -71,6 +73,7 @@ export class ItemLifecycle implements KnownItems {
             store,
             changes: { emit: none },
             broadcast: none,
+            rings: () => false,
             push: none,
         });
     }
@@ -79,9 +82,9 @@ export class ItemLifecycle implements KnownItems {
         this.deps.store.push(event);
         this.deps.changes.emit("box", event.dedupeKey);
         if (cause === "backlog") return;
-        this.deps.broadcast(event);
-        // The box holds read items too: only something unread rings the phone.
-        if (!event.read) this.deps.push(event);
+        const notify = this.deps.rings(event);
+        this.deps.broadcast({ ...event, notify });
+        if (notify) this.deps.push(event);
     }
 
     /**

@@ -10,6 +10,7 @@ import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
 import { ChangeFeed } from "../../source/changes/change_feed.js";
+import { FcmSender } from "../../source/push/fcm_sender.js";
 import { ActionCooldownTracker } from "../../source/actions/action_cooldown.js";
 import { EmailClassificationStore } from "../../source/connectors/email/email_classification_store.js";
 import { GoogleTokenStore } from "../../source/auth/google_token_store.js";
@@ -1948,6 +1949,38 @@ describe("AcediaApiServer — /api/devices/push-token", () => {
         );
         server.stop();
         expect(res.status).toBe(503);
+    });
+
+    // A phone that registers with the hub moves its notifications there: the hub lets LunAcedia's copy of that token
+    // go, so the phone never rings twice — and never another phone's.
+    it("lets the hub take over one phone's token, never another one's", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acedia-fcm-"));
+        const fcm = new FcmSender(["urgent"], path.join(dir, "fcm_token"));
+        await fcm.setToken("phone-a");
+        const port = nextPort();
+        const server = new AcediaApiServer(
+            new EventStore(),
+            [],
+            hubOnBox([]).hub,
+            fcm,
+            nullAI,
+            SECRET,
+            new ActionTierStore(),
+            new PendingActionStore(null),
+        );
+        server.start(port);
+        const release = (token: string) =>
+            fetch(`http://localhost:${port}/api/devices/push-token`, {
+                method: "DELETE",
+                headers: { ...AUTH, "Content-Type": "application/json" },
+                body: JSON.stringify({ token }),
+            });
+        expect((await release("phone-b")).status).toBe(204);
+        expect(fcm.getToken()).toBe("phone-a");
+        expect((await release("phone-a")).status).toBe(204);
+        server.stop();
+        expect(fcm.getToken()).toBeNull();
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 
     it("should return 404 for unknown routes", async () => {
