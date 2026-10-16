@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { NullAIProvider } from "../../source/ai/null_provider.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
@@ -185,7 +185,7 @@ function makeServer(
     return new AcediaApiServer(
         store,
         connectors,
-        new IngestionHub(connectors),
+        hubOnBox(connectors).hub,
         null,
         ai,
         secret,
@@ -275,7 +275,7 @@ describe("AcediaApiServer — auth", () => {
         const server = new AcediaApiServer(
             new EventStore(),
             [],
-            new IngestionHub([]),
+            hubOnBox([]).hub,
             null,
             nullAI,
             undefined,
@@ -1264,7 +1264,7 @@ describe("AcediaApiServer — GET /api/changes", () => {
         const server = new AcediaApiServer(
             new EventStore(),
             [],
-            new IngestionHub([]),
+            hubOnBox([]).hub,
             null,
             nullAI,
             SECRET,
@@ -1475,7 +1475,7 @@ describe("AcediaApiServer — GET /api/oauth/google/*", () => {
                 throw new Error("invalid_grant");
             },
         };
-        const hub = new IngestionHub([gmail]);
+        const hub = hubOnBox([gmail]).hub;
         await hub.pollOne("email");
         const server = new AcediaApiServer(
             new EventStore(),
@@ -1510,7 +1510,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
     it("should return 200 and ok:true when the poll succeeds", async () => {
         const port = nextPort();
         const conn: IConnector = { slug: "github", name: "GitHub", poll: async () => [] };
-        const hub = new IngestionHub([conn]);
+        const hub = hubOnBox([conn]).hub;
         const server = new AcediaApiServer(
             new EventStore(),
             [conn],
@@ -1541,7 +1541,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
                 throw new Error("invalid_grant");
             },
         };
-        const hub = new IngestionHub([conn]);
+        const hub = hubOnBox([conn]).hub;
         const server = new AcediaApiServer(
             new EventStore(),
             [conn],
@@ -1571,7 +1571,7 @@ describe("AcediaApiServer — POST /api/connectors/:slug/reconnect", () => {
     it("should update getConnectorHealth() immediately, not wait for the next scheduled poll", async () => {
         const port = nextPort();
         const conn: IConnector = { slug: "rss", name: "RSS", poll: async () => [] };
-        const hub = new IngestionHub([conn]);
+        const hub = hubOnBox([conn]).hub;
         const server = new AcediaApiServer(
             new EventStore(),
             [conn],

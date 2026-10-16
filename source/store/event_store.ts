@@ -4,7 +4,7 @@ import * as path from "path";
 import type { AcediaEvent, AcediaEventSource, AcediaEventPriority } from "../types/acedia_event.js";
 import { VIP_REASON } from "../guards/guard_types.js";
 
-/** Where the box lives on disk — next to dedup_seen.json, which it must stay consistent with. */
+/** Where the box lives on disk: the items held, and the keys gone that must not come back. */
 export function defaultEventStorePath(): string {
     const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
     return path.join(storageDir, "inbox_store.json");
@@ -34,18 +34,29 @@ function sameContent(a: AcediaEvent, b: AcediaEvent): boolean {
     );
 }
 
+/** The file's shape since the box and dedup became one state (version 1 was the bare list of items). */
+interface StoredBox {
+    version: 2;
+    items: AcediaEvent[];
+    /** dedupeKey → when it left the box. */
+    gone: Record<string, number>;
+}
+
 /**
- * Ring buffer for AcediaEvents — it IS the box.
- * Oldest event is evicted when capacity is reached.
- * Thread-safe for single-threaded Node.js use.
+ * The box, and everything it knows about a key: held (an item), gone and not to come back (`gone`: expired,
+ * taken out at the source by a rule, evicted past capacity), or unknown — collected as news when a source lists it.
+ * One state, one file: dedup used to live in a file of its own, and keeping the two consistent across restarts
+ * cost a recovery pass that brought gone items back.
  *
- * Persisted when given a file (the live check of 2026-09-28): it used to be memory-only on the idea
- * that polls refill it within seconds, but dedup is persisted, so after a restart the mail already in the
- * inbox was "seen" and never collected again — the box stayed empty. Every change rewrites the file
- * (≤ maxSize events), writes are chained so they land in order.
+ * Only ItemLifecycle changes it. The oldest item is evicted past capacity — and remembered as gone, or the next
+ * collection would announce it as new. Every change rewrites the file atomically (a temporary file, then a
+ * rename); writes are chained so they land in order.
  */
 export class EventStore {
     private buf: AcediaEvent[] = [];
+    private readonly gone = new Map<string, number>();
+    /** Nothing on disk at load: a first run (or a lost file) — what the first collection finds is not news. */
+    private fresh = false;
     private chain: Promise<void> = Promise.resolve();
     private writeQueued = false;
 
@@ -54,15 +65,30 @@ export class EventStore {
         private readonly filePath?: string,
     ) {}
 
-    /** Restores the box from disk; a missing or unreadable file means an empty box, never a crash. */
+    /**
+     * Restores the box from disk; a missing or unreadable file means an empty, fresh box, never a crash. Reads the
+     * version-1 file (the bare list of items) as well: the next write turns it into version 2.
+     */
     async load(): Promise<void> {
         if (!this.filePath) return;
         try {
             const parsed = JSON.parse(await fs.readFile(this.filePath, "utf-8")) as unknown;
-            if (Array.isArray(parsed)) this.buf = (parsed as AcediaEvent[]).slice(-this.maxSize);
+            if (Array.isArray(parsed)) {
+                this.buf = (parsed as AcediaEvent[]).slice(-this.maxSize);
+            } else if (isStoredBox(parsed)) {
+                this.buf = parsed.items.slice(-this.maxSize);
+                for (const [key, at] of Object.entries(parsed.gone)) this.gone.set(key, at);
+            } else {
+                this.fresh = true;
+            }
         } catch {
-            // first run, or a torn file: start empty — recovery re-collects what the source still has
+            this.fresh = true;
         }
+    }
+
+    /** Whether load() found nothing to restore. */
+    isFresh(): boolean {
+        return this.fresh;
     }
 
     /** Waits for pending writes — used by tests and by graceful shutdown. */
@@ -77,8 +103,16 @@ export class EventStore {
         this.chain = this.chain
             .then(async () => {
                 this.writeQueued = false;
+                const box: StoredBox = {
+                    version: 2,
+                    items: this.buf,
+                    gone: Object.fromEntries(this.gone),
+                };
                 await fs.mkdir(path.dirname(file), { recursive: true });
-                await fs.writeFile(file, JSON.stringify(this.buf), "utf-8");
+                // Atomic: a crash mid-write leaves the previous file whole, never a torn one.
+                const tmp = `${file}.tmp`;
+                await fs.writeFile(tmp, JSON.stringify(box), "utf-8");
+                await fs.rename(tmp, file);
             })
             .catch((e: Error) => {
                 this.writeQueued = false;
@@ -86,9 +120,13 @@ export class EventStore {
             });
     }
 
-    push(event: AcediaEvent): void {
+    push(event: AcediaEvent, now: number = Date.now()): void {
+        this.gone.delete(event.dedupeKey);
         this.buf.push(event);
-        if (this.buf.length > this.maxSize) this.buf.shift();
+        if (this.buf.length > this.maxSize) {
+            const evicted = this.buf.shift()!;
+            if (!this.has(evicted.dedupeKey)) this.gone.set(evicted.dedupeKey, now);
+        }
         this.persist();
     }
 
@@ -186,7 +224,50 @@ export class EventStore {
         }
     }
 
+    /** Held, or gone and not to come back: a source listing it again is not news. */
+    knows(dedupeKey: string): boolean {
+        return this.gone.has(dedupeKey) || this.has(dedupeKey);
+    }
+
+    isGone(dedupeKey: string): boolean {
+        return this.gone.has(dedupeKey);
+    }
+
+    /** Remembers a key that left (or never entered) the box and must not come back as news. */
+    markGone(dedupeKey: string, at: number = Date.now()): void {
+        this.gone.set(dedupeKey, at);
+        this.persist();
+    }
+
+    /** The key may come back: its object returned at the source (a mail restored from the trash). */
+    clearGone(dedupeKey: string): void {
+        if (this.gone.delete(dedupeKey)) this.persist();
+    }
+
+    /** Forgets the keys gone before `cutoff` — a held item is never forgotten. Returns how many. */
+    purgeGone(cutoff: number): number {
+        let purged = 0;
+        for (const [key, at] of this.gone) {
+            if (at >= cutoff) continue;
+            this.gone.delete(key);
+            purged++;
+        }
+        if (purged > 0) this.persist();
+        return purged;
+    }
+
     get size(): number {
         return this.buf.length;
     }
+}
+
+function isStoredBox(value: unknown): value is StoredBox {
+    const v = value as Partial<StoredBox> | null;
+    return (
+        typeof v === "object" &&
+        v !== null &&
+        Array.isArray(v.items) &&
+        typeof v.gone === "object" &&
+        v.gone !== null
+    );
 }

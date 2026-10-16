@@ -5,6 +5,7 @@
  * the Core, the phone. No path decides them on its own any more (the cause of the patches piled on the box).
  */
 import type { ChangeFeed } from "../changes/change_feed.js";
+import type { KnownItems } from "./ingestion_hub.js";
 import type { EventStore } from "../store/event_store.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 
@@ -33,27 +34,26 @@ export function toWire(change: InboxChange, ts: number = Date.now()): AcediaEven
 }
 
 /**
- * Why an item enters the box. `new`: collected from its source. `recovered`: dedup had it but the box lost it — back
- * in the box only, it is news to no one. `reminder`: the planning calls for it; its truth is the planning, never a
- * source.
+ * Why an item enters the box. `new`: collected from its source. `backlog`: already there before (a fresh install's
+ * first sweep, an old mail of the inbox) — in the box only, it is news to no one. `reminder`: the planning calls for
+ * it; its truth is the planning, never a source.
  */
-export type CollectCause = "new" | "recovered" | "reminder";
+export type CollectCause = "new" | "backlog" | "reminder";
 
 export type ItemOp = "read" | "unread" | "removed";
 
 /**
  * Why an item is read, unread or gone. `source`: seen at the source. `gesture`: Master in the box. `action`: an action
  * carried out. `agent`: the agent read the mail in full. `expired`: an informational item (RSS, HA) past its lifetime —
- * it stays in dedup, being still in its feed. `settled`: the planning no longer calls for a reminder. `snoozed`: Master
- * pushed a reminder back. `planning`: an event or a task the box held before the planning took them over.
+ * remembered as gone, being still in its feed. `settled`: the planning no longer calls for a reminder. `snoozed`:
+ * Master pushed a reminder back. `planning`: an event or a task the box held before the planning took them over.
+ * Every removal but `expired` lets the item come back if its source lists it again.
  */
 export type ChangeCause =
     "source" | "gesture" | "action" | "agent" | "expired" | "settled" | "snoozed" | "planning";
 
 export interface ItemLifecycleDeps {
     store: EventStore;
-    /** Drops a key from dedup, so the item comes back if its object does (restored mail, new activity). */
-    forget: (key: string) => void;
     changes: Pick<ChangeFeed, "emit">;
     /** Sends to the Core (the WebSocket): a new item, or a change message. */
     broadcast: (event: AcediaEvent) => void;
@@ -61,7 +61,7 @@ export interface ItemLifecycleDeps {
     push: (event: AcediaEvent) => void;
 }
 
-export class ItemLifecycle {
+export class ItemLifecycle implements KnownItems {
     constructor(private readonly deps: ItemLifecycleDeps) {}
 
     /** The box alone, telling no one — where nothing listens (tests, tools). */
@@ -69,7 +69,6 @@ export class ItemLifecycle {
         const none = (): void => {};
         return new ItemLifecycle({
             store,
-            forget: none,
             changes: { emit: none },
             broadcast: none,
             push: none,
@@ -79,7 +78,7 @@ export class ItemLifecycle {
     collected(event: AcediaEvent, cause: CollectCause): void {
         this.deps.store.push(event);
         this.deps.changes.emit("box", event.dedupeKey);
-        if (cause === "recovered") return;
+        if (cause === "backlog") return;
         this.deps.broadcast(event);
         // The box holds read items too: only something unread rings the phone.
         if (!event.read) this.deps.push(event);
@@ -110,7 +109,7 @@ export class ItemLifecycle {
         if (!held) return false;
         if (op === "removed") {
             this.deps.store.remove(key);
-            if (cause !== "expired") this.deps.forget(key);
+            if (cause === "expired") this.deps.store.markGone(key);
         } else if (op === "read") {
             this.deps.store.markRead(key);
         } else {
@@ -118,6 +117,28 @@ export class ItemLifecycle {
         }
         this.tell({ op, key, source: held.source });
         return true;
+    }
+
+    knows(key: string): boolean {
+        return this.deps.store.knows(key);
+    }
+
+    goneAtCollection(key: string): void {
+        this.deps.store.markGone(key);
+    }
+
+    isFresh(): boolean {
+        return this.deps.store.isFresh();
+    }
+
+    /** Its object is back at the source (a mail restored from the trash): the next collection takes it again. */
+    mayReturn(key: string): void {
+        this.deps.store.clearGone(key);
+    }
+
+    /** Forgets the keys gone before `cutoff`, so a source listing them long after may bring them back. */
+    forgetGoneBefore(cutoff: number): number {
+        return this.deps.store.purgeGone(cutoff);
     }
 
     /** The Core on the WebSocket, and the views that follow — settled when read or gone, so a notification comes down. */

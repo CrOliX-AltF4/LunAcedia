@@ -3,8 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
-import { recordingLifecycle } from "../hub/recording_lifecycle.js";
+import { hubOnBox, recordingLifecycle } from "../hub/recording_lifecycle.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -106,10 +105,10 @@ describe("AcediaApiServer — inbox routes", () => {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-inbox-"));
         const store = new EventStore();
         for (const e of events) store.push(e);
-        const hub = new IngestionHub([connector], path.join(dir, "seen.json"));
+        const hub = hubOnBox([connector], { store }).hub;
         const tierStore = new ActionTierStore(path.join(dir, "t.json"), path.join(dir, "o.json"));
         if (Object.keys(tiers).length) await tierStore.patch(tiers as never);
-        const { life, emitted, forgotten } = recordingLifecycle(store, (k) => hub.forget(k));
+        const { life, emitted } = recordingLifecycle(store);
         server = new AcediaApiServer(
             store,
             [connector],
@@ -128,7 +127,7 @@ describe("AcediaApiServer — inbox routes", () => {
         );
         const port = nextPort();
         server.start(port);
-        return { base: `http://localhost:${port}`, store, emitted, forgotten, hub };
+        return { base: `http://localhost:${port}`, store, emitted, hub };
     }
 
     // An action carried out (the agent, a confirmation) follows the box's own path: the wire, the views and a closed
@@ -270,14 +269,15 @@ describe("AcediaApiServer — inbox routes", () => {
 
     it("lists Gmail's trash and restores a mail, which comes back at the next collection", async () => {
         const gmail = fakeGmail();
-        const { base, hub } = await start(gmail, []);
-        const forget = vi.spyOn(hub, "forget");
+        const { base, store } = await start(gmail, []);
+        // Taken out at the source by a rule earlier: remembered as gone, it would never come back.
+        store.markGone("email-t1");
         expect((await call("GET", `${base}/api/inbox/trash`)).body.items[0]).toMatchObject({
             id: "t1",
         });
         const r = await call("POST", `${base}/api/inbox/trash/t1/restore`);
         expect(r.body).toEqual({ ok: true });
         expect(gmail.restoreMessage).toHaveBeenCalledWith("t1");
-        expect(forget).toHaveBeenCalledWith("email-t1");
+        expect(store.knows("email-t1")).toBe(false);
     });
 });

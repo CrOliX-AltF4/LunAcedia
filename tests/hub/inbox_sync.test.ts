@@ -34,21 +34,21 @@ function connector(
 function setup(events: AcediaEvent[], connectors: IConnector[]) {
     const store = new EventStore();
     for (const e of events) store.push(e);
-    const { life, emitted, forgotten } = recordingLifecycle(store);
+    const { life, emitted } = recordingLifecycle(store);
     const sync = new InboxSync({ connectors, store, life });
-    return { store, emitted, forgotten, sync };
+    return { store, emitted, sync };
 }
 
 describe("InboxSync.reconcile", () => {
     it("removes what is gone at the source, forgets it for dedup, and tells the Core", async () => {
-        const { store, emitted, forgotten, sync } = setup(
+        const { store, emitted, sync } = setup(
             [item("email-a"), item("email-b")],
             [connector("email", { "email-a": "gone", "email-b": "unread" })],
         );
         await sync.reconcile();
         expect(store.get("email-a")).toBeUndefined();
         expect(store.get("email-b")).toBeDefined();
-        expect(forgotten).toEqual(["email-a"]);
+        expect(store.knows("email-a")).toBe(false); // may come back if its object does
         expect(emitted).toEqual([{ op: "removed", key: "email-a", source: "email" }]);
     });
 
@@ -158,13 +158,13 @@ describe("InboxSync.reconcile", () => {
 });
 
 describe("InboxSync — informational items expire", () => {
-    it("removes RSS and Home Assistant items past their lifetime, keeps them in dedup, tells the Core", async () => {
+    it("removes RSS and Home Assistant items past their lifetime, remembers them as gone, tells the Core", async () => {
         const store = new EventStore();
         const old = { ...item("rss-old", "rss"), ts: 1_000 };
         const recent = { ...item("ha-recent", "ha"), ts: 9_000 };
         const mail = { ...item("email-old", "email"), ts: 1_000 };
         for (const e of [old, recent, mail]) store.push(e);
-        const { life, emitted, forgotten } = recordingLifecycle(store);
+        const { life, emitted } = recordingLifecycle(store);
         const sync = new InboxSync({
             connectors: [],
             store,
@@ -177,6 +177,6 @@ describe("InboxSync — informational items expire", () => {
         expect(store.has("ha-recent")).toBe(true);
         expect(store.has("email-old")).toBe(true);
         expect(emitted).toEqual([{ op: "removed", key: "rss-old", source: "rss" }]);
-        expect(forgotten).toEqual([]);
+        expect(store.isGone("rss-old")).toBe(true); // still in its feed: not news again
     });
 });

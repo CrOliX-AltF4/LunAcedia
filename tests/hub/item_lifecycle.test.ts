@@ -42,9 +42,9 @@ describe("ItemLifecycle — collected", () => {
         expect(rung).toHaveLength(0);
     });
 
-    it("a recovered item is back in the box only — news to no one", () => {
+    it("a backlog item is in the box only — news to no one", () => {
         const { store, sent, rung, views, life } = setup();
-        life.collected(item("m1"), "recovered");
+        life.collected(item("m1"), "backlog");
         expect(store.has("m1")).toBe(true);
         expect(views).toHaveLength(1);
         expect(sent).toHaveLength(0);
@@ -65,7 +65,7 @@ describe("ItemLifecycle — collected", () => {
 
 describe("ItemLifecycle — refreshed", () => {
     it("changed content: the box holds it, the Core gets an update by key — never the item as news", () => {
-        const { store, emitted, sent, rung, forgotten, life } = setup([item("m1")]);
+        const { store, emitted, sent, rung, life } = setup([item("m1")]);
         life.refreshed(item("m1", { title: "moved" }));
         expect(store.get("m1")).toMatchObject({ title: "moved", read: false });
         expect(emitted).toEqual([
@@ -78,7 +78,6 @@ describe("ItemLifecycle — refreshed", () => {
         ]);
         expect(sent).toHaveLength(0);
         expect(rung).toHaveLength(0);
-        expect(forgotten).toHaveLength(0);
     });
 
     it("tells no one when nothing changed, when the item is not held, or when it is backlog", () => {
@@ -92,10 +91,7 @@ describe("ItemLifecycle — refreshed", () => {
 
 describe("ItemLifecycle — changed", () => {
     it("read and unread: the box follows, the Core is told, the views see a read item settled", () => {
-        const { store, emitted, views, forgotten, life } = setup([
-            item("a"),
-            item("b", { read: true }),
-        ]);
+        const { store, emitted, views, life } = setup([item("a"), item("b", { read: true })]);
         life.changed("a", "read", "gesture");
         life.changed("b", "unread", "source");
         expect(store.get("a")!.read).toBe(true);
@@ -108,25 +104,22 @@ describe("ItemLifecycle — changed", () => {
             ["a", true],
             ["b", false],
         ]);
-        expect(forgotten).toHaveLength(0);
     });
 
-    it("removed: leaves the box and dedup forgets it, so it comes back if its object does", () => {
-        const { store, emitted, forgotten, views, life } = setup([
-            item("rem-1", { source: "tasks" }),
-        ]);
+    it("removed: leaves the box, unknown again — it comes back if its object does", () => {
+        const { store, emitted, views, life } = setup([item("rem-1", { source: "tasks" })]);
         expect(life.changed("rem-1", "removed", "settled")).toBe(true);
         expect(store.has("rem-1")).toBe(false);
-        expect(forgotten).toEqual(["rem-1"]);
+        expect(store.knows("rem-1")).toBe(false); // not gone: it may come back
         expect(emitted).toEqual([{ op: "removed", key: "rem-1", source: "tasks" }]);
         expect(views.at(-1)).toMatchObject({ scope: "box", key: "rem-1", settled: true });
     });
 
-    it("expired: leaves the box but stays in dedup — still in its feed, it must not come back as news", () => {
-        const { store, forgotten, emitted, life } = setup([item("rss-1", { source: "rss" })]);
+    it("expired: leaves the box, remembered as gone — still in its feed, it must not come back as news", () => {
+        const { store, emitted, life } = setup([item("rss-1", { source: "rss" })]);
         life.changed("rss-1", "removed", "expired");
         expect(store.has("rss-1")).toBe(false);
-        expect(forgotten).toHaveLength(0);
+        expect(store.isGone("rss-1")).toBe(true);
         expect(emitted).toHaveLength(1);
     });
 
@@ -150,5 +143,29 @@ describe("the wire message", () => {
             dedupeKey: "sync-removed-email-a-1234",
             meta: { op: "removed", key: "email-a" },
         });
+    });
+});
+
+// One writer: a path that changed the box on its own is how the patches piled up. Reading it is free.
+describe("only the lifecycle writes the box", () => {
+    it("no source file but the lifecycle (and the one-time migration) calls the box's mutators", async () => {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        const root = path.resolve(import.meta.dirname, "../../source");
+        const allowed = new Set([
+            "store/event_store.ts",
+            "hub/item_lifecycle.ts",
+            "store/dedup_migration.ts",
+        ]);
+        const mutator =
+            /\bstore\.(push|remove|markRead|markUnread|refresh|markGone|clearGone|purgeGone)\(/;
+        const offenders: string[] = [];
+        for (const entry of await fs.readdir(root, { recursive: true })) {
+            const rel = entry.split(path.sep).join("/");
+            if (!rel.endsWith(".ts") || allowed.has(rel)) continue;
+            const text = await fs.readFile(path.join(root, entry), "utf-8");
+            if (mutator.test(text)) offenders.push(rel);
+        }
+        expect(offenders).toEqual([]);
     });
 });

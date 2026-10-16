@@ -1,25 +1,28 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
 import type { IConnector } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 import type { GuardOutcome, GuardPipeline } from "../guards/guard_pipeline.js";
 
-const DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const URGENT_POLL_MS = 60_000;
 
-function resolveSeenPath(): string {
-    const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
-    return path.join(storageDir, "dedup_seen.json");
+/**
+ * What the hub asks of the box (ItemLifecycle): it keeps no state of its own about what was collected.
+ */
+export interface KnownItems {
+    /** Held, or gone and not to come back: a source listing it again is not news. */
+    knows(key: string): boolean;
+    /** A rule took it out at the source while it was collected: never stored, never to come back. */
+    goneAtCollection(key: string): void;
+    /** Nothing was restored at start: the first collection is the backlog, not news. */
+    isFresh(): boolean;
 }
 
 /**
- * `recovered`: not news to anyone downstream — the box lost this item and it came back (recoverMissing), it
- * was collected by the first sweep of a fresh install, or its connector flagged it as backlog (`meta.backlog`:
- * an old mail collected because the box is the whole inbox, C7). Stored in the box, never announced.
+ * `backlog`: not news to anyone downstream — collected by the first sweep of a fresh install, or flagged as backlog
+ * by its connector (`meta.backlog`: an old mail collected because the box is the whole inbox, C7). Stored in the box,
+ * never announced.
  */
 export interface DispatchMeta {
-    recovered: boolean;
+    backlog: boolean;
 }
 
 type EventHandler = (event: AcediaEvent, meta?: DispatchMeta) => void;
@@ -49,12 +52,9 @@ interface HealthState {
 export class IngestionHub {
     private readonly handlers = new Set<EventHandler>();
     private readonly refreshHandlers = new Set<RefreshHandler>();
-    private readonly seen = new Map<string, number>(); // dedupeKey → ts
-    private readonly recovering = new Set<string>(); // forgotten by recoverMissing(), not yet re-collected
-    /** No dedup file at load: the first sweep is the backlog (fresh install, storage moved), not news. */
+    /** A fresh box: the first sweep is the backlog (fresh install, storage moved), not news. */
     private quietFirstSweep = false;
     private readonly health = new Map<string, HealthState>(); // connector slug → poll health
-    private readonly seenPath: string;
     private urgentTimer: ReturnType<typeof setInterval> | null = null;
     private normalTimer: ReturnType<typeof setInterval> | null = null;
     private started = false;
@@ -65,14 +65,8 @@ export class IngestionHub {
 
     constructor(
         private readonly connectors: IConnector[],
-        seenPath?: string,
+        private readonly known: KnownItems,
         private readonly guard?: GuardPipeline,
-        /**
-         * Whether the box still holds a key. A held key is never forgotten by the dedup TTL: an item still in
-         * the box (an old unread mail, a task overdue for weeks) would otherwise come back as news after the
-         * next restart.
-         */
-        private readonly isHeld: (key: string) => boolean = () => false,
         /**
          * Carries out what a rule does at the source and says what came of it: `removed` = the mail left the
          * inbox (it is then neither stored nor announced), `read` = it was marked read. Absent: rules only sort the box.
@@ -82,7 +76,6 @@ export class IngestionHub {
             actions: NonNullable<GuardOutcome["source"]>,
         ) => Promise<{ removed: boolean; read: boolean }>,
     ) {
-        this.seenPath = seenPath ?? resolveSeenPath();
         for (const c of connectors) {
             this.health.set(c.slug, { lastSuccessAt: null, lastError: null });
             c.setSettledFilter?.((key) => this.isSettled(key));
@@ -91,7 +84,7 @@ export class IngestionHub {
 
     /** Already dispatched, or dropped by a guard under the current rules — nothing left to do for this key. */
     private isSettled(key: string): boolean {
-        return this.seen.has(key) || (this.guard?.isSettled(key) ?? false);
+        return this.known.knows(key) || (this.guard?.isSettled(key) ?? false);
     }
 
     /**
@@ -114,8 +107,7 @@ export class IngestionHub {
                 const done = await this.ruleActor(outcome.event, outcome.source);
                 if (done.removed) {
                     // Out of the inbox at the source: settled, never stored nor announced.
-                    this.seen.set(event.dedupeKey, event.ts);
-                    void this.saveSeen();
+                    this.known.goneAtCollection(event.dedupeKey);
                     continue;
                 }
                 if (done.read) {
@@ -128,57 +120,9 @@ export class IngestionHub {
         return out;
     }
 
-    /**
-     * Drops a key from dedup: an item removed because its source object is gone comes back if
-     * the object does — a mail restored from the trash, a GitHub thread with new activity.
-     */
-    forget(key: string): void {
-        if (this.seen.delete(key)) void this.saveSeen();
-    }
-
-    /**
-     * Forgets every seen key the box no longer holds so the next collection takes it again, and flags its
-     * return as recovered (live check 2026-09-28): the box used to be memory-only while this dedup was on
-     * disk, so a restart left the inbox's mail "seen" and never shown. A recovered item is not news — the
-     * caller stores it without re-broadcasting or pushing it. Call after load(), before start(). Returns
-     * the number of keys forgotten; one that the source no longer has simply never comes back (R8).
-     */
-    recoverMissing(isHeld: (key: string) => boolean): number {
-        let forgotten = 0;
-        for (const key of [...this.seen.keys()]) {
-            if (isHeld(key)) continue;
-            this.seen.delete(key);
-            this.recovering.add(key);
-            forgotten++;
-        }
-        if (forgotten > 0) void this.saveSeen();
-        return forgotten;
-    }
-
     /** Re-dispatches a user-restored event, bypassing both dedup and the guard (the user's decision wins). */
     dispatchRestored(event: AcediaEvent): void {
-        this.seen.set(event.dedupeKey, event.ts);
-        void this.saveSeen();
         this.notify(event);
-    }
-
-    /**
-     * Restores dedup state from the last run — without this, every restart replayed every
-     * currently-unread source event from scratch (AlertQueue.push() masks the duplicate
-     * *entry*, but JarvisClient.handleEvent() still re-triggers proactive voice for each one
-     * unconditionally, so a LunAcedia restart re-announced every open alert). Call before
-     * start(), same convention as ActionTierStore/GoogleTokenStore's load().
-     */
-    async load(): Promise<void> {
-        try {
-            const raw = await fs.readFile(this.seenPath, "utf-8");
-            const parsed = JSON.parse(raw) as Record<string, number>;
-            for (const [key, ts] of Object.entries(parsed)) this.seen.set(key, ts);
-        } catch {
-            // File absent or unreadable — start empty, and keep the first sweep quiet: what it collects
-            // was already there, announcing it would ring the phone for the whole backlog.
-            this.quietFirstSweep = true;
-        }
     }
 
     /**
@@ -240,8 +184,7 @@ export class IngestionHub {
     start(): void {
         if (this.started) return;
         this.started = true;
-
-        this.purgeSeen();
+        this.quietFirstSweep = this.known.isFresh();
 
         // Initial sweep
         void this.pollAll().finally(() => {
@@ -297,7 +240,7 @@ export class IngestionHub {
         try {
             const events = await connector.poll();
             this.recordSuccess(connector);
-            for (const e of events) if (this.seen.has(e.dedupeKey)) this.refresh(e);
+            for (const e of events) if (this.known.knows(e.dedupeKey)) this.refresh(e);
             for (const e of await this.applyGuard(events)) this.dispatch(e);
         } catch (err) {
             this.recordError(connector, (err as Error).message);
@@ -314,16 +257,10 @@ export class IngestionHub {
         this.health.set(connector.slug, { lastSuccessAt: prior.lastSuccessAt, lastError: message });
     }
 
+    /** New to the box: the handlers store it (ItemLifecycle), so a second sighting is known. */
     private dispatch(event: AcediaEvent): void {
-        if (this.seen.has(event.dedupeKey)) return;
-
-        this.seen.set(event.dedupeKey, event.ts);
-        void this.saveSeen();
-        const recovered =
-            this.recovering.delete(event.dedupeKey) ||
-            this.quietFirstSweep ||
-            event.meta?.["backlog"] === true;
-        this.notify(event, { recovered });
+        if (this.known.knows(event.dedupeKey)) return;
+        this.notify(event, { backlog: this.quietFirstSweep || event.meta?.["backlog"] === true });
     }
 
     private refresh(fresh: AcediaEvent): void {
@@ -338,38 +275,13 @@ export class IngestionHub {
         }
     }
 
-    private notify(event: AcediaEvent, meta: DispatchMeta = { recovered: false }): void {
+    private notify(event: AcediaEvent, meta: DispatchMeta = { backlog: false }): void {
         for (const handler of this.handlers) {
             try {
                 handler(event, meta);
             } catch {
                 /* never throw from dispatch */
             }
-        }
-    }
-
-    private purgeSeen(): void {
-        const cutoff = Date.now() - DEDUP_TTL_MS;
-        let purged = false;
-        for (const [key, ts] of this.seen) {
-            if (ts < cutoff && !this.isHeld(key)) {
-                this.seen.delete(key);
-                purged = true;
-            }
-        }
-        if (purged) void this.saveSeen();
-    }
-
-    private async saveSeen(): Promise<void> {
-        try {
-            await fs.mkdir(path.dirname(this.seenPath), { recursive: true });
-            await fs.writeFile(
-                this.seenPath,
-                JSON.stringify(Object.fromEntries(this.seen)),
-                "utf-8",
-            );
-        } catch (e) {
-            console.error("[Hub] Failed to persist dedup state:", (e as Error).message);
         }
     }
 }

@@ -46,7 +46,7 @@ export interface InboxRouteDeps {
     store: EventStore;
     connectors: IConnector[];
     hub: IngestionHub;
-    life: Pick<ItemLifecycle, "changed">;
+    life: Pick<ItemLifecycle, "changed" | "mayReturn">;
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
 
@@ -103,7 +103,7 @@ export class InboxRoutes {
             try {
                 await gmail.restoreMessage(id);
                 // Back in the inbox at the source: let the next collection take it again (R8).
-                this.deps.hub.forget(key);
+                this.deps.life.mayReturn(key);
                 void this.deps.hub.pollOne(gmail.slug);
                 this.record(key, "restore", true);
                 json(res, 200, { ok: true });

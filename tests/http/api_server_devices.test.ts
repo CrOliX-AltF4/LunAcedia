@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { hubOnBox } from "../hub/recording_lifecycle.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
-import { IngestionHub } from "../../source/hub/ingestion_hub.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -54,7 +54,7 @@ describe("AcediaApiServer — paired devices", () => {
         server = new AcediaApiServer(
             new EventStore(),
             [],
-            new IngestionHub([]),
+            hubOnBox([]).hub,
             null,
             new NullAIProvider(),
             SECRET,

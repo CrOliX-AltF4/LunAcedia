@@ -13,6 +13,7 @@ import { IngestionHub } from "./hub/ingestion_hub.js";
 import { ItemLifecycle } from "./hub/item_lifecycle.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
+import { adoptLegacyDedup, legacyDedupPath } from "./store/dedup_migration.js";
 import { EventStore, defaultEventStorePath } from "./store/event_store.js";
 import { FcmSender } from "./push/fcm_sender.js";
 import { createAIProvider } from "./ai/create_ai_provider.js";
@@ -107,19 +108,12 @@ const guardPipeline = new GuardPipeline({
     vipSenders: () => emailClassificationStore.getAll().vipSenders,
 });
 
-// The box is persisted next to dedup — both must survive a restart together.
+// The box: the items held, and the keys gone that must not come back — one state, one file.
 const store = new EventStore(1000, defaultEventStorePath());
 const fcm = FcmSender.fromEnv();
 // The AI set from the dashboard, kept in STORAGE_DIR, over .env — it survives image updates.
 applyStoredAiProvider();
 const ai = createAIProvider();
-const hub = new IngestionHub(
-    connectors,
-    undefined,
-    guardPipeline,
-    (key) => store.has(key),
-    createRuleActor({ connectors, journal: ruleActions }),
-);
 const ws = new AcediaWsServer();
 // What changed, for the views that follow (lot S): the dashboard and the phones by /api/changes, the Core by the
 // WebSocket (system.change), which relays to its own views.
@@ -163,18 +157,24 @@ const sweepDevices = async (): Promise<void> => {
 };
 await sweepDevices();
 setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
-// The sync rule: every item follows its source object; changes go to the Core on the wire.
 // The life of a box item: every path that changes one goes through here, which tells the views, the Core and the phone.
 const lifecycle = new ItemLifecycle({
     store,
-    forget: (key) => hub.forget(key),
     changes,
     broadcast: (event) => ws.broadcast(event),
     push: (event) => void fcm?.send(event),
 });
+// Collection: polls the sources and asks the box what it already knows.
+const hub = new IngestionHub(
+    connectors,
+    lifecycle,
+    guardPipeline,
+    createRuleActor({ connectors, journal: ruleActions }),
+);
 // What the sources say of the items held: read, unread or gone elsewhere.
 const inboxSync = new InboxSync({ connectors, store, life: lifecycle });
 const INBOX_SYNC_MS = 60_000;
+const GONE_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
 // The planning: every event of the horizon and every task, as objects.
 const planningStore = new PlanningStore(defaultPlanningPath());
 await planningStore.load();
@@ -260,13 +260,13 @@ usageAlerts.watch(usageLedger, (alert) => {
     });
 });
 await tierStore.load();
-await hub.load();
 await store.load();
-// Whatever dedup still calls "seen" but the box lost (first run with a persisted box, an unreadable
-// file) is collected again, quietly — see the onEvent handler below.
-const recovered = hub.recoverMissing((key) => store.has(key));
-if (recovered > 0)
-    console.warn(`[LunAcedia] Box: ${recovered} seen item(s) missing, re-collecting`);
+// Once: dedup used to live in a file of its own — its keys the box does not hold become gone.
+const adopted = await adoptLegacyDedup(store, legacyDedupPath(), defaultEventStorePath());
+if (adopted !== null)
+    console.warn(`[LunAcedia] Box: dedup merged into the box (${adopted} gone key(s) kept)`);
+// A key gone for a week may come back if its source still lists it (a held item is never forgotten).
+lifecycle.forgetGoneBefore(Date.now() - GONE_KEPT_MS);
 // Once: the events and tasks the box held before the planning leave it — through the box's own path, so the Core drops
 // its copies and a phone its notifications. Reminders replace them.
 if (planningActive) {
@@ -282,8 +282,8 @@ if (planningActive) {
 ws.start(wsPort);
 api.start(httpPort);
 
-// A recovered item is back in the box only: the Core already holds it and the phone must not ring.
-hub.onEvent((event, meta) => lifecycle.collected(event, meta?.recovered ? "recovered" : "new"));
+// Backlog is stored, never announced: what was already there before is news to no one.
+hub.onEvent((event, meta) => lifecycle.collected(event, meta?.backlog ? "backlog" : "new"));
 // A known item whose content changed at the source (moved event, new due date).
 hub.onRefresh((event) => lifecycle.refreshed(event));
 
