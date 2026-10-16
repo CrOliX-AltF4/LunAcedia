@@ -10,6 +10,7 @@ import { HaConnector } from "./connectors/ha/ha_connector.js";
 import type { IConnector } from "./connectors/connector_interface.js";
 import type { AcediaEvent } from "./types/acedia_event.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
+import { ItemLifecycle, syncEffects } from "./hub/item_lifecycle.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
 import { EventStore, defaultEventStorePath } from "./store/event_store.js";
@@ -166,11 +167,16 @@ setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
 const inboxSync = new InboxSync({
     connectors,
     store,
-    emit: (change) => {
-        ws.broadcast(InboxSync.toWire(change));
-        changes.emit("box", change.key, change.op === "removed" || change.op === "read");
-    },
+    emit: syncEffects((event) => ws.broadcast(event), changes),
     forget: (key) => hub.forget(key),
+});
+// The life of a box item: collection, refresh and reminders change an item through here.
+const lifecycle = new ItemLifecycle({
+    store,
+    sync: inboxSync,
+    changes,
+    broadcast: (event) => ws.broadcast(event),
+    push: (event) => void fcm?.send(event),
 });
 const INBOX_SYNC_MS = 60_000;
 // The planning: every event of the horizon and every task, as objects.
@@ -202,19 +208,10 @@ const reminders = new ReminderEngine({
     },
     settings: () => reminderSettings.get(),
     // A reminder goes where a new box item goes: the box, the views that follow, the Core, a standalone phone.
-    emit: (r) => {
-        const event = reminderEvent(r, planningStore);
-        store.push(event);
-        changes.emit("box", event.dedupeKey);
-        ws.broadcast(event);
-        void fcm?.send(event);
-    },
+    emit: (r) => lifecycle.collected(reminderEvent(r, planningStore), "reminder"),
     // Through the box's own path: the Core drops its copy and a closed phone takes the notification down.
     settle: (keys) => {
-        for (const key of keys) {
-            const held = store.get(key);
-            if (held) inboxSync.applyLocal({ op: "removed", key, source: held.source });
-        }
+        for (const key of keys) lifecycle.removed(key, "settled");
     },
     filePath: defaultReminderJournalPath(),
 });
@@ -248,10 +245,7 @@ const api = new AcediaApiServer(
     {
         settings: reminderSettings,
         engine: reminders,
-        onSnoozed: (key) => {
-            const held = store.get(key);
-            if (held) inboxSync.applyLocal({ op: "removed", key, source: held.source });
-        },
+        onSnoozed: (key) => void lifecycle.removed(key, "snoozed"),
     },
 );
 
@@ -282,8 +276,7 @@ if (recovered > 0)
 if (planningActive) {
     const { events: held } = store.query({ limit: 1000 });
     const old = (held as AcediaEvent[]).filter((e) => BOX_PLANNING_TYPES.has(e.type));
-    for (const e of old)
-        inboxSync.applyLocal({ op: "removed", key: e.dedupeKey, source: e.source });
+    for (const e of old) lifecycle.removed(e.dedupeKey, "planning");
     if (old.length > 0)
         console.warn(
             `[Planning] ${old.length} event(s)/task(s) taken out of the box — reminders replace them`,
@@ -293,30 +286,10 @@ if (planningActive) {
 ws.start(wsPort);
 api.start(httpPort);
 
-hub.onEvent((event, meta) => {
-    store.push(event);
-    changes.emit("box", event.dedupeKey);
-    // A recovered item is back in the box only: the Core already holds it and the phone must not ring.
-    if (meta?.recovered) return;
-    ws.broadcast(event);
-    // The inbox now holds read mail too: only something new and unread is pushed.
-    if (!event.read) void fcm?.send(event);
-});
-
-// A known item whose content changed at the source (moved event, new due date): the box is
-// updated and the Core refreshes its copy by key through an "updated" sync message — never the event itself,
-// which the Core would announce as news. A backlog item was never sent to the Core, so its refresh is not either.
-hub.onRefresh((event) => {
-    const updated = store.refresh(event);
-    if (!updated || updated.meta?.["backlog"] === true) return;
-    const { title, body, priority, ts } = updated;
-    inboxSync.applyLocal({
-        op: "updated",
-        key: updated.dedupeKey,
-        source: updated.source,
-        item: { title, body, priority, ts },
-    });
-});
+// A recovered item is back in the box only: the Core already holds it and the phone must not ring.
+hub.onEvent((event, meta) => lifecycle.collected(event, meta?.recovered ? "recovered" : "new"));
+// A known item whose content changed at the source (moved event, new due date).
+hub.onRefresh((event) => lifecycle.refreshed(event));
 
 hub.start();
 planningSync.start(PLANNING_SYNC_MS);
