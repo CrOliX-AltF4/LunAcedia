@@ -10,7 +10,7 @@ import { HaConnector } from "./connectors/ha/ha_connector.js";
 import type { IConnector } from "./connectors/connector_interface.js";
 import type { AcediaEvent } from "./types/acedia_event.js";
 import { IngestionHub } from "./hub/ingestion_hub.js";
-import { ItemLifecycle, syncEffects } from "./hub/item_lifecycle.js";
+import { ItemLifecycle } from "./hub/item_lifecycle.js";
 import { AcediaWsServer } from "./ws/acedia_ws_server.js";
 import { AcediaApiServer } from "./http/api_server.js";
 import { EventStore, defaultEventStorePath } from "./store/event_store.js";
@@ -164,20 +164,16 @@ const sweepDevices = async (): Promise<void> => {
 await sweepDevices();
 setInterval(() => void sweepDevices(), 24 * 60 * 60 * 1000).unref();
 // The sync rule: every item follows its source object; changes go to the Core on the wire.
-const inboxSync = new InboxSync({
-    connectors,
-    store,
-    emit: syncEffects((event) => ws.broadcast(event), changes),
-    forget: (key) => hub.forget(key),
-});
-// The life of a box item: collection, refresh and reminders change an item through here.
+// The life of a box item: every path that changes one goes through here, which tells the views, the Core and the phone.
 const lifecycle = new ItemLifecycle({
     store,
-    sync: inboxSync,
+    forget: (key) => hub.forget(key),
     changes,
     broadcast: (event) => ws.broadcast(event),
     push: (event) => void fcm?.send(event),
 });
+// What the sources say of the items held: read, unread or gone elsewhere.
+const inboxSync = new InboxSync({ connectors, store, life: lifecycle });
 const INBOX_SYNC_MS = 60_000;
 // The planning: every event of the horizon and every task, as objects.
 const planningStore = new PlanningStore(defaultPlanningPath());
@@ -211,7 +207,7 @@ const reminders = new ReminderEngine({
     emit: (r) => lifecycle.collected(reminderEvent(r, planningStore), "reminder"),
     // Through the box's own path: the Core drops its copy and a closed phone takes the notification down.
     settle: (keys) => {
-        for (const key of keys) lifecycle.removed(key, "settled");
+        for (const key of keys) lifecycle.changed(key, "removed", "settled");
     },
     filePath: defaultReminderJournalPath(),
 });
@@ -236,7 +232,7 @@ const api = new AcediaApiServer(
         ruleActions,
     },
     agent,
-    inboxSync,
+    lifecycle,
     topics,
     { ledger: usageLedger, alerts: usageAlerts },
     devices,
@@ -245,7 +241,7 @@ const api = new AcediaApiServer(
     {
         settings: reminderSettings,
         engine: reminders,
-        onSnoozed: (key) => void lifecycle.removed(key, "snoozed"),
+        onSnoozed: (key) => void lifecycle.changed(key, "removed", "snoozed"),
     },
 );
 
@@ -276,7 +272,7 @@ if (recovered > 0)
 if (planningActive) {
     const { events: held } = store.query({ limit: 1000 });
     const old = (held as AcediaEvent[]).filter((e) => BOX_PLANNING_TYPES.has(e.type));
-    for (const e of old) lifecycle.removed(e.dedupeKey, "planning");
+    for (const e of old) lifecycle.changed(e.dedupeKey, "removed", "planning");
     if (old.length > 0)
         console.warn(
             `[Planning] ${old.length} event(s)/task(s) taken out of the box — reminders replace them`,

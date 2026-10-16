@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { AcediaApiServer } from "../../source/http/api_server.js";
 import { IngestionHub } from "../../source/hub/ingestion_hub.js";
-import { InboxSync, type InboxChange } from "../../source/hub/inbox_sync.js";
+import { recordingLifecycle } from "../hub/recording_lifecycle.js";
 import { EventStore } from "../../source/store/event_store.js";
 import { ActionTierStore } from "../../source/actions/action_tier_store.js";
 import { PendingActionStore } from "../../source/actions/pending_action_store.js";
@@ -107,19 +107,9 @@ describe("AcediaApiServer — inbox routes", () => {
         const store = new EventStore();
         for (const e of events) store.push(e);
         const hub = new IngestionHub([connector], path.join(dir, "seen.json"));
-        const emitted: InboxChange[] = [];
-        const forgotten: string[] = [];
         const tierStore = new ActionTierStore(path.join(dir, "t.json"), path.join(dir, "o.json"));
         if (Object.keys(tiers).length) await tierStore.patch(tiers as never);
-        const sync = new InboxSync({
-            connectors: [connector],
-            store,
-            emit: (c) => emitted.push(c),
-            forget: (k) => {
-                forgotten.push(k);
-                hub.forget(k);
-            },
-        });
+        const { life, emitted, forgotten } = recordingLifecycle(store, (k) => hub.forget(k));
         server = new AcediaApiServer(
             store,
             [connector],
@@ -134,7 +124,7 @@ describe("AcediaApiServer — inbox routes", () => {
             undefined,
             undefined,
             new AgentService(),
-            sync,
+            life,
         );
         const port = nextPort();
         server.start(port);

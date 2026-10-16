@@ -10,7 +10,7 @@ import type { IAIProvider } from "../ai/ai_provider.js";
 import { formatProposalsPrompt } from "../ai/ai_provider.js";
 import { createAIProvider, loadSystemPrompt } from "../ai/create_ai_provider.js";
 import { AgentService } from "../agent/agent_service.js";
-import type { InboxSync } from "../hub/inbox_sync.js";
+import { ItemLifecycle } from "../hub/item_lifecycle.js";
 import { InboxRoutes } from "./inbox_routes.js";
 import { ConversationRoutes } from "./conversation_routes.js";
 import {
@@ -238,8 +238,9 @@ export class AcediaApiServer {
         private readonly guards?: GuardServices,
         // The agent's switch and journal. In memory unless index.ts gives it a file.
         private readonly agent: AgentService = new AgentService(),
-        // The box and the sync rule — absent in tests that do not exercise them.
-        inbox?: InboxSync,
+        // The life of a box item (gestures, actions, the agent's reads) — absent in tests that do not exercise the
+        // box's routes: the box is then changed alone, telling no one.
+        life?: ItemLifecycle,
         // The pocket app's topics — absent in tests that do not exercise them.
         topics?: ConversationStore,
         // LLM usage and its alerts — absent in tests that do not exercise them.
@@ -262,10 +263,8 @@ export class AcediaApiServer {
         this.planningStore = planning?.store ?? null;
         this.devices = devices ?? null;
         this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
-        this.inboxSync = inbox ?? null;
-        this.inboxRoutes = inbox
-            ? new InboxRoutes({ store, connectors, hub, sync: inbox, json })
-            : null;
+        this.life = life ?? ItemLifecycle.local(store);
+        this.inboxRoutes = life ? new InboxRoutes({ store, connectors, hub, life, json }) : null;
         this.conversationRoutes = topics
             ? new ConversationRoutes({
                   topics,
@@ -295,7 +294,7 @@ export class AcediaApiServer {
     /** Null without a topic store. Public for tests: settled() waits for background titles and summaries. */
     readonly conversationRoutes: ConversationRoutes | null;
 
-    private readonly inboxSync: InboxSync | null;
+    private readonly life: ItemLifecycle;
 
     private readonly inboxRoutes: InboxRoutes | null;
 
@@ -328,13 +327,7 @@ export class AcediaApiServer {
                             const connector = this.connectors.find((c) => c.slug === event.source);
                             if (!connector?.inboxGesture) return;
                             const r = await connector.inboxGesture("read", event);
-                            if (r.change && this.inboxSync) {
-                                this.inboxSync.applyLocal({
-                                    op: r.change,
-                                    key: event.dedupeKey,
-                                    source: event.source,
-                                });
-                            }
+                            if (r.change) this.life.changed(event.dedupeKey, r.change, "agent");
                         },
                     },
                     dispatch: (connector, action, capToConfirm) =>
@@ -544,17 +537,9 @@ export class AcediaApiServer {
         if (!sync) return;
         const op =
             sync.effect === "remove" ? "removed" : sync.effect === "read" ? "read" : "unread";
-        const item = this.store.get(sync.dedupeKey);
         // Through the box's own path, like a gesture made in the box: the wire, the views that follow and a closed
-        // phone's notification all learn it. Changing the store alone told nobody, and the next sync, finding the store
-        // already right, never would.
-        if (this.inboxSync && item) {
-            this.inboxSync.applyLocal({ op, key: sync.dedupeKey, source: item.source });
-            return;
-        }
-        if (sync.effect === "remove") this.store.remove(sync.dedupeKey);
-        else if (sync.effect === "read") this.store.markRead(sync.dedupeKey);
-        else this.store.markUnread(sync.dedupeKey);
+        // phone's notification all learn it — the store changed alone told nobody, and the next sync never would.
+        this.life.changed(sync.dedupeKey, op, "action");
     }
 
     /** Executes a confirmed pending action, and records how it ended (a card in a topic shows it). */

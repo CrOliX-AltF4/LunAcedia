@@ -1,6 +1,6 @@
 /**
  * The box: Master's own gestures on an item, applied at the source — Gmail, GitHub — then
- * followed by the item and told to the Core (InboxSync.applyLocal, the same path as a change seen at the
+ * followed by the item and told to the Core (ItemLifecycle, the same path as a change seen at the
  * source, R8). A gesture is Master's own hand, not an autonomous decision: it runs directly, without the
  * tier gate that governs the agent (D1), and every gesture is journaled.
  *
@@ -14,7 +14,7 @@
 import type http from "node:http";
 import type { EventStore } from "../store/event_store.js";
 import type { IngestionHub } from "../hub/ingestion_hub.js";
-import type { InboxSync } from "../hub/inbox_sync.js";
+import type { ItemLifecycle } from "../hub/item_lifecycle.js";
 import type { IConnector, InboxGesture } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 import type { TrashPage } from "../connectors/email/gmail_connector.js";
@@ -46,7 +46,7 @@ export interface InboxRouteDeps {
     store: EventStore;
     connectors: IConnector[];
     hub: IngestionHub;
-    sync: InboxSync;
+    life: Pick<ItemLifecycle, "changed">;
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
 
@@ -132,7 +132,7 @@ export class InboxRoutes {
             // and the item is read in the box (there is no read state to change at its source).
             if (gesture === "open" && !connector?.inboxGesture) {
                 const change = item.read ? null : "read";
-                if (change) this.deps.sync.applyLocal({ op: change, key, source: item.source });
+                if (change) this.deps.life.changed(key, change, "gesture");
                 this.record(key, gesture, true);
                 json(res, 200, { ok: true, change, body: item.body ?? "" });
                 return true;
@@ -145,7 +145,7 @@ export class InboxRoutes {
             try {
                 const result = await connector.inboxGesture(gesture, item);
                 if (result.change) {
-                    this.deps.sync.applyLocal({ op: result.change, key, source: item.source });
+                    this.deps.life.changed(key, result.change, "gesture");
                 }
                 this.record(key, gesture, true);
                 json(res, 200, {

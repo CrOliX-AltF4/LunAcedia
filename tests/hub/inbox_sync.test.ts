@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { InboxSync, INBOX_CHANGED, type InboxChange } from "../../source/hub/inbox_sync.js";
+import { InboxSync } from "../../source/hub/inbox_sync.js";
+import { recordingLifecycle } from "./recording_lifecycle.js";
 import { EventStore } from "../../source/store/event_store.js";
 import type { IConnector, SourceState } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
-// An item never outlives its linked object, wherever the change happened.
+// An item never outlives its linked object: what a source says of the items held becomes their transition.
 
 function item(key: string, source: AcediaEvent["source"] = "email", read = false): AcediaEvent {
     return {
@@ -33,14 +34,8 @@ function connector(
 function setup(events: AcediaEvent[], connectors: IConnector[]) {
     const store = new EventStore();
     for (const e of events) store.push(e);
-    const emitted: InboxChange[] = [];
-    const forgotten: string[] = [];
-    const sync = new InboxSync({
-        connectors,
-        store,
-        emit: (c) => emitted.push(c),
-        forget: (k) => forgotten.push(k),
-    });
+    const { life, emitted, forgotten } = recordingLifecycle(store);
+    const sync = new InboxSync({ connectors, store, life });
     return { store, emitted, forgotten, sync };
 }
 
@@ -162,51 +157,6 @@ describe("InboxSync.reconcile", () => {
     });
 });
 
-describe("InboxSync.applyLocal — a gesture made through LunAcedia", () => {
-    it("applies it to the store and tells the Core the same way", () => {
-        const { store, emitted, forgotten, sync } = setup([item("email-a"), item("email-b")], []);
-        sync.applyLocal({ op: "removed", key: "email-a", source: "email" });
-        sync.applyLocal({ op: "read", key: "email-b", source: "email" });
-        expect(store.get("email-a")).toBeUndefined();
-        expect(forgotten).toEqual(["email-a"]);
-        expect(store.get("email-b")!.read).toBe(true);
-        expect(emitted).toHaveLength(2);
-    });
-});
-
-describe("the wire message", () => {
-    it("is an AcediaEvent of its own type, carrying the change, never stored as an item", () => {
-        const msg = InboxSync.toWire({ op: "removed", key: "email-a", source: "email" }, 1234);
-        expect(msg).toEqual({
-            type: INBOX_CHANGED,
-            ts: 1234,
-            source: "email",
-            title: "",
-            priority: "info",
-            dedupeKey: "sync-removed-email-a-1234",
-            meta: { op: "removed", key: "email-a" },
-        });
-    });
-});
-
-describe("InboxSync — updated", () => {
-    it("sends the fresh content on the wire and touches nothing in the store", () => {
-        const { store, emitted, forgotten, sync } = setup([item("cal-1", "calendar")], []);
-        sync.applyLocal({
-            op: "updated",
-            key: "cal-1",
-            source: "calendar",
-            item: { title: "moved", priority: "normal", ts: 2, body: undefined },
-        });
-        expect(store.get("cal-1")?.read).toBe(false);
-        expect(forgotten).toEqual([]);
-        expect(emitted).toHaveLength(1);
-        const wire = InboxSync.toWire(emitted[0]!, 9);
-        expect(wire.type).toBe(INBOX_CHANGED);
-        expect(wire.meta).toMatchObject({ op: "updated", key: "cal-1", item: { title: "moved" } });
-    });
-});
-
 describe("InboxSync — informational items expire", () => {
     it("removes RSS and Home Assistant items past their lifetime, keeps them in dedup, tells the Core", async () => {
         const store = new EventStore();
@@ -214,13 +164,11 @@ describe("InboxSync — informational items expire", () => {
         const recent = { ...item("ha-recent", "ha"), ts: 9_000 };
         const mail = { ...item("email-old", "email"), ts: 1_000 };
         for (const e of [old, recent, mail]) store.push(e);
-        const emitted: InboxChange[] = [];
-        const forgotten: string[] = [];
+        const { life, emitted, forgotten } = recordingLifecycle(store);
         const sync = new InboxSync({
             connectors: [],
             store,
-            emit: (c) => emitted.push(c),
-            forget: (k) => forgotten.push(k),
+            life,
             infoTtlMs: 5_000,
             now: () => 10_000,
         });
