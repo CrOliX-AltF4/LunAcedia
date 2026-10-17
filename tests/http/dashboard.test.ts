@@ -486,6 +486,7 @@ describe("dashboard mail sorting", () => {
             inconnu: on,
         },
         personalSenders: ["maman@famille.fr"],
+        mailboxes: [{ address: "pro@<espi>.fr", mailClass: "pro" }],
         counts: { pro: 4, pub: 9 },
     };
     const rules = [
@@ -531,6 +532,8 @@ describe("dashboard mail sorting", () => {
         expect(out).toContain("classe Pub (masquée)");
         expect(out).toContain("règle « AliExpress »");
         expect(out).toContain("maman@famille.fr");
+        expect(out).toContain('data-address="pro@&lt;espi&gt;.fr"');
+        expect(out).toContain('<option value="pro" selected>Pro</option>');
     });
 
     it("switches one rule by the id read from its row, and restores by the key read from its row", () => {

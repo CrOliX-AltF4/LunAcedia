@@ -121,6 +121,21 @@ function isLabelMutation(action: ConnectorAction): action is LabelMutation {
  *
  * GMAIL_RULES is no longer read here: it is turned into guard rules once, at startup (priority_migration.ts).
  */
+/** The headers that say who a mail was addressed to, a forwarded box included. */
+const RECIPIENT_HEADERS = ["To", "Cc", "Delivered-To", "X-Original-To", "X-Forwarded-To"];
+const MAX_RECIPIENTS = 20;
+
+/** Every address of those headers, lower case, once each — a header may come more than once (Delivered-To). */
+export function recipientsOf(headers: { name: string; value: string }[]): string[] {
+    const wanted = new Set(RECIPIENT_HEADERS.map((h) => h.toLowerCase()));
+    const out = new Set<string>();
+    for (const h of headers) {
+        if (!wanted.has(h.name.toLowerCase())) continue;
+        for (const m of h.value.matchAll(/[^\s<>,;"']+@[^\s<>,;"']+/g)) out.add(m[0].toLowerCase());
+    }
+    return [...out].slice(0, MAX_RECIPIENTS);
+}
+
 export class GmailConnector implements IConnector {
     readonly slug: ConnectorSlug = "email";
     get name(): string {
@@ -206,7 +221,8 @@ export class GmailConnector implements IConnector {
             try {
                 const resp = await fetch(
                     `${GMAIL_API}/messages/${id}?format=metadata` +
-                        `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=List-Unsubscribe`,
+                        `&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=List-Unsubscribe` +
+                        RECIPIENT_HEADERS.map((h) => `&metadataHeaders=${h}`).join(""),
                     { headers: authHeaders },
                 );
                 if (!resp.ok) continue;
@@ -247,6 +263,9 @@ export class GmailConnector implements IConnector {
                         headers: header("List-Unsubscribe")
                             ? { "list-unsubscribe": header("List-Unsubscribe").slice(0, 200) }
                             : {},
+                        // Who it was addressed to — a forwarded box's address included (Delivered-To, X-Original-To…):
+                        // what tells which of Master's boxes it came to.
+                        recipients: recipientsOf(msg.payload.headers),
                     },
                 });
             } catch {

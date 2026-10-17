@@ -336,6 +336,8 @@ function renderSort(cfg,rules,journal){
   const ruleRows=classify.map(r=>{const a=r.actions.find(x=>x.type==='classify');const n=(CLASS_NAMES.find(c=>c[0]===a.mailClass)||[,a.mailClass])[1];return \`<tr class="sort-rule" data-id="\${esc(r.id)}"><td>\${ruleWhen(r)}</td><td>\${esc(n)}</td><td><input type="checkbox" \${r.enabled?'checked':''} onchange="toggleRule(this)" aria-label="Règle active"></td><td><button onclick="deleteRule(this)">Supprimer</button></td></tr>\`;}).join('')||'<tr><td colspan="4"><small>Aucune règle qui classe — un geste « Classer… » sur un mail en crée une.</small></td></tr>';
   const kept=(journal.entries||[]).map(e=>\`<div class="trash-row" data-key="\${esc(e.event.dedupeKey)}"><span>\${esc(e.event.title)} — \${esc((e.event.meta||{}).from||'')} <small>· \${esc(keptWhy(e,rules))}</small></span><button onclick="restoreKept(this)">Restaurer</button></div>\`).join('')||'<p><small>Rien n’est gardé hors de la boîte.</small></p>';
   const opts=CLASS_NAMES.slice(0,4).map(([c,l])=>\`<option value="\${c}">\${l}</option>\`).join('');
+  const boxOpts=(sel)=>'<option value="">— (selon le mail)</option>'+CLASS_NAMES.slice(0,4).map(([c,l])=>\`<option value="\${c}" \${sel===c?'selected':''}>\${l}</option>\`).join('');
+  const boxes=(cfg.mailboxes||[]).map(b=>\`<div class="trash-row sort-box" data-address="\${esc(b.address)}"><span>\${esc(b.address)}</span><select onchange="setBoxClass(this)" aria-label="Classe par défaut de \${esc(b.address)}">\${boxOpts(b.mailClass)}</select><button onclick="removeBox(this)">Retirer</button></div>\`).join('')||'<p><small>Aucune — ajoute les adresses de tes boîtes redirigées vers celle-ci.</small></p>';
   return \`<div class="plan">
 <p>Classé à l'arrivée sans aucune IA. Une classe « hors IA » n'est lue par aucun modèle : l'assistant, le digest, les propositions, le hub.</p>
 <h4>Classes</h4>
@@ -344,6 +346,10 @@ function renderSort(cfg,rules,journal){
 <h4>Expéditeurs perso</h4>
 <label><small>Un par ligne — un nom, une adresse ou une partie</small><textarea id="sort-perso" rows="4">\${esc((cfg.personalSenders||[]).join('\\n'))}</textarea></label>
 <button onclick="savePerso()">Enregistrer</button>
+<h4>Tes boîtes</h4>
+<p><small>Les boîtes redirigées vers celle-ci : chaque mail dit sur laquelle il est arrivé ; une classe par défaut s'applique à ce qui n'est ni perso, ni pub, ni notification.</small></p>
+\${boxes}
+<div class="sort-new"><input id="sort-box" type="email" placeholder="adresse@exemple.fr" aria-label="Adresse d'une boîte"><button onclick="addBox()">Ajouter</button></div>
 <h4>Règles qui classent</h4>
 <table class="sort-table"><thead><tr><th>Quand</th><th>Classer</th><th>Active</th><th></th></tr></thead><tbody>\${ruleRows}</tbody></table>
 <div class="sort-new"><select id="sort-field"><option value="domain">le domaine de l'expéditeur est</option><option value="from">l'expéditeur contient</option><option value="subject">le sujet contient</option></select><input id="sort-value" type="text" placeholder="exemple.fr"><select id="sort-class">\${opts}</select><button onclick="previewSortRule()">Aperçu</button><button onclick="addSortRule()">Ajouter</button> <span id="sort-preview"></span></div>
@@ -351,6 +357,7 @@ function renderSort(cfg,rules,journal){
 <h4>Gardés hors de la boîte <small>· \${journal.total??0}</small></h4>\${kept}</div>\`;
 }
 let sortRules=[];
+let sortBoxes=[];
 async function openSort(){
   const d=document.getElementById('digest');
   document.getElementById('digest-title').textContent='Tri des mails';
@@ -362,6 +369,7 @@ async function openSort(){
     const [cfg,rules,journal]=await Promise.all([req('/api/config/mail-classes').then(r=>r.json()),req('/api/guard/rules').then(r=>r.json()),req('/api/guard/journal?limit=50').then(r=>r.json())]);
     if(!cfg.classes){box.textContent=cfg.error||'Tri des mails indisponible.';return;}
     sortRules=rules.rules||[];
+    sortBoxes=cfg.mailboxes||[];
     box.innerHTML=renderSort(cfg,sortRules,journal);
   }catch(e){box.textContent='Error: '+e.message;}
 }
@@ -377,6 +385,13 @@ async function savePerso(){
   const r=await req('/api/config/mail-classes',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({personalSenders:list})}).catch(()=>null);
   document.getElementById('sort-msg').textContent=r&&r.ok?'Enregistré.':'Pas enregistré.';
 }
+async function saveBoxes(list){
+  const r=await req('/api/config/mail-classes',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({mailboxes:list})}).catch(()=>null);
+  if(r&&r.ok)openSort();else document.getElementById('sort-msg').textContent='Pas enregistré.';
+}
+function setBoxClass(sel){const a=sel.closest('.sort-box').dataset.address;saveBoxes(sortBoxes.map(b=>b.address===a?{address:a,mailClass:sel.value||null}:b));}
+function removeBox(btn){const a=btn.closest('.sort-box').dataset.address;saveBoxes(sortBoxes.filter(b=>b.address!==a));}
+function addBox(){const a=document.getElementById('sort-box').value.trim().toLowerCase();if(!a)return;saveBoxes([...sortBoxes.filter(b=>b.address!==a),{address:a,mailClass:null}]);}
 async function toggleRule(input){
   const id=input.closest('.sort-rule').dataset.id;
   const r=await req('/api/guard/rules/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:input.checked})}).catch(()=>null);

@@ -15,6 +15,7 @@ import { GuardRulesStore, validateRules } from "../../source/guards/guard_rules_
 import { GuardStats } from "../../source/guards/guard_stats.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 import { EventStore } from "../../source/store/event_store.js";
+import { recipientsOf } from "../../source/connectors/email/gmail_connector.js";
 
 // Mail sorted at collection without any model: a class says if it shows, if a model may read it, if it rings.
 
@@ -72,6 +73,31 @@ describe("classifyMail", () => {
     });
 });
 
+describe("the box a mail came to", () => {
+    it("reads every recipient once, a forwarded box's address included", () => {
+        expect(
+            recipientsOf([
+                { name: "To", value: "Moi <Pro@ESPI.fr>, autre@x.org" },
+                { name: "Delivered-To", value: "moi@gmail.com" },
+                { name: "Delivered-To", value: "moi@gmail.com" },
+                { name: "X-Original-To", value: "pro@espi.fr" },
+                { name: "Subject", value: "pas@ici.fr" },
+            ]),
+        ).toEqual(["pro@espi.fr", "autre@x.org", "moi@gmail.com"]);
+    });
+
+    it("a box's class goes to what is neither personal, nor advertising, nor a notification — a VIP's included", () => {
+        const none = { personal: false, vip: false, boxClass: "pro" as const };
+        expect(classifyMail(mail("1"), none)).toBe("pro");
+        expect(classifyMail(mail("2", { labels: ["CATEGORY_PROMOTIONS"] }), none)).toBe("pub");
+        expect(classifyMail(mail("3"), { ...none, personal: true })).toBe("perso");
+        expect(classifyMail(mail("4"), { ...none, vip: true })).toBe("pro");
+        expect(classifyMail(mail("5"), { ...none, ruleClass: "notification" })).toBe(
+            "notification",
+        );
+    });
+});
+
 describe("mail classes in the pipeline and their settings", () => {
     let dir: string;
     afterEach(async () => {
@@ -113,6 +139,26 @@ describe("mail classes in the pipeline and their settings", () => {
         ).toBe("notification");
         const task: AcediaEvent = { ...mail("t"), source: "tasks", meta: {} };
         expect(classOf(task)).toBeUndefined();
+    });
+
+    it("says which of Master's boxes a mail came to, and gives it the box's class", async () => {
+        const { pipeline, classes } = await setup();
+        await classes.patch({ mailboxes: [{ address: "Pro@Espi.fr", mailClass: "pro" }] });
+        const out = pipeline.process(
+            mail("1", { recipients: ["moi@gmail.com", "pro@espi.fr"] }),
+        ).event;
+        expect(out.meta).toMatchObject({ mailbox: "pro@espi.fr", mailClass: "pro" });
+        expect(
+            pipeline.process(mail("2", { recipients: ["moi@gmail.com"] })).event.meta,
+        ).not.toHaveProperty("mailbox");
+        expect(
+            validateMailClassPatch({
+                mailboxes: [{ address: "pas une adresse", mailClass: null }],
+            }),
+        ).toContain("address");
+        expect(
+            validateMailClassPatch({ mailboxes: [{ address: "a@b.c", mailClass: "spam" }] }),
+        ).toContain("Unknown class");
     });
 
     it("a hidden class keeps its mail out, journaled and restorable — never a VIP's — and showing it again lets it in", async () => {
