@@ -264,6 +264,51 @@ describe("AcediaApiServer — inbox routes", () => {
         expect(emitted).toEqual([]);
     });
 
+    // a conflict's way out is Master's gesture — the event moved at the calendar, the conflict gone.
+    it("solves a conflict: its event moved to the chosen slot, the conflict out of the box", async () => {
+        const executeAction = vi.fn(async () => {});
+        const calendar = {
+            slug: "calendar" as const,
+            name: "Calendar",
+            poll: async () => [],
+            executeAction,
+        };
+        const conflict: AcediaEvent = {
+            type: "planning.conflict",
+            ts: 1,
+            source: "calendar",
+            title: "Conflit — A et B",
+            priority: "normal",
+            dedupeKey: "conflict-primary/a-primary/b",
+            read: false,
+            meta: {
+                conflict: true,
+                moving: "primary/b",
+                solutions: [
+                    {
+                        eventId: "primary/b",
+                        start: "2026-10-20T13:00:00.000Z",
+                        end: "2026-10-20T14:00:00.000Z",
+                    },
+                ],
+            },
+        };
+        const { base, store, emitted } = await start(calendar as never, [conflict]);
+        const key = encodeURIComponent(conflict.dedupeKey);
+
+        expect((await call("POST", `${base}/api/inbox/${key}/solve/3`)).status).toBe(400);
+        const r = await call("POST", `${base}/api/inbox/${key}/solve/0`);
+        expect(r.status).toBe(200);
+        expect(executeAction).toHaveBeenCalledWith({
+            kind: "update_event",
+            sourceId: "primary/b",
+            fields: { start: "2026-10-20T13:00:00.000Z", end: "2026-10-20T14:00:00.000Z" },
+        });
+        expect(store.has(conflict.dedupeKey)).toBe(false);
+        expect(emitted.at(-1)).toMatchObject({ op: "removed", key: conflict.dedupeKey });
+        expect((await call("POST", `${base}/api/inbox/${key}/solve/0`)).status).toBe(404);
+    });
+
     it("lists Gmail's trash and restores a mail, which comes back at the next collection", async () => {
         const gmail = fakeGmail();
         const { base, store } = await start(gmail, []);

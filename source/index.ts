@@ -46,6 +46,7 @@ import {
     defaultReminderSettingsPath,
 } from "./planning/reminder_settings.js";
 import { BOX_PLANNING_TYPES, reminderEvent } from "./planning/reminder_delivery.js";
+import { CONFLICT_HORIZON_DAYS, conflictItems, syncConflicts } from "./planning/conflict_watch.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -294,6 +295,19 @@ hub.onRefresh((event) => lifecycle.refreshed(event));
 hub.start();
 planningSync.start(PLANNING_SYNC_MS);
 if (planningActive) reminders.start(60_000);
+// The conflicts of the coming days in the box, with their ways out — only on a planning read in full:
+// an empty one after a restart would take every conflict down, then bring them back ringing.
+const syncPlanningConflicts = (): void => {
+    const now = Date.now();
+    const snap = planningStore.snapshot(
+        now - DAY_MS,
+        now + (CONFLICT_HORIZON_DAYS + 1) * DAY_MS,
+        planningSync.configured(),
+    );
+    if (!snap.complete) return;
+    syncConflicts(lifecycle, store, conflictItems(snap.events, now));
+};
+const conflictTimer = planningActive ? setInterval(syncPlanningConflicts, 60_000) : null;
 
 const inboxSyncTimer = setInterval(() => void inboxSync.reconcile(), INBOX_SYNC_MS);
 
@@ -316,6 +330,7 @@ process.on("SIGINT", () => {
     hub.stop();
     planningSync.stop();
     reminders.stop();
+    if (conflictTimer) clearInterval(conflictTimer);
     clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();
@@ -326,6 +341,7 @@ process.on("SIGTERM", () => {
     hub.stop();
     planningSync.stop();
     reminders.stop();
+    if (conflictTimer) clearInterval(conflictTimer);
     clearInterval(inboxSyncTimer);
     ws.stop();
     api.stop();

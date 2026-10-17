@@ -261,7 +261,16 @@ export class AcediaApiServer {
         this.devices = devices ?? null;
         this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
         this.life = life ?? ItemLifecycle.local(store);
-        this.inboxRoutes = life ? new InboxRoutes({ store, connectors, hub, life, json }) : null;
+        this.inboxRoutes = life
+            ? new InboxRoutes({
+                  store,
+                  connectors,
+                  hub,
+                  life,
+                  ...(planning && { planningSync: planning.sync }),
+                  json,
+              })
+            : null;
         this.conversationRoutes = topics
             ? new ConversationRoutes({
                   topics,

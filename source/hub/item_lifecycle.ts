@@ -38,7 +38,7 @@ export function toWire(change: InboxChange, ts: number = Date.now()): AcediaEven
  * first sweep, an old mail of the inbox) — in the box only, it is news to no one. `reminder`: the planning calls for
  * it; its truth is the planning, never a source.
  */
-export type CollectCause = "new" | "backlog" | "reminder";
+export type CollectCause = "new" | "backlog" | "reminder" | "conflict";
 
 export type ItemOp = "read" | "unread" | "removed";
 

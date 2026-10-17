@@ -6,6 +6,7 @@
  *
  *   GET  /api/inbox                          { items (newest first), unread }
  *   POST /api/inbox/:key/:gesture            open | read | archive | trash | spam | done
+ *   POST /api/inbox/:key/solve/:n            a conflict's n-th way out: its event moved there
  *   GET  /api/inbox/trash?page=…             Gmail's trash (30 days, kept by Gmail), a page at a time:
  *                                            { items, next?, skipped }
  *   POST /api/inbox/trash/:messageId/restore back to the inbox, collected again at the next pass
@@ -26,7 +27,7 @@ const BOX_SIZE = 200;
 export interface InboxJournalEntry {
     at: string;
     key: string;
-    gesture: InboxGesture | "restore";
+    gesture: InboxGesture | "restore" | "solve";
     ok: boolean;
     error?: string;
 }
@@ -47,6 +48,8 @@ export interface InboxRouteDeps {
     connectors: IConnector[];
     hub: IngestionHub;
     life: Pick<ItemLifecycle, "changed" | "mayReturn">;
+    /** The planning, read again once a conflict's event was moved — absent where it is not wired. */
+    planningSync?: { syncNow(): Promise<void> };
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
 
@@ -114,6 +117,13 @@ export class InboxRoutes {
             return true;
         }
 
+        // A conflict's way out, chosen by Master: his hand, carried out at once like any gesture of the box.
+        const solve = path.match(/^\/api\/inbox\/([^/]+)\/solve\/(\d+)$/);
+        if (method === "POST" && solve) {
+            await this.solve(res, decodeURIComponent(solve[1]!), Number(solve[2]));
+            return true;
+        }
+
         const gestureMatch = path.match(/^\/api\/inbox\/([^/]+)\/([^/]+)$/);
         if (method === "POST" && gestureMatch) {
             const key = decodeURIComponent(gestureMatch[1]!);
@@ -166,9 +176,49 @@ export class InboxRoutes {
         return false;
     }
 
+    /** Moves the conflict's event to the chosen slot at the calendar, then the conflict leaves the box. */
+    private async solve(res: http.ServerResponse, key: string, n: number): Promise<void> {
+        const { json } = this.deps;
+        const item = this.deps.store.get(key);
+        if (!item || item.type !== "planning.conflict") {
+            json(res, 404, { error: "No such conflict in the box" });
+            return;
+        }
+        const solutions = (item.meta?.["solutions"] ?? []) as {
+            eventId: string;
+            start: string;
+            end: string;
+        }[];
+        const chosen = solutions[n];
+        if (!chosen) {
+            json(res, 400, { error: `No way out number ${n}` });
+            return;
+        }
+        const calendar = this.deps.connectors.find((c) => c.slug === "calendar");
+        if (!calendar?.executeAction) {
+            json(res, 503, { error: "No calendar to move the event in" });
+            return;
+        }
+        try {
+            await calendar.executeAction({
+                kind: "update_event",
+                sourceId: chosen.eventId,
+                fields: { start: chosen.start, end: chosen.end },
+            });
+        } catch (e) {
+            this.record(key, "solve", false, (e as Error).message);
+            json(res, 502, { error: (e as Error).message });
+            return;
+        }
+        this.record(key, "solve", true);
+        this.deps.life.changed(key, "removed", "gesture");
+        void this.deps.planningSync?.syncNow();
+        json(res, 200, { ok: true, moved: chosen });
+    }
+
     private record(
         key: string,
-        gesture: InboxGesture | "restore",
+        gesture: InboxGesture | "restore" | "solve",
         ok: boolean,
         error?: string,
     ): void {
