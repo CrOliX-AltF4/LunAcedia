@@ -10,6 +10,9 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "GET", pattern: /^\/api\/inbox\/trash$/ },
     { method: "POST", pattern: /^\/api\/inbox\/trash\/[^/]+\/restore$/ },
     { method: "POST", pattern: /^\/api\/inbox\/[^/]+\/[^/]+$/ },
+    // The Planning screen (lot AT7): read, and « Fait » on a task.
+    { method: "GET", pattern: /^\/api\/planning$/ },
+    { method: "POST", pattern: /^\/api\/planning\/tasks\/[^/]+\/done$/ },
     // A one-turn chat with the assistant — kept: it may serve the standalone assistant's chat window. The legacy
     // event list is closed: the app reads the box (/api/inbox) since the box screen shipped.
     { method: "POST", pattern: /^\/api\/chat$/ },
