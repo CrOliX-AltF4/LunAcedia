@@ -53,10 +53,14 @@ describe("InboxSync.reconcile", () => {
     });
 
     // Lot AT4: a reminder's life is the reminder engine's — the calendar's window would call it gone.
-    it("never asks a source about a reminder", async () => {
+    it("never asks a source about a reminder or a conflict — the planning says how long they live", async () => {
         const reminder: AcediaEvent = {
             ...item("rem-event_soon-primary/ev1-1", "calendar"),
             type: "planning.reminder",
+        };
+        const conflict: AcediaEvent = {
+            ...item("conflict-a-b", "calendar"),
+            type: "planning.conflict",
         };
         const calendar: IConnector & { sourceState: ReturnType<typeof vi.fn> } = {
             slug: "calendar",
@@ -66,10 +70,11 @@ describe("InboxSync.reconcile", () => {
                 async () => new Map<string, SourceState>([[reminder.dedupeKey, "gone"]]),
             ),
         };
-        const { store, sync } = setup([reminder], [calendar]);
+        const { store, sync } = setup([reminder, conflict], [calendar]);
         await sync.reconcile();
         expect(calendar.sourceState).not.toHaveBeenCalled();
         expect(store.get(reminder.dedupeKey)).toBeDefined();
+        expect(store.get(conflict.dedupeKey)).toBeDefined();
     });
 
     it("reports a read state changed at the source, both ways", async () => {

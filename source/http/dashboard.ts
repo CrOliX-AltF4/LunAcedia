@@ -60,6 +60,17 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 #digest-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:560px;width:90%;max-height:80vh;overflow-y:auto}
 #digest-box h3{color:var(--accent);margin-bottom:12px}
 #digest-text{font-size:14px;line-height:1.7;white-space:pre-wrap}
+#digest-box.wide{max-width:960px}
+.plan-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;white-space:normal}
+.plan-nav .active{border-color:var(--accent);color:var(--accent)}
+.plan{display:flex;gap:20px;flex-wrap:wrap;white-space:normal}
+.plan-main{flex:2 1 360px;min-width:0}
+.plan-aside{flex:1 1 240px;min-width:0}
+.plan-day{padding:8px 0;border-bottom:1px solid var(--border)}
+.plan-day h4,.plan-aside h4{font-size:14px;margin:4px 0}
+.plan-day small,.plan-aside small{color:var(--muted)}
+.plan-conflict{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px}
+.plan-conflict button{margin:4px 4px 0 0}
 #digest-close{margin-top:14px}
 /* command bar */
 #cmdbar{padding:10px 20px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)}
@@ -164,6 +175,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <h1>◆ LunAcedia</h1>
   <span id="badge">0</span>
   <div class="spacer"></div>
+  <button onclick="openPlanning()">Planning</button>
   <button onclick="openProposals()">Propositions</button>
   <button onclick="openFreeSlots()">Créneaux libres</button>
   <button onclick="openDigest()">Digest</button>
@@ -303,6 +315,91 @@ async function gesture(btn,ev){
   }catch(e){btn.disabled=false;return;}
   load();
 }
+
+// The planning: the week, the tasks, what is late — « Fait » at Google Tasks, a conflict's way out chosen here as in
+// the box. Keys and ids read from the clicked element, never interpolated into onclick. From here to renderPlanning's
+// end, pure: the tests run it as shipped.
+let planView='week';
+function dayKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function clock(iso){const d=new Date(iso);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function dayLabel(d){const s=d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric'});return s.charAt(0).toUpperCase()+s.slice(1);}
+function eventsOn(p,d){const k=dayKey(d),from=d.getTime(),to=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1).getTime();return (p.events||[]).filter(e=>e.allDay?e.start<=k&&k<e.end:Date.parse(e.start)<to&&Date.parse(e.end)>from).sort((a,b)=>a.allDay===b.allDay?Date.parse(a.start)-Date.parse(b.start):(a.allDay?-1:1));}
+function daysLate(t,today){if(!t.due||t.due>=dayKey(today))return 0;const [y,m,d]=t.due.split('-').map(Number);return Math.round((today-new Date(y,m-1,d))/864e5);}
+function taskRow(t,today,where){const late=daysLate(t,today);const note=late?'en retard de '+late+' j':where;return \`<div class="trash-row" data-id="\${esc(t.id)}"><span>\${esc(t.title)}\${note?' <small>· '+esc(note)+'</small>':''}</span><button onclick="donePlanningTask(this)">Fait</button></div>\`;}
+function renderPlanning(p,conflicts,now){
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const open=(p.tasks||[]).filter(t=>t.status==='open');
+  const late=open.filter(t=>daysLate(t,today)>0).sort((a,b)=>daysLate(b,today)-daysLate(a,today));
+  const views=[['today','Aujourd’hui'],['week','Semaine'],['tasks','Tâches'],['late','En retard'+(late.length?' · '+late.length:'')]];
+  const nav='<div class="plan-nav">'+views.map(([v,l])=>\`<button data-view="\${v}" class="\${v===planView?'active':''}" onclick="openPlanning(this.dataset.view)">\${esc(l)}</button>\`).join('')+'</div>';
+  const note=p.complete?'':'<p><small>Le planning n’a pas encore été lu en entier : il peut manquer des éléments.</small></p>';
+  let main='';
+  if(planView==='today'||planView==='week'){
+    for(let i=0;i<(planView==='today'?1:7);i++){
+      const d=new Date(today.getFullYear(),today.getMonth(),today.getDate()+i);
+      const evs=eventsOn(p,d);
+      const c=(p.conflicts||[]).filter(x=>dayKey(new Date(x.from))===dayKey(d)).length;
+      const tasks=open.filter(t=>t.due===dayKey(d));
+      main+=\`<div class="plan-day"><h4>\${esc(dayLabel(d))}\${c?' <small>· conflit</small>':''}</h4>\`
+        +(evs.length?evs.map(e=>\`<p>\${e.allDay?'':esc(clock(e.start))+' '}\${esc(e.title)}</p>\`).join(''):'<p><small>Rien de prévu</small></p>')
+        +(planView==='today'?[...tasks,...late].map(t=>taskRow(t,today,t.listTitle)).join(''):(tasks.length?\`<p><small>\${tasks.length} tâche\${tasks.length>1?'s':''}</small></p>\`:''))
+        +'</div>';
+    }
+  }else{
+    const list=planView==='tasks'?open:late;
+    main=list.length?list.map(t=>taskRow(t,today,planView==='tasks'?t.listTitle:'')).join(''):\`<p><small>\${planView==='tasks'?'Aucune tâche ouverte.':'Rien en retard.'}</small></p>\`;
+  }
+  const ways=conflicts.map(c=>{
+    const m=c.meta||{},sol=m.solutions||[];
+    return \`<div class="plan-conflict" data-key="\${esc(c.dedupeKey)}"><h4>\${esc(c.title)}</h4><p><small>\${esc(c.body||'')}</small></p>\`
+      +(sol.length?\`<p>Déplacer « \${esc(m.movingTitle||'')} » :</p>\`+sol.map((s,i)=>\`<button data-n="\${i}" onclick="solveConflict(this)">À \${esc(clock(s.start))}</button>\`).join(' '):'<p><small>Aucun créneau libre ce jour-là, de la même durée.</small></p>')
+      +' <button onclick="leaveConflict(this)">Laisser tel quel</button> <span class="plan-msg"></span></div>';
+  }).join('');
+  const end=dayKey(new Date(today.getFullYear(),today.getMonth(),today.getDate()+7));
+  const weekTasks=open.filter(t=>t.due&&t.due<end).sort((a,b)=>a.due<b.due?-1:1);
+  const aside=ways+(planView==='week'?'<h4>Tâches de la semaine</h4>'+(weekTasks.length?weekTasks.map(t=>taskRow(t,today,dayLabel(new Date(t.due+'T00:00')))).join(''):'<p><small>Aucune.</small></p>'):'');
+  return nav+note+'<div class="plan"><div class="plan-main">'+main+'</div><aside class="plan-aside">'+aside+'</aside></div>';
+}
+async function openPlanning(view){
+  if(view)planView=view;
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Planning';
+  document.getElementById('digest-box').classList.add('wide');
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const [p,inbox]=await Promise.all([req('/api/planning').then(r=>r.json()),req('/api/inbox').then(r=>r.json())]);
+    box.innerHTML=renderPlanning(p,(inbox.items||[]).filter(i=>i.type==='planning.conflict'),new Date());
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function donePlanningTask(btn){
+  const row=btn.closest('.trash-row');
+  btn.disabled=true;
+  try{
+    const r=await req('/api/planning/tasks/'+encodeURIComponent(row.dataset.id)+'/done',{method:'POST'});
+    if(!r.ok){btn.disabled=false;btn.textContent='Pas fait — réessayer';return;}
+  }catch(e){btn.disabled=false;return;}
+  row.remove();
+}
+async function settleConflict(btn,path){
+  const row=btn.closest('.plan-conflict');
+  const buttons=row.querySelectorAll('button');
+  buttons.forEach(b=>b.disabled=true);
+  try{
+    const r=await req('/api/inbox/'+encodeURIComponent(row.dataset.key)+'/'+path,{method:'POST'});
+    if(!r.ok){
+      const e=await r.json().catch(()=>({}));
+      row.querySelector('.plan-msg').textContent='Pas fait : '+(e.error||r.status);
+      buttons.forEach(b=>b.disabled=false);
+      return;
+    }
+  }catch(e){buttons.forEach(b=>b.disabled=false);return;}
+  openPlanning();
+  load();
+}
+function solveConflict(btn){return settleConflict(btn,'solve-'+btn.dataset.n);}
+function leaveConflict(btn){return settleConflict(btn,'leave');}
 
 // Gmail's trash (kept 30 days by Gmail), a page at a time — ids read from the row, never interpolated into onclick.
 let trashNext=null;
@@ -532,7 +629,7 @@ async function openDigest(){
   }catch(e){t.textContent='Error: '+e.message;}
 }
 function openProposals(){openDigestLike('/api/proposals','Propositions');}
-function closeDigest(){document.getElementById('digest').classList.remove('open');}
+function closeDigest(){document.getElementById('digest').classList.remove('open');document.getElementById('digest-box').classList.remove('wide');}
 
 function fmtSlot(s){
   const opts={weekday:'short',hour:'2-digit',minute:'2-digit'};
@@ -745,7 +842,11 @@ function reloadOnce(name,fn){
   reloadSoon[name]=setTimeout(fn,300);
 }
 function onChange(c){
-  if(c.scope==='box')reloadOnce('box',load);
+  if(c.scope==='box'){
+    reloadOnce('box',load);
+    // A conflict settled elsewhere: the planning open here follows.
+    if(document.getElementById('digest-box').classList.contains('wide'))reloadOnce('planning',()=>openPlanning());
+  }
   else if(c.scope==='actions')reloadOnce('actions',loadPending);
 }
 async function followChanges(){

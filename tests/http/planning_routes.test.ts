@@ -40,34 +40,84 @@ function setup() {
 }
 
 describe("GET /api/planning", () => {
-    it("defaults to the whole horizon held: 7 days back, 90 ahead", () => {
+    it("defaults to the whole horizon held: 7 days back, 90 ahead", async () => {
         const { json, get } = setup();
-        expect(get()).toBe(true);
+        expect(await get()).toBe(true);
         const [, status, body] = json.mock.calls[0]!;
         expect(status).toBe(200);
         expect(body.events.map((e: PlanningEvent) => e.title)).toEqual(["soon", "far"]);
         expect(body.complete).toBe(true);
     });
 
-    it("serves the period asked", () => {
+    it("serves the period asked", async () => {
         const { json, get } = setup();
-        get("?from=2026-10-19&to=2026-10-21");
+        await get("?from=2026-10-19&to=2026-10-21");
         expect(json.mock.calls[0]![2].events.map((e: PlanningEvent) => e.title)).toEqual(["soon"]);
     });
 
-    it("refuses dates it cannot read, a period that ends before it starts, more than 366 days", () => {
+    it("refuses dates it cannot read, a period that ends before it starts, more than 366 days", async () => {
         const { json, get } = setup();
-        get("?from=garbage");
-        get("?from=2026-10-21&to=2026-10-19");
-        get("?from=2026-01-01&to=2027-06-01");
+        await get("?from=garbage");
+        await get("?from=2026-10-21&to=2026-10-19");
+        await get("?from=2026-01-01&to=2027-06-01");
         expect(json.mock.calls.map((c) => c[1])).toEqual([400, 400, 400]);
     });
 
-    it("leaves other routes alone", () => {
+    it("leaves other routes alone", async () => {
         const { routes, res } = setup();
-        expect(routes.handle("POST", "/api/planning", new URL("http://x/api/planning"), res)).toBe(
+        expect(
+            await routes.handle("POST", "/api/planning", new URL("http://x/api/planning"), res),
+        ).toBe(false);
+        expect(await routes.handle("GET", "/api/inbox", new URL("http://x/api/inbox"), res)).toBe(
             false,
         );
-        expect(routes.handle("GET", "/api/inbox", new URL("http://x/api/inbox"), res)).toBe(false);
+    });
+});
+
+// The Planning screen's « Fait » (lot AT7): Master's hand — the task completed at Google Tasks at once, no confirmation.
+describe("POST /api/planning/tasks/:id/done", () => {
+    it("completes a task of the planning at the source, then reads the planning again; an unknown one is 404", async () => {
+        const store = new PlanningStore();
+        store.replaceTasks(
+            [
+                {
+                    id: "list1/t1",
+                    listId: "list1",
+                    title: "Courses",
+                    status: "needsAction",
+                    updatedAt: 1,
+                } as never,
+            ],
+            NOW,
+        );
+        const syncNow = vi.fn(async () => {});
+        const executeAction = vi.fn(async () => {});
+        const json = vi.fn();
+        const routes = new PlanningRoutes({
+            store,
+            sync: { syncNow, configured: () => ({}) } as never,
+            json,
+            now: () => NOW,
+            connectors: [
+                { slug: "tasks", name: "Tasks", poll: async () => [], executeAction } as never,
+            ],
+        });
+        const res = {} as http.ServerResponse;
+        await routes.handle(
+            "POST",
+            `/api/planning/tasks/${encodeURIComponent("list1/t1")}/done`,
+            new URL("http://x"),
+            res,
+        );
+        expect(executeAction).toHaveBeenCalledWith({ kind: "complete_task", sourceId: "list1/t1" });
+        expect(syncNow).toHaveBeenCalled();
+        expect(json.mock.calls[0]!.slice(1)).toEqual([200, { ok: true }]);
+        await routes.handle(
+            "POST",
+            `/api/planning/tasks/${encodeURIComponent("list1/nope")}/done`,
+            new URL("http://x"),
+            res,
+        );
+        expect(json.mock.calls[1]![1]).toBe(404);
     });
 });

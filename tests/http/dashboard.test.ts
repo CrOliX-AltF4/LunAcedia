@@ -193,7 +193,8 @@ describe("dashboard box", () => {
             script.indexOf("setInterval(loadPending"),
         );
         expect(block).toContain("req('/api/changes')");
-        expect(block).toContain("c.scope==='box')reloadOnce('box',load)");
+        expect(block).toContain("c.scope==='box'){\n    reloadOnce('box',load);");
+        expect(block).toContain("reloadOnce('planning',()=>openPlanning())");
         expect(block).toContain("c.scope==='actions')reloadOnce('actions',loadPending)");
         expect(block).toContain("buf.indexOf('\\n\\n')");
         expect(script).toContain("setInterval(load,60000)");
@@ -377,5 +378,88 @@ describe("dashboard agent and pending writes", () => {
     it("ships a script the browser can parse", () => {
         const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
         for (const s of scripts) expect(() => new Function(s)).not.toThrow();
+    });
+});
+
+// The planning on the dashboard: rendered by the shipped code itself, on a sample.
+describe("dashboard planning", () => {
+    const html = DASHBOARD_HTML;
+    const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).join("\n");
+    const pure = script.slice(
+        script.indexOf("let planView="),
+        script.indexOf("async function openPlanning"),
+    );
+    const esc = extractEscFn();
+    const render = (view: string, p: unknown, conflicts: unknown[], now: Date): string =>
+        new Function("esc", `${pure}; planView=${JSON.stringify(view)}; return renderPlanning;`)(
+            esc,
+        )(p, conflicts, now);
+
+    const now = new Date(2026, 9, 19, 8);
+    const at = (h: number, m = 0) => new Date(2026, 9, 19, h, m).toISOString();
+    const planning = {
+        complete: true,
+        events: [
+            { id: "p/a", title: "Dentiste", start: at(10), end: at(11), allDay: false },
+            { id: "p/b", title: "<b>Appel</b>", start: at(10, 30), end: at(11, 30), allDay: false },
+        ],
+        tasks: [
+            {
+                id: "l/x",
+                title: "Payer la facture",
+                listTitle: "Maison",
+                due: "2026-10-17",
+                status: "open",
+            },
+            { id: "l/y", title: "Courses", listTitle: "Maison", due: "2026-10-21", status: "open" },
+            {
+                id: "l/z",
+                title: "Vieux",
+                listTitle: "Maison",
+                due: "2026-10-01",
+                status: "completed",
+            },
+        ],
+        conflicts: [{ id: "c1", eventIds: ["p/a", "p/b"], from: at(10, 30), to: at(11) }],
+    };
+    const conflict = {
+        dedupeKey: "c1",
+        type: "planning.conflict",
+        title: "Conflit — Dentiste et Appel",
+        meta: { movingTitle: "Appel", solutions: [{ eventId: "p/b", start: at(14), end: at(15) }] },
+    };
+
+    it("the week: each day's events, the conflict's ways out and the week's tasks, every text escaped", () => {
+        const out = render("week", planning, [conflict], now);
+        expect(out).toContain("10:00 Dentiste");
+        expect(out).toContain("10:30 &lt;b&gt;Appel&lt;/b&gt;");
+        expect(out).not.toContain("<b>Appel</b>");
+        expect(out).toContain("· conflit");
+        expect(out).toContain('data-key="c1"');
+        expect(out).toContain('<button data-n="0" onclick="solveConflict(this)">À 14:00</button>');
+        expect(out).toContain("Laisser tel quel");
+        expect(out).toContain("Payer la facture <small>· en retard de 2 j</small>");
+        expect(out).toContain("Courses");
+        expect(out).toContain("En retard · 1");
+        expect(out).not.toContain("Vieux");
+    });
+
+    it("late: only what is past due; « Fait » reads the task's id from its row", () => {
+        const out = render("late", planning, [], now);
+        expect(out).toContain('data-id="l/x"');
+        expect(out).not.toContain("Courses");
+        const block = script.slice(
+            script.indexOf("async function donePlanningTask"),
+            script.indexOf("async function settleConflict"),
+        );
+        expect(block).toContain(
+            "'/api/planning/tasks/'+encodeURIComponent(row.dataset.id)+'/done',{method:'POST'}",
+        );
+    });
+
+    it("says when the planning was not read in full", () => {
+        expect(render("tasks", { ...planning, complete: false }, [], now)).toContain(
+            "pas encore été lu en entier",
+        );
     });
 });

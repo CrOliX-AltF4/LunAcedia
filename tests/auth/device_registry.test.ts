@@ -126,6 +126,9 @@ describe("isDeviceRoute", () => {
             ["GET", "/api/inbox"],
             ["POST", "/api/inbox/email-1/archive"],
             ["POST", "/api/inbox/trash/abc/restore"],
+            // The Planning screen: read it, and « Fait » on a task.
+            ["GET", "/api/planning"],
+            ["POST", "/api/planning/tasks/list1%2Ft1/done"],
             ["GET", "/api/conversations"],
             ["POST", "/api/conversations/x/messages"],
             ["DELETE", "/api/conversations/x"],
@@ -151,7 +154,6 @@ describe("isDeviceRoute", () => {
             ["GET", "/api/usage"],
             ["PUT", "/api/config/usage-alerts"],
             ["PUT", "/api/config/reminders"],
-            ["GET", "/api/planning"],
             ["GET", "/api/devices"],
             ["POST", "/api/devices/pairing-code"],
             ["DELETE", "/api/devices/abc"],

@@ -252,7 +252,9 @@ export class AcediaApiServer {
         reminders?: Omit<ReminderRouteDeps, "readBody" | "json">,
     ) {
         this.usageRoutes = usage ? new UsageRoutes({ ...usage, readBody, json }) : null;
-        this.planningRoutes = planning ? new PlanningRoutes({ ...planning, json }) : null;
+        this.planningRoutes = planning
+            ? new PlanningRoutes({ ...planning, connectors, json })
+            : null;
         this.reminderRoutes = reminders
             ? new ReminderRoutes({ ...reminders, readBody, json })
             : null;
@@ -261,7 +263,16 @@ export class AcediaApiServer {
         this.devices = devices ?? null;
         this.deviceRoutes = devices ? new DeviceRoutes({ devices, fcm, readBody, json }) : null;
         this.life = life ?? ItemLifecycle.local(store);
-        this.inboxRoutes = life ? new InboxRoutes({ store, connectors, hub, life, json }) : null;
+        this.inboxRoutes = life
+            ? new InboxRoutes({
+                  store,
+                  connectors,
+                  hub,
+                  life,
+                  ...(planning && { planningSync: planning.sync }),
+                  json,
+              })
+            : null;
         this.conversationRoutes = topics
             ? new ConversationRoutes({
                   topics,
@@ -1192,7 +1203,7 @@ export class AcediaApiServer {
             return;
 
         // The planning: events and tasks as objects
-        if (this.planningRoutes?.handle(method, path, url, res)) return;
+        if (await this.planningRoutes?.handle(method, path, url, res)) return;
         if (this.reminderRoutes && (await this.reminderRoutes.handle(method, path, url, req, res)))
             return;
 

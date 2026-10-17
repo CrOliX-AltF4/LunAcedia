@@ -38,7 +38,7 @@ export function toWire(change: InboxChange, ts: number = Date.now()): AcediaEven
  * first sweep, an old mail of the inbox) — in the box only, it is news to no one. `reminder`: the planning calls for
  * it; its truth is the planning, never a source.
  */
-export type CollectCause = "new" | "backlog" | "reminder";
+export type CollectCause = "new" | "backlog" | "reminder" | "conflict";
 
 export type ItemOp = "read" | "unread" | "removed";
 
@@ -47,10 +47,19 @@ export type ItemOp = "read" | "unread" | "removed";
  * carried out. `agent`: the agent read the mail in full. `expired`: an informational item (RSS, HA) past its lifetime —
  * remembered as gone, being still in its feed. `settled`: the planning no longer calls for a reminder. `snoozed`:
  * Master pushed a reminder back. `planning`: an event or a task the box held before the planning took them over.
- * Every removal but `expired` lets the item come back if its source lists it again.
+ * `dismissed`: a conflict Master left as it is — remembered as gone, not brought back while it lasts.
+ * Every removal but `expired` and `dismissed` lets the item come back if its source lists it again.
  */
 export type ChangeCause =
-    "source" | "gesture" | "action" | "agent" | "expired" | "settled" | "snoozed" | "planning";
+    | "source"
+    | "gesture"
+    | "action"
+    | "agent"
+    | "expired"
+    | "settled"
+    | "snoozed"
+    | "planning"
+    | "dismissed";
 
 export interface ItemLifecycleDeps {
     store: EventStore;
@@ -112,7 +121,8 @@ export class ItemLifecycle implements KnownItems {
         if (!held) return false;
         if (op === "removed") {
             this.deps.store.remove(key);
-            if (cause === "expired") this.deps.store.markGone(key);
+            // Expired (still in its feed) or dismissed (a conflict Master left): remembered as gone, not news again.
+            if (cause === "expired" || cause === "dismissed") this.deps.store.markGone(key);
         } else if (op === "read") {
             this.deps.store.markRead(key);
         } else {

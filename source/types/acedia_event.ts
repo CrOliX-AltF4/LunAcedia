@@ -18,6 +18,11 @@ export type AcediaEventType =
      * meta { reminder: true, rule, objectKind, objectId, at, and the object's ids (calendarId/eventId or listId/taskId) }.
      */
     | "planning.reminder"
+    /**
+     * Two events of the planning that overlap — in the box until the overlap is gone. meta { conflict: true,
+     * eventIds, moving (the event a solution moves), solutions: [{ eventId, start, end }] } — chosen by Master, never alone.
+     */
+    | "planning.conflict"
     | "system.heartbeat"
     /** A spend alert on LunAcedia's own LLM — pushed to the phone, never put in the box. */
     | "system.llm_spend"

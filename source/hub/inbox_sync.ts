@@ -47,9 +47,9 @@ export class InboxSync {
             const { events } = this.deps.store.query({ limit: STORE_SCAN });
             for (const connector of this.deps.connectors) {
                 if (!connector.sourceState) continue;
-                // A reminder lives as long as the reminder engine says, not as long as its source lists it.
+                // A reminder or a conflict lives as long as the planning says, not as long as its source lists it.
                 const held = (events as AcediaEvent[]).filter(
-                    (e) => e.source === connector.slug && e.type !== "planning.reminder",
+                    (e) => e.source === connector.slug && !e.type.startsWith("planning."),
                 );
                 if (held.length === 0) continue;
                 let state: Awaited<ReturnType<NonNullable<IConnector["sourceState"]>>>;

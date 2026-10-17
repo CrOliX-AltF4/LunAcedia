@@ -135,6 +135,15 @@ describe("FcmSender.send", () => {
         expect(h.mockSend).not.toHaveBeenCalled();
     });
 
+    // A reminder rings whatever its priority (« à faire demain » is normal) — but never once read.
+    it("sends a reminder whatever its priority, never a read one", async () => {
+        const sender = FcmSender.fromEnv()!;
+        await sender.setToken("device-token");
+        await sender.send(makeEvent({ type: "planning.reminder", priority: "normal" }));
+        await sender.send(makeEvent({ type: "planning.reminder", priority: "info", read: true }));
+        expect(h.mockSend).toHaveBeenCalledOnce();
+    });
+
     it("should send for normal events when filter includes normal", async () => {
         process.env["ACEDIA_FCM_FILTER"] = "urgent,normal";
         const sender = FcmSender.fromEnv()!;
