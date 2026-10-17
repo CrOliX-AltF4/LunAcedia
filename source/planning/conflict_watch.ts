@@ -56,7 +56,7 @@ export function conflictItems(
             priority: from - now < DAY_MS ? "urgent" : "normal",
             dedupeKey: c.id,
             read: false,
-            meta: { conflict: true, eventIds: c.eventIds, moving: moves.id, solutions },
+            meta: { conflict: true, eventIds: c.eventIds, moving: moves.id, movingTitle: moves.title, solutions },
         });
     }
     return items;

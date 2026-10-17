@@ -2,7 +2,7 @@
  * The planning: calendar events and tasks held as objects to manage over the whole horizon —
  * not as notifications. The box keeps the flow to sort; the planning keeps what Master organises.
  *
- * Wire contract: served by GET /api/planning and mirrored by hand in the Core (contract test there, Rule 3).
+ * Wire contract: served by GET /api/planning; an optional hub relays it as is, without a copy of these types.
  * Facts only, as at the source: no interpretation, no LLM output.
  */
 
@@ -41,7 +41,7 @@ export interface PlanningTask {
     updatedAt: number;
 }
 
-/** Two timed events that overlap. `proposals` (free slots to move one of them) come with lot AT5. */
+/** Two timed events that overlap. The ways out are not here: they live on the conflict's box item (its `meta`). */
 export interface PlanningConflict {
     /** Stable for the pair, whatever their order. */
     id: string;
@@ -49,7 +49,6 @@ export interface PlanningConflict {
     /** The overlap itself (ISO). */
     from: string;
     to: string;
-    proposals?: { start: string; end: string }[];
 }
 
 export interface PlanningSnapshot {

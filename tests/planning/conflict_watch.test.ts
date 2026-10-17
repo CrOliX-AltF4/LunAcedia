@@ -44,7 +44,7 @@ describe("conflictItems", () => {
             source: "calendar",
             priority: "normal",
             title: "Conflit — Dentiste et Appel Léa",
-            meta: { conflict: true, moving: "primary/call" },
+            meta: { conflict: true, moving: "primary/call", movingTitle: "Appel Léa" },
         });
         const solutions = item!.meta!["solutions"] as {
             eventId: string;
