@@ -24,6 +24,8 @@ export interface ReadToolDeps {
      * the background: a failure never keeps the agent from reading the mail.
      */
     markRead?: (event: AcediaEvent) => Promise<void>;
+    /** Whether a model may read an item (its class of mail): the others are never handed to it. Absent: all may. */
+    aiReadable?: (event: AcediaEvent) => boolean;
     /**
      * The planning over [from, to) — every event of the horizon and every task (lot AT). Absent: the agenda and tasks
      * tools are not offered.
@@ -218,12 +220,15 @@ function searchEvents(args: Record<string, unknown>, deps: ReadToolDeps): ReadTo
         ...(sinceHours !== undefined && { since: deps.now() - sinceHours * 3_600_000 }),
     });
     const text = typeof args["text"] === "string" ? args["text"].toLowerCase() : "";
+    const readable = deps.aiReadable ?? (() => true);
     const matched = (events as AcediaEvent[]).filter(
         (e) =>
-            !text ||
-            e.title.toLowerCase().includes(text) ||
-            (e.body ?? "").toLowerCase().includes(text) ||
-            (typeof e.meta?.["from"] === "string" && e.meta["from"].toLowerCase().includes(text)),
+            readable(e) &&
+            (!text ||
+                e.title.toLowerCase().includes(text) ||
+                (e.body ?? "").toLowerCase().includes(text) ||
+                (typeof e.meta?.["from"] === "string" &&
+                    e.meta["from"].toLowerCase().includes(text))),
     );
     const limit = (args["limit"] as number | undefined) ?? 10;
     return {
@@ -241,6 +246,11 @@ function getEvent(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolRe
         return {
             ok: false,
             error: `no event with key '${key}' (it may have been read and dropped)`,
+        };
+    if (deps.aiReadable && !deps.aiReadable(e))
+        return {
+            ok: false,
+            error: `the item '${key}' is kept away from the assistant (personal or advertising mail)`,
         };
     if (e.source === "email" && !e.read && deps.markRead) {
         void deps

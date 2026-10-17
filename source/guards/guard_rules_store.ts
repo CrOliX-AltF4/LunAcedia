@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import { isMailClass, MAIL_CLASSES } from "./mail_class.js";
 import type { AcediaEventPriority } from "../types/acedia_event.js";
 import type { GuardAction, GuardCondition, GuardRule, RuleSourceKind } from "./guard_types.js";
 
@@ -136,6 +137,14 @@ function parseAction(raw: unknown, where: string): GuardAction | Fail {
             ? { type: "set_priority", priority: priority as AcediaEventPriority }
             : fail(`${where}: priority must be urgent, normal or info`, "invalid_action");
     }
+    if (raw["type"] === "classify") {
+        return isMailClass(raw["mailClass"])
+            ? { type: "classify", mailClass: raw["mailClass"] }
+            : fail(
+                  `${where}: mailClass must be one of ${MAIL_CLASSES.join(", ")}`,
+                  "invalid_action",
+              );
+    }
     if (raw["type"] === "source") {
         const action = raw["action"];
         if (!SOURCE_KINDS.includes(action as RuleSourceKind))
@@ -152,7 +161,7 @@ function parseAction(raw: unknown, where: string): GuardAction | Fail {
         return { type: "source", action: action as RuleSourceKind };
     }
     return fail(
-        `${where}: unknown action type (allowed: drop, tag, set_priority, source)`,
+        `${where}: unknown action type (allowed: drop, tag, set_priority, classify, source)`,
         "invalid_action",
     );
 }

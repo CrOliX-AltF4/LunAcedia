@@ -70,6 +70,8 @@ export interface ItemLifecycleDeps {
     rings: (event: AcediaEvent) => boolean;
     /** Rings the phone registered with LunAcedia (FCM) — a wired phone is registered with the hub instead. */
     push: (event: AcediaEvent) => void;
+    /** Whether a model may read it (its class of mail) — told to the Core with the item. Absent: readable. */
+    aiReadable?: (event: AcediaEvent) => boolean;
 }
 
 export class ItemLifecycle implements KnownItems {
@@ -92,7 +94,8 @@ export class ItemLifecycle implements KnownItems {
         this.deps.changes.emit("box", event.dedupeKey);
         if (cause === "backlog") return;
         const notify = this.deps.rings(event);
-        this.deps.broadcast({ ...event, notify });
+        const ai = this.deps.aiReadable?.(event) ?? true;
+        this.deps.broadcast({ ...event, notify, ...(!ai && { ai: false }) });
         if (notify) this.deps.push(event);
     }
 

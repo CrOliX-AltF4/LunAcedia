@@ -29,6 +29,8 @@ import { GuardRulesStore } from "./guards/guard_rules_store.js";
 import { GuardJournal } from "./guards/guard_journal.js";
 import { GuardStats } from "./guards/guard_stats.js";
 import { GuardPipeline } from "./guards/guard_pipeline.js";
+import { MailClassStore } from "./guards/mail_class_store.js";
+import { readableByAi } from "./guards/mail_class.js";
 import { RuleActionJournal, createRuleActor } from "./guards/rule_actor.js";
 import { migrateLegacyPriority } from "./guards/priority_migration.js";
 import { parseRules } from "./connectors/email/email_rules.js";
@@ -102,12 +104,16 @@ if (parseRules(process.env["GMAIL_RULES"] ?? "[]").length > 0)
     console.warn(
         "[Priority] GMAIL_RULES is no longer read — its entries are guard rules now; remove it from .env",
     );
+// The classes of mail: what shows in the box, what a model may read, what rings — sorted without any model.
+const mailClasses = new MailClassStore();
+await mailClasses.load();
 const guardPipeline = new GuardPipeline({
     rules: guardRules,
     journal: guardJournal,
     stats: guardStats,
     // The legacy VIP list stays the single source of truth for "never drop" (edited live from the dashboard).
     vipSenders: () => emailClassificationStore.getAll().vipSenders,
+    classes: mailClasses,
 });
 
 // The box: the items held, and the keys gone that must not come back — one state, one file.
@@ -166,8 +172,9 @@ const lifecycle = new ItemLifecycle({
     store,
     changes,
     broadcast: (event) => ws.broadcast(event),
-    rings: (event) => rings(event, notifyFilter),
+    rings: (event) => rings(event, notifyFilter, mailClasses.table()),
     push: (event) => void fcm?.send(event),
+    aiReadable: (event) => readableByAi(event, mailClasses.table()),
 });
 // Collection: polls the sources and asks the box what it already knows.
 const hub = new IngestionHub(
@@ -235,6 +242,7 @@ const api = new AcediaApiServer(
         journal: guardJournal,
         stats: guardStats,
         ruleActions,
+        classes: mailClasses,
     },
     agent,
     lifecycle,

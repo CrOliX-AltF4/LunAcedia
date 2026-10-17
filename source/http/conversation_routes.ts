@@ -20,6 +20,7 @@ import type { IAIProvider } from "../ai/ai_provider.js";
 import type { AgentRequest, AgentResult } from "../agent/agent_loop.js";
 import type { ActionState } from "../actions/pending_action_store.js";
 import type { EventStore } from "../store/event_store.js";
+import type { AcediaEvent } from "../types/acedia_event.js";
 import { withUsagePurpose } from "../usage/llm_usage.js";
 import {
     ConversationFullError,
@@ -56,6 +57,8 @@ export interface ConversationRouteDeps {
     actionState?: (id: string) => ActionState | undefined;
     readBody: (req: http.IncomingMessage) => Promise<unknown>;
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
+    /** Whether a model may read a box item (its class of mail). Absent: all may. */
+    aiReadable?: (event: AcediaEvent) => boolean;
 }
 
 type TurnResult =
@@ -301,6 +304,9 @@ export class ConversationRoutes {
     private aboutContext(key: string): string | null {
         const e = this.deps.store.get(key);
         if (!e) return null;
+        // Kept away from a model: the topic says so, and nothing of the item goes in.
+        if (this.deps.aiReadable && !this.deps.aiReadable(e))
+            return "The user is asking about an item of their box that is kept away from the assistant (personal or advertising mail): you cannot see it — say so, and help without it.";
         const body = e.body ? e.body.slice(0, BODY_CHARS) : "";
         return [
             `The user is asking about this item of their box (key ${e.dedupeKey}, source ${e.source}, type ${e.type}):`,

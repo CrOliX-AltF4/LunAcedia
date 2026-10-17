@@ -3,6 +3,7 @@ import { toWire, INBOX_CHANGED } from "../../source/hub/item_lifecycle.js";
 import { EventStore } from "../../source/store/event_store.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 import { recordingLifecycle } from "./recording_lifecycle.js";
+import { DEFAULT_CLASSES } from "../../source/guards/mail_class.js";
 
 // What each transition does, seen from outside: the box, dedup, the views that follow, the Core, the phone.
 
@@ -54,6 +55,22 @@ describe("ItemLifecycle — collected", () => {
             ["m2", true],
         ]);
         expect(rung.map((e) => e.dedupeKey)).toEqual(["m2"]);
+    });
+
+    // A class of mail decides what a model may read and what rings; the Core is told, it never decides.
+    it("a personal mail: the Core is told no model may read it; a notification is told but never rings", () => {
+        const { sent, rung, life } = recordingLifecycle(
+            new EventStore(),
+            undefined,
+            DEFAULT_CLASSES,
+        );
+        life.collected(item("m1", { meta: { mailClass: "perso" } }), "new");
+        life.collected(item("m2", { meta: { mailClass: "notification" } }), "new");
+        expect(sent.map((e) => [e.dedupeKey, e.notify, e.ai])).toEqual([
+            ["m1", true, false],
+            ["m2", false, undefined],
+        ]);
+        expect(rung.map((e) => e.dedupeKey)).toEqual(["m1"]);
     });
 
     it("a backlog item is in the box only — news to no one", () => {

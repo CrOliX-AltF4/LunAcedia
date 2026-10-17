@@ -6,6 +6,7 @@ import type { GuardPipeline } from "../../source/guards/guard_pipeline.js";
 import type { IConnector } from "../../source/connectors/connector_interface.js";
 import type { AcediaEvent, AcediaEventPriority } from "../../source/types/acedia_event.js";
 import { rings } from "../../source/push/notify_policy.js";
+import { readableByAi, type ClassTable } from "../../source/guards/mail_class.js";
 
 type RuleActor = ConstructorParameters<typeof IngestionHub>[3];
 
@@ -16,6 +17,7 @@ type RuleActor = ConstructorParameters<typeof IngestionHub>[3];
 export function recordingLifecycle(
     store: EventStore,
     ringing: AcediaEventPriority[] = ["urgent", "normal", "info"],
+    classes?: ClassTable,
 ) {
     const emitted: InboxChange[] = [];
     const sent: AcediaEvent[] = [];
@@ -37,8 +39,9 @@ export function recordingLifecycle(
             });
         },
         // Every priority rings here, unless a test says otherwise: what matters is the read state and the cause.
-        rings: (e) => rings(e, ringing),
+        rings: (e) => rings(e, ringing, classes),
         push: (e) => rung.push(e),
+        ...(classes && { aiReadable: (e: AcediaEvent) => readableByAi(e, classes) }),
     });
     return { life, emitted, sent, rung, views };
 }

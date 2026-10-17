@@ -14,6 +14,7 @@ import { GuardRulesStore } from "../../source/guards/guard_rules_store.js";
 import { RuleActionJournal } from "../../source/guards/rule_actor.js";
 import { GuardStats } from "../../source/guards/guard_stats.js";
 import type { GuardServices } from "../../source/guards/guard_services.js";
+import { MailClassStore } from "../../source/guards/mail_class_store.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
 
 // A port range of its own: test files run in parallel and must never collide with the other API tests.
@@ -74,9 +75,16 @@ describe("AcediaApiServer — ingestion guard routes", () => {
             () => journal.flush(),
             () => stats.flush(),
         );
-        const pipeline = new GuardPipeline({ rules, journal, stats, vipSenders: () => [] });
+        const classes = new MailClassStore(path.join(dir, "mail_classes.json"));
+        const pipeline = new GuardPipeline({
+            rules,
+            journal,
+            stats,
+            vipSenders: () => [],
+            classes,
+        });
         const ruleActions = new RuleActionJournal(path.join(dir, "guard_actions.jsonl"));
-        const guards: GuardServices = { pipeline, rules, journal, stats, ruleActions };
+        const guards: GuardServices = { pipeline, rules, journal, stats, ruleActions, classes };
         const store = new EventStore();
         const hub = hubOnBox([], { store, guard: pipeline }).hub;
         const received: AcediaEvent[] = [];
@@ -103,6 +111,24 @@ describe("AcediaApiServer — ingestion guard routes", () => {
     it("answers 503 when the guards are not configured", async () => {
         const { base } = await start(false);
         expect((await call("GET", `${base}/api/guard/rules`)).status).toBe(503);
+        expect((await call("GET", `${base}/api/config/mail-classes`)).status).toBe(503);
+    });
+
+    it("reads and sets the classes of mail and the personal senders, refusing what it does not know", async () => {
+        const { base } = await start();
+        const first = await call("GET", `${base}/api/config/mail-classes`);
+        expect(first.body.classes.perso).toEqual({ visible: true, ai: false, rings: true });
+        const set = await call("PATCH", `${base}/api/config/mail-classes`, {
+            classes: { pub: { visible: false } },
+            personalSenders: ["maman@"],
+        });
+        expect(set.status).toBe(200);
+        expect(set.body.classes.pub).toEqual({ visible: false, ai: false, rings: false });
+        expect(set.body.personalSenders).toEqual(["maman@"]);
+        expect(
+            (await call("PATCH", `${base}/api/config/mail-classes`, { classes: { spam: {} } }))
+                .status,
+        ).toBe(400);
     });
 
     // what rules do at the source: one switch (law 3), and every mail touched shown.

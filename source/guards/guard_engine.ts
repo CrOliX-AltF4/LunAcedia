@@ -153,6 +153,9 @@ export function evaluateGuard(
                     verdict.priorityRuleId = rule.id;
                 }
                 firstEffectRuleId ??= rule.id;
+            } else if (action.type === "classify") {
+                verdict.mailClass ??= action.mailClass;
+                firstEffectRuleId ??= rule.id;
             } else if (action.type === "source") {
                 const key = `${action.action}:${action.label?.toLowerCase() ?? ""}`;
                 if (seenSource.has(key)) continue;

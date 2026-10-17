@@ -3,6 +3,7 @@ import type { GuardJournal } from "./guard_journal.js";
 import type { GuardPipeline } from "./guard_pipeline.js";
 import type { GuardRulesStore } from "./guard_rules_store.js";
 import type { GuardStats } from "./guard_stats.js";
+import type { MailClassStore } from "./mail_class_store.js";
 
 /** Everything the HTTP layer needs to expose the ingestion guards — one object, wired once in index.ts. */
 export interface GuardServices {
@@ -12,4 +13,6 @@ export interface GuardServices {
     stats: GuardStats;
     /** What rules did at the source — absent: no such journal on this deployment. */
     ruleActions?: RuleActionJournal;
+    /** The classes of mail (visible, read by a model, rings) and the personal senders — absent: the defaults. */
+    classes?: MailClassStore;
 }

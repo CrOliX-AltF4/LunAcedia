@@ -68,6 +68,8 @@ import type { EmailClassificationConfig } from "../types/email_classification.js
 import type { GoogleConnectorKey, GoogleTokenStore } from "../auth/google_token_store.js";
 import type { GuardServices } from "../guards/guard_services.js";
 import { validateRules } from "../guards/guard_rules_store.js";
+import { DEFAULT_CLASSES, readableByAi } from "../guards/mail_class.js";
+import { validateMailClassPatch, type MailClassPatch } from "../guards/mail_class_store.js";
 import {
     findGoogleOAuthConnector,
     buildGoogleAuthUrl,
@@ -160,6 +162,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                    tier: null removes the override
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
+ *   GET  /api/config/mail-classes  → { classes, personalSenders }  each class: { visible, ai, rings }
+ *   PATCH /api/config/mail-classes body: { classes?: { <class>: { visible?, ai?, rings? } }, personalSenders? }
  *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards)
  *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
  *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
@@ -284,6 +288,7 @@ export class AcediaApiServer {
                   changed: (id) => this.changes?.emit("topics", id),
                   readBody,
                   json,
+                  aiReadable: (e) => this.aiReadable(e),
               })
             : null;
     }
@@ -311,6 +316,11 @@ export class AcediaApiServer {
     }
 
     /** One agent run over this server's store, calendar and tier gate, journaled. */
+    /** Whether a model may read a box item — its class of mail decides; every call that hands the box to one asks. */
+    private aiReadable(e: AcediaEvent): boolean {
+        return readableByAi(e, this.guards?.classes?.table() ?? DEFAULT_CLASSES);
+    }
+
     private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
         // The declared caller wins over the route's default: the Core asking counts as the Core.
         return withUsageContext({ caller: callerOf(req.callerId) }, () =>
@@ -319,6 +329,7 @@ export class AcediaApiServer {
                     provider: this.ai,
                     read: {
                         store: this.store,
+                        aiReadable: (e: AcediaEvent) => this.aiReadable(e),
                         busyIntervals: () => this.calendarBusyIntervals(),
                         ...(this.planningStore &&
                             this.planningSync && {
@@ -1170,6 +1181,25 @@ export class AcediaApiServer {
             return json(res, 200, this.emailClassificationStore.getAll());
         }
 
+        // The classes of mail and the personal senders
+        if (path === "/api/config/mail-classes") {
+            const classes = this.guards?.classes;
+            if (!classes) return json(res, 503, { error: "Not configured" });
+            if (method === "GET") return json(res, 200, classes.get());
+            if (method === "PATCH") {
+                let body: unknown;
+                try {
+                    body = await readBody(req);
+                } catch {
+                    return json(res, 400, { error: "Invalid JSON" });
+                }
+                const problem = validateMailClassPatch(body);
+                if (problem) return json(res, 400, { error: problem });
+                const saved = await classes.patch(body as MailClassPatch);
+                return json(res, 200, saved);
+            }
+        }
+
         // PATCH /api/config/email-rules
         if (method === "PATCH" && path === "/api/config/email-rules") {
             if (!this.emailClassificationStore) return json(res, 503, { error: "Not configured" });
@@ -1408,7 +1438,10 @@ export class AcediaApiServer {
                     source: e.source,
                     ...(e.priorityReason && { priorityReason: e.priorityReason }),
                 }));
-            const rest = unread.filter((e) => e.priority !== "urgent").slice(0, limit);
+            // Listed for Master, not summarized: what is kept away from a model never reaches the digest's prompt.
+            const rest = unread
+                .filter((e) => e.priority !== "urgent" && this.aiReadable(e))
+                .slice(0, limit);
             const count = unread.length;
             if (rest.length === 0 || this.ai.mode === "none")
                 return json(res, 200, { response: "", count, urgent });
@@ -1430,7 +1463,9 @@ export class AcediaApiServer {
             }
             const { events } = this.store.query({ unread: true, limit: 100 });
             const relevant = (events as AcediaEvent[]).filter(
-                (e) => e.priority === "urgent" || e.type === "calendar.conflict",
+                (e) =>
+                    (e.priority === "urgent" || e.type === "calendar.conflict") &&
+                    this.aiReadable(e),
             );
             const hasConflict = relevant.some((e) => e.type === "calendar.conflict");
             const freeSlots = hasConflict
