@@ -6,7 +6,8 @@
  *
  *   GET  /api/inbox                          { items (newest first), unread }
  *   POST /api/inbox/:key/:gesture            open | read | archive | trash | spam | done
- *   POST /api/inbox/:key/solve/:n            a conflict's n-th way out: its event moved there
+ *   POST /api/inbox/:key/solve-<n>           a conflict's n-th way out: its event moved there
+ *   POST /api/inbox/:key/leave               a conflict left as it is: out of the box, not brought back
  *   GET  /api/inbox/trash?page=…             Gmail's trash (30 days, kept by Gmail), a page at a time:
  *                                            { items, next?, skipped }
  *   POST /api/inbox/trash/:messageId/restore back to the inbox, collected again at the next pass
@@ -27,7 +28,7 @@ const BOX_SIZE = 200;
 export interface InboxJournalEntry {
     at: string;
     key: string;
-    gesture: InboxGesture | "restore" | "solve";
+    gesture: InboxGesture | "restore" | "solve" | "leave";
     ok: boolean;
     error?: string;
 }
@@ -118,9 +119,23 @@ export class InboxRoutes {
         }
 
         // A conflict's way out, chosen by Master: his hand, carried out at once like any gesture of the box.
-        const solve = path.match(/^\/api\/inbox\/([^/]+)\/solve\/(\d+)$/);
+        // Shaped like every gesture (one segment), so the hub's relays carry it as they carry the others.
+        const solve = path.match(/^\/api\/inbox\/([^/]+)\/solve-(\d+)$/);
         if (method === "POST" && solve) {
             await this.solve(res, decodeURIComponent(solve[1]!), Number(solve[2]));
+            return true;
+        }
+        const leave = path.match(/^\/api\/inbox\/([^/]+)\/leave$/);
+        if (method === "POST" && leave) {
+            const key = decodeURIComponent(leave[1]!);
+            if (this.deps.store.get(key)?.type !== "planning.conflict") {
+                this.deps.json(res, 404, { error: "No such conflict in the box" });
+                return true;
+            }
+            // Master keeps both: the conflict leaves and is remembered as left — not brought back while it lasts.
+            this.deps.life.changed(key, "removed", "dismissed");
+            this.record(key, "leave", true);
+            this.deps.json(res, 200, { ok: true });
             return true;
         }
 
@@ -218,7 +233,7 @@ export class InboxRoutes {
 
     private record(
         key: string,
-        gesture: InboxGesture | "restore" | "solve",
+        gesture: InboxGesture | "restore" | "solve" | "leave",
         ok: boolean,
         error?: string,
     ): void {

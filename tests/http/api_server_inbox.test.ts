@@ -296,8 +296,8 @@ describe("AcediaApiServer — inbox routes", () => {
         const { base, store, emitted } = await start(calendar as never, [conflict]);
         const key = encodeURIComponent(conflict.dedupeKey);
 
-        expect((await call("POST", `${base}/api/inbox/${key}/solve/3`)).status).toBe(400);
-        const r = await call("POST", `${base}/api/inbox/${key}/solve/0`);
+        expect((await call("POST", `${base}/api/inbox/${key}/solve-3`)).status).toBe(400);
+        const r = await call("POST", `${base}/api/inbox/${key}/solve-0`);
         expect(r.status).toBe(200);
         expect(executeAction).toHaveBeenCalledWith({
             kind: "update_event",
@@ -306,7 +306,41 @@ describe("AcediaApiServer — inbox routes", () => {
         });
         expect(store.has(conflict.dedupeKey)).toBe(false);
         expect(emitted.at(-1)).toMatchObject({ op: "removed", key: conflict.dedupeKey });
-        expect((await call("POST", `${base}/api/inbox/${key}/solve/0`)).status).toBe(404);
+        expect((await call("POST", `${base}/api/inbox/${key}/solve-0`)).status).toBe(404);
+    });
+
+    // « Laisser tel quel »: both events stay, the conflict leaves and is remembered — not brought back while it lasts.
+    it("leaves a conflict as it is: out of the box, remembered as gone", async () => {
+        const conflict: AcediaEvent = {
+            type: "planning.conflict",
+            ts: 1,
+            source: "calendar",
+            title: "Conflit — A et B",
+            priority: "normal",
+            dedupeKey: "conflict-primary/a-primary/b",
+            read: false,
+            meta: { conflict: true, solutions: [] },
+        };
+        const mailItem = mail("x");
+        const { base, store } = await start(fakeGmail(), [conflict, mailItem]);
+        expect(
+            (
+                await call(
+                    "POST",
+                    `${base}/api/inbox/${encodeURIComponent(mailItem.dedupeKey)}/leave`,
+                )
+            ).status,
+        ).toBe(404);
+        expect(
+            (
+                await call(
+                    "POST",
+                    `${base}/api/inbox/${encodeURIComponent(conflict.dedupeKey)}/leave`,
+                )
+            ).status,
+        ).toBe(200);
+        expect(store.has(conflict.dedupeKey)).toBe(false);
+        expect(store.isGone(conflict.dedupeKey)).toBe(true);
     });
 
     it("lists Gmail's trash and restores a mail, which comes back at the next collection", async () => {

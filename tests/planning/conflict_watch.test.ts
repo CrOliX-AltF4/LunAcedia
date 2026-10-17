@@ -106,5 +106,10 @@ describe("syncConflicts", () => {
         syncConflicts(life, store, []);
         expect(store.has(items[0]!.dedupeKey)).toBe(false);
         expect(emitted.at(-1)).toMatchObject({ op: "removed", key: items[0]!.dedupeKey });
+
+        // Left as it is by Master (remembered as gone): not brought back while the overlap lasts.
+        store.markGone(items[0]!.dedupeKey);
+        syncConflicts(life, store, items);
+        expect(store.has(items[0]!.dedupeKey)).toBe(false);
     });
 });

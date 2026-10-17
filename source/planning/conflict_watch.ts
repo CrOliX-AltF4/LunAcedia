@@ -103,11 +103,13 @@ function solutionsFor(
  */
 export function syncConflicts(
     life: Pick<ItemLifecycle, "collected" | "refreshed" | "changed">,
-    store: Pick<EventStore, "has" | "query">,
+    store: Pick<EventStore, "has" | "query" | "isGone">,
     items: AcediaEvent[],
 ): void {
     const keys = new Set(items.map((i) => i.dedupeKey));
     for (const item of items) {
+        // A conflict Master left as it is stays left while it lasts.
+        if (store.isGone(item.dedupeKey)) continue;
         if (store.has(item.dedupeKey)) life.refreshed(item);
         else life.collected(item, "conflict");
     }
