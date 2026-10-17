@@ -265,19 +265,25 @@ describe("AcediaApiServer — inbox routes", () => {
     });
 
     // a conflict's way out is Master's gesture — the event moved at the calendar, the conflict gone.
-    it("solves a conflict: its event moved to the chosen slot, the conflict out of the box", async () => {
+    it("opens then solves a conflict: its own text, then its event moved to the chosen slot, the conflict out of the box", async () => {
         const executeAction = vi.fn(async () => {});
+        // The calendar reads an event of its own on "open" — a conflict is not one.
+        const inboxGesture = vi.fn(async () => {
+            throw new Error("[GCal] item has no event id");
+        });
         const calendar = {
             slug: "calendar" as const,
             name: "Calendar",
             poll: async () => [],
             executeAction,
+            inboxGesture,
         };
         const conflict: AcediaEvent = {
             type: "planning.conflict",
             ts: 1,
             source: "calendar",
             title: "Conflit — A et B",
+            body: "10:30–11:00 : « B » chevauche « A ».",
             priority: "normal",
             dedupeKey: "conflict-primary/a-primary/b",
             read: false,
@@ -296,6 +302,13 @@ describe("AcediaApiServer — inbox routes", () => {
         const { base, store, emitted } = await start(calendar as never, [conflict]);
         const key = encodeURIComponent(conflict.dedupeKey);
 
+        const opened = await call("POST", `${base}/api/inbox/${key}/open`);
+        expect(opened.body).toEqual({
+            ok: true,
+            change: "read",
+            body: "10:30–11:00 : « B » chevauche « A ».",
+        });
+        expect(inboxGesture).not.toHaveBeenCalled();
         expect((await call("POST", `${base}/api/inbox/${key}/solve-3`)).status).toBe(400);
         const r = await call("POST", `${base}/api/inbox/${key}/solve-0`);
         expect(r.status).toBe(200);

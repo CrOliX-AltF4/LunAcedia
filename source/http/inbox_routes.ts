@@ -154,8 +154,10 @@ export class InboxRoutes {
             }
             const connector = this.deps.connectors.find((c) => c.slug === item.source);
             // Opening is reading, for every source: one without gestures gives the text the box holds,
-            // and the item is read in the box (there is no read state to change at its source).
-            if (gesture === "open" && !connector?.inboxGesture) {
+            // and the item is read in the box (there is no read state to change at its source). So does a
+            // conflict: LunAcedia made it, its source holds no such object to read.
+            const ownText = !connector?.inboxGesture || item.type === "planning.conflict";
+            if (gesture === "open" && ownText) {
                 const change = item.read ? null : "read";
                 if (change) this.deps.life.changed(key, change, "gesture");
                 this.record(key, gesture, true);
