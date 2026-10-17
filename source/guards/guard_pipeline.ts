@@ -19,6 +19,8 @@ export interface GuardPreview {
     wouldDrop: number;
     wouldTag: number;
     wouldChangePriority: number;
+    /** Mails a `classify` would file in another class than the one they have. */
+    wouldClassify: number;
     vipProtected: number;
     /** A few concrete examples so the effect of a rule is visible before it is activated. */
     sample: Array<{
@@ -173,6 +175,12 @@ export class GuardPipeline {
         return this.withPriority({ ...classed }, verdict, vip);
     }
 
+    /** Kept out by Master's own gesture (a mail filed in a class kept out of the box): journaled and settled. */
+    keepOut(event: AcediaEvent, ruleId: string): void {
+        this.deps.journal.record(event, ruleId);
+        this.dropped.set(event.dedupeKey, this.version());
+    }
+
     /** User restore: takes the event back out of the journal so the caller can re-dispatch it (bypassing dedup and guard). */
     restore(key: string): AcediaEvent | undefined {
         this.dropped.delete(key);
@@ -187,6 +195,7 @@ export class GuardPipeline {
             wouldDrop: 0,
             wouldTag: 0,
             wouldChangePriority: 0,
+            wouldClassify: 0,
             vipProtected: 0,
             sample: [],
         };
@@ -215,6 +224,12 @@ export class GuardPipeline {
                 result.wouldTag += 1;
                 if (!v.drop && !v.vipProtected) push("tag");
             }
+            if (
+                v.mailClass !== undefined &&
+                event.source === "email" &&
+                v.mailClass !== event.meta?.["mailClass"]
+            )
+                result.wouldClassify += 1;
             if (v.priority !== undefined && v.priority !== event.priority) {
                 result.wouldChangePriority += 1;
                 if (!v.drop && v.tags.length === 0) push("priority");

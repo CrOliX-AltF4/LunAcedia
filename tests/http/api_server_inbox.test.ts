@@ -1,4 +1,10 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { GuardRulesStore } from "../../source/guards/guard_rules_store.js";
+import { GuardJournal } from "../../source/guards/guard_journal.js";
+import { GuardStats } from "../../source/guards/guard_stats.js";
+import { GuardPipeline } from "../../source/guards/guard_pipeline.js";
+import { MailClassStore } from "../../source/guards/mail_class_store.js";
+import type { GuardServices } from "../../source/guards/guard_services.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -98,6 +104,7 @@ describe("AcediaApiServer — inbox routes", () => {
         connector: IConnector,
         events: AcediaEvent[],
         tiers: Record<string, string> = {},
+        guards?: GuardServices,
     ) {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-inbox-"));
         const store = new EventStore();
@@ -118,7 +125,7 @@ describe("AcediaApiServer — inbox routes", () => {
             undefined,
             undefined,
             undefined,
-            undefined,
+            guards,
             new AgentService(),
             life,
         );
@@ -126,6 +133,67 @@ describe("AcediaApiServer — inbox routes", () => {
         port = await server.start(0);
         return { base: `http://localhost:${port}`, store, emitted, hub };
     }
+
+    // « Classer… » (ADR-041 D0): a mail filed by hand, or every mail of its sender through a rule.
+    async function sortingGuards() {
+        const rules = new GuardRulesStore(path.join(dir, "rules.json"));
+        const journal = new GuardJournal(path.join(dir, "journal.jsonl"));
+        const stats = new GuardStats(path.join(dir, "stats.json"));
+        const classes = new MailClassStore(path.join(dir, "classes.json"));
+        const pipeline = new GuardPipeline({
+            rules,
+            journal,
+            stats,
+            vipSenders: () => [],
+            classes,
+        });
+        return { pipeline, rules, journal, stats, classes } satisfies GuardServices;
+    }
+
+    it("lists what no model may read, and files a mail — or every mail of its sender — in another class", async () => {
+        dir = await fs.mkdtemp(path.join(os.tmpdir(), "api-inbox-"));
+        const guards = await sortingGuards();
+        const from = (id: string, sender: string, mailClass = "inconnu"): AcediaEvent => ({
+            ...mail(id),
+            meta: { ...mail(id).meta, from: sender, mailClass },
+        });
+        const { base, store } = await start(
+            fakeGmail(),
+            [
+                from("a", "Prof <prof@espi.fr>"),
+                from("b", "Admin <admin@espi.fr>"),
+                from("c", "Maman <maman@famille.fr>", "perso"),
+            ],
+            {},
+            guards,
+        );
+        const listed = await call("GET", `${base}/api/inbox`);
+        expect(listed.body.items.find((i: AcediaEvent) => i.dedupeKey === "email-c").ai).toBe(
+            false,
+        );
+        expect(
+            listed.body.items.find((i: AcediaEvent) => i.dedupeKey === "email-a").ai,
+        ).toBeUndefined();
+
+        const once = await call("POST", `${base}/api/inbox/email-c/class-pro`, {});
+        expect(once.status).toBe(200);
+        expect(store.get("email-c")!.meta).toMatchObject({
+            mailClass: "pro",
+            mailClassByHand: true,
+        });
+
+        const always = await call("POST", `${base}/api/inbox/email-a/class-pro`, { always: true });
+        expect(always.body.rule.name).toBe("De « espi.fr » → Pro");
+        expect(guards.rules.getRules()).toHaveLength(1);
+        expect(store.get("email-b")!.meta?.["mailClass"]).toBe("pro");
+
+        await guards.classes.patch({ classes: { pub: { visible: false } } });
+        const out = await call("POST", `${base}/api/inbox/email-b/class-pub`, {});
+        expect(out.body.change).toBe("removed");
+        expect(store.has("email-b")).toBe(false);
+        expect(guards.journal.get("email-b")!.ruleId).toBe("class:pub");
+        expect((await call("POST", `${base}/api/inbox/email-a/class-spam`, {})).status).toBe(400);
+    });
 
     // An action carried out (the agent, a confirmation) follows the box's own path: the wire, the views and a closed
     // phone's notification learn it — the store changed alone told nobody, and the next sync never would.

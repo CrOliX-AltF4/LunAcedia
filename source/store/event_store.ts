@@ -142,13 +142,25 @@ export class EventStore {
         const held = this.buf[idx]!;
         // A guard rule or the VIP list may have set the priority: that choice stands over the source's.
         const decided = held.ruleId !== undefined || held.priorityReason === VIP_REASON;
-        const incoming = decided
+        const decidedEvent = decided
             ? {
                   ...fresh,
                   priority: held.priority,
                   ...(held.priorityReason && { priorityReason: held.priorityReason }),
               }
             : fresh;
+        // A mail Master filed by hand keeps its class over what the source and the rules say.
+        const incoming =
+            held.meta?.["mailClassByHand"] === true
+                ? {
+                      ...decidedEvent,
+                      meta: {
+                          ...decidedEvent.meta,
+                          mailClass: held.meta["mailClass"],
+                          mailClassByHand: true,
+                      },
+                  }
+                : decidedEvent;
         if (sameContent(held, incoming)) return null;
         const merged: AcediaEvent = {
             ...incoming,

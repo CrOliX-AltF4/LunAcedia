@@ -68,7 +68,8 @@ import type { EmailClassificationConfig } from "../types/email_classification.js
 import type { GoogleConnectorKey, GoogleTokenStore } from "../auth/google_token_store.js";
 import type { GuardServices } from "../guards/guard_services.js";
 import { validateRules } from "../guards/guard_rules_store.js";
-import { DEFAULT_CLASSES, readableByAi } from "../guards/mail_class.js";
+import { classOf, DEFAULT_CLASSES, MAIL_CLASSES, readableByAi } from "../guards/mail_class.js";
+import { reclassify } from "../guards/mail_reclass.js";
 import { validateMailClassPatch, type MailClassPatch } from "../guards/mail_class_store.js";
 import {
     findGoogleOAuthConnector,
@@ -164,6 +165,8 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
  *   GET  /api/config/mail-classes  → { classes, personalSenders }  each class: { visible, ai, rings }
  *   PATCH /api/config/mail-classes body: { classes?: { <class>: { visible?, ai?, rings? } }, personalSenders? }
+ *   POST /api/inbox/:key/class-<class>  body: { always? }  « Classer… »: this mail, or every mail of its sender
+ *   PATCH /api/guard/rules/:id     body: { enabled }  one rule on or off
  *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards)
  *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
  *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
@@ -275,6 +278,23 @@ export class AcediaApiServer {
                   life,
                   ...(planning && { planningSync: planning.sync }),
                   json,
+                  readBody,
+                  aiReadable: (e) => this.aiReadable(e),
+                  ...(guards?.classes && {
+                      reclassify: (key, mailClass, always) =>
+                          reclassify(
+                              {
+                                  store,
+                                  life,
+                                  pipeline: guards.pipeline,
+                                  rules: guards.rules,
+                                  hidden: (c) => guards.classes!.table()[c].visible === false,
+                              },
+                              key,
+                              mailClass,
+                              always,
+                          ),
+                  }),
               })
             : null;
         this.conversationRoutes = topics
@@ -316,6 +336,24 @@ export class AcediaApiServer {
     }
 
     /** One agent run over this server's store, calendar and tier gate, journaled. */
+    /** Mails per class over the last 7 days: in the box, and kept out of it by their class. */
+    private classCounts(): Record<string, number> {
+        const since = Date.now() - 7 * 86_400_000;
+        const counts: Record<string, number> = Object.fromEntries(MAIL_CLASSES.map((c) => [c, 0]));
+        for (const e of this.store.query({ source: "email", since, limit: Number.MAX_SAFE_INTEGER })
+            .events as AcediaEvent[]) {
+            const c = classOf(e);
+            if (c) counts[c] = (counts[c] ?? 0) + 1;
+        }
+        for (const entry of this.guards?.journal.list(500) ?? []) {
+            const c = entry.ruleId?.startsWith("class:")
+                ? entry.ruleId.slice("class:".length)
+                : undefined;
+            if (c && entry.ts >= since && c in counts) counts[c] = (counts[c] ?? 0) + 1;
+        }
+        return counts;
+    }
+
     /** Whether a model may read a box item — its class of mail decides; every call that hands the box to one asks. */
     private aiReadable(e: AcediaEvent): boolean {
         return readableByAi(e, this.guards?.classes?.table() ?? DEFAULT_CLASSES);
@@ -417,6 +455,27 @@ export class AcediaApiServer {
             const result = await g.rules.replaceAll(rules);
             if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
+            return json(res, 200, rulesPayload());
+        }
+
+        const one = path.match(/^\/api\/guard\/rules\/([^/]+)$/);
+        if (method === "PATCH" && one) {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const enabled = (body as { enabled?: unknown } | null)?.enabled;
+            if (typeof enabled !== "boolean")
+                return json(res, 400, { error: "Body must be { enabled: boolean }" });
+            const id = decodeURIComponent(one[1]!);
+            const rules = g.rules.getRules();
+            if (!rules.some((r) => r.id === id)) return json(res, 404, { error: "No such rule" });
+            const result = await g.rules.replaceAll(
+                rules.map((r) => (r.id === id ? { ...r, enabled } : r)),
+            );
+            if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             return json(res, 200, rulesPayload());
         }
 
@@ -1185,7 +1244,8 @@ export class AcediaApiServer {
         if (path === "/api/config/mail-classes") {
             const classes = this.guards?.classes;
             if (!classes) return json(res, 503, { error: "Not configured" });
-            if (method === "GET") return json(res, 200, classes.get());
+            if (method === "GET")
+                return json(res, 200, { ...classes.get(), counts: this.classCounts() });
             if (method === "PATCH") {
                 let body: unknown;
                 try {
@@ -1224,7 +1284,7 @@ export class AcediaApiServer {
         // The box: Master's gestures at the source, trash, journal
         if (
             this.inboxRoutes &&
-            (await this.inboxRoutes.handle(method, path, res, url.searchParams))
+            (await this.inboxRoutes.handle(method, path, res, url.searchParams, req))
         )
             return;
 

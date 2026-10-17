@@ -463,3 +463,83 @@ describe("dashboard planning", () => {
         );
     });
 });
+
+// Sorting mail on the dashboard: rendered by the shipped code itself, on a sample.
+describe("dashboard mail sorting", () => {
+    const script = [...DASHBOARD_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+        .map((m) => m[1]!)
+        .join("\n");
+    const pure = script.slice(
+        script.indexOf("const CLASS_NAMES="),
+        script.indexOf("let sortRules="),
+    );
+    const esc = extractEscFn();
+    const render = (cfg: unknown, rules: unknown[], journal: unknown): string =>
+        new Function("esc", `${pure}; return renderSort;`)(esc)(cfg, rules, journal);
+    const on = { visible: true, ai: true, rings: true };
+    const cfg = {
+        classes: {
+            pro: on,
+            perso: { ...on, ai: false },
+            notification: on,
+            pub: { ...on, visible: false },
+            inconnu: on,
+        },
+        personalSenders: ["maman@famille.fr"],
+        counts: { pro: 4, pub: 9 },
+    };
+    const rules = [
+        {
+            id: "r1",
+            name: "x",
+            enabled: true,
+            conditions: [{ field: "from", op: "domain", value: "<espi>.fr" }],
+            actions: [{ type: "classify", mailClass: "pro" }],
+        },
+        {
+            id: "r2",
+            name: "AliExpress",
+            enabled: true,
+            conditions: [{ field: "from", op: "domain", value: "ali.com" }],
+            actions: [{ type: "drop" }],
+        },
+    ];
+    const journal = {
+        total: 2,
+        entries: [
+            {
+                ts: 1,
+                ruleId: "class:pub",
+                event: { dedupeKey: "email-1", title: "Soldes", meta: { from: "Lumen" } },
+            },
+            {
+                ts: 1,
+                ruleId: "r2",
+                event: { dedupeKey: "email-2", title: "Colis", meta: { from: "Ali" } },
+            },
+        ],
+    };
+
+    it("shows each class with its three switches and its count, the rules that classify only, and why a mail was kept out", () => {
+        const out = render(cfg, rules, journal);
+        expect(out).toContain('data-class="perso" data-key="ai"  onchange');
+        expect(out).toContain('data-class="pro" data-key="ai" checked');
+        expect(out).toContain("<td><small>9</small></td>");
+        expect(out).toContain("l'expéditeur est du domaine « &lt;espi&gt;.fr »");
+        expect(out).not.toContain("ali.com");
+        expect(out).toContain('data-id="r1"');
+        expect(out).toContain("classe Pub (masquée)");
+        expect(out).toContain("règle « AliExpress »");
+        expect(out).toContain("maman@famille.fr");
+    });
+
+    it("switches one rule by the id read from its row, and restores by the key read from its row", () => {
+        const block = script.slice(
+            script.indexOf("async function toggleRule"),
+            script.indexOf("async function putRules"),
+        );
+        expect(block).toContain("'/api/guard/rules/'+encodeURIComponent(id),{method:'PATCH'");
+        expect(script).toContain("body:JSON.stringify({dedupeKey:row.dataset.key})");
+        expect(DASHBOARD_HTML).toContain('onclick="openSort()"');
+    });
+});

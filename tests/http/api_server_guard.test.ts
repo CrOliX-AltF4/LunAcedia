@@ -108,6 +108,29 @@ describe("AcediaApiServer — ingestion guard routes", () => {
         return { base: `http://localhost:${port}`, guards, store, received };
     }
 
+    it("turns one rule on or off", async () => {
+        const { base } = await start();
+        await call("PUT", `${base}/api/guard/rules`, {
+            rules: [
+                {
+                    id: "r1",
+                    name: "x",
+                    enabled: true,
+                    conditions: [{ field: "subject", op: "contains", value: "a" }],
+                    actions: [{ type: "classify", mailClass: "pro" }],
+                },
+            ],
+        });
+        const off = await call("PATCH", `${base}/api/guard/rules/r1`, { enabled: false });
+        expect(off.body.rules[0].enabled).toBe(false);
+        expect(
+            (await call("PATCH", `${base}/api/guard/rules/nope`, { enabled: true })).status,
+        ).toBe(404);
+        expect((await call("PATCH", `${base}/api/guard/rules/r1`, { enabled: "no" })).status).toBe(
+            400,
+        );
+    });
+
     it("answers 503 when the guards are not configured", async () => {
         const { base } = await start(false);
         expect((await call("GET", `${base}/api/guard/rules`)).status).toBe(503);
@@ -115,9 +138,19 @@ describe("AcediaApiServer — ingestion guard routes", () => {
     });
 
     it("reads and sets the classes of mail and the personal senders, refusing what it does not know", async () => {
-        const { base } = await start();
+        const { base, store } = await start();
+        store.push({
+            type: "email.received",
+            ts: Date.now(),
+            source: "email",
+            title: "x",
+            priority: "info",
+            dedupeKey: "email-p",
+            meta: { mailClass: "pub" },
+        });
         const first = await call("GET", `${base}/api/config/mail-classes`);
         expect(first.body.classes.perso).toEqual({ visible: true, ai: false, rings: true });
+        expect(first.body.counts).toMatchObject({ pub: 1, pro: 0 });
         const set = await call("PATCH", `${base}/api/config/mail-classes`, {
             classes: { pub: { visible: false } },
             personalSenders: ["maman@"],

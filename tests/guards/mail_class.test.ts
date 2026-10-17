@@ -14,6 +14,7 @@ import { GuardPipeline } from "../../source/guards/guard_pipeline.js";
 import { GuardRulesStore, validateRules } from "../../source/guards/guard_rules_store.js";
 import { GuardStats } from "../../source/guards/guard_stats.js";
 import type { AcediaEvent } from "../../source/types/acedia_event.js";
+import { EventStore } from "../../source/store/event_store.js";
 
 // Mail sorted at collection without any model: a class says if it shows, if a model may read it, if it rings.
 
@@ -127,6 +128,33 @@ describe("mail classes in the pipeline and their settings", () => {
         await classes.patch({ classes: { pub: { visible: true } } });
         expect(pipeline.isSettled("email-1")).toBe(false);
         expect(pipeline.process(promo).dropped).toBe(false);
+    });
+
+    it("the preview of a rule that classifies counts the mails that would change class", async () => {
+        const { pipeline } = await setup();
+        const rule = {
+            id: "r",
+            name: "x",
+            enabled: true,
+            conditions: [{ field: "from", op: "domain", value: "corp.com" }],
+            actions: [{ type: "classify", mailClass: "pro" }],
+        };
+        const preview = pipeline.preview([rule] as never, [
+            mail("1", { from: "a@corp.com", mailClass: "inconnu" }),
+            mail("2", { from: "b@corp.com", mailClass: "pro" }),
+            mail("3", { from: "c@else.org" }),
+        ]);
+        expect(preview.wouldClassify).toBe(1);
+    });
+
+    it("a mail filed by hand keeps its class when the source refreshes it", async () => {
+        const store = new EventStore();
+        store.push(mail("1", { mailClass: "pro", mailClassByHand: true }));
+        const refreshed = store.refresh({
+            ...mail("1", { mailClass: "pub" }),
+            title: "Nouveau titre",
+        });
+        expect(refreshed!.meta).toMatchObject({ mailClass: "pro", mailClassByHand: true });
     });
 
     it("keeps its settings in a file, and refuses what it does not know", async () => {
