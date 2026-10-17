@@ -69,4 +69,7 @@ export interface AcediaEvent {
     /** On the wire only, never stored: whether this new item rings the phone (LunAcedia's rule, notify_policy.ts) —
      *  a hub relays it as it is, it never decides. */
     notify?: boolean;
+    /** On the wire only, never stored: false when no model may read this item (its class of mail) — a hub keeps it out
+     *  of its own model's reach (briefing, voice) as LunAcedia does. Absent: readable. */
+    ai?: boolean;
 }

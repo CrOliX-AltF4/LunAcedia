@@ -38,6 +38,24 @@ describe("readToolDefinitions", () => {
     });
 });
 
+describe("what a model may not read", () => {
+    it("search_events leaves out an item kept away from the assistant; get_event refuses it", () => {
+        const d: ReadToolDeps = {
+            ...deps([mail("1"), mail("2", { meta: { messageId: "2", mailClass: "perso" } })]),
+            aiReadable: (e) => e.meta?.["mailClass"] !== "perso",
+        };
+        const found = runReadTool("search_events", {}, d);
+        expect(found).toMatchObject({ ok: true });
+        const keys = (found as { result: { events: { key: string }[] } }).result.events.map(
+            (e) => e.key,
+        );
+        expect(keys).toEqual(["email-1"]);
+        const got = runReadTool("get_event", { key: "email-2" }, d);
+        expect(got).toMatchObject({ ok: false });
+        expect(JSON.stringify(got)).not.toContain("Body of 2");
+    });
+});
+
 describe("search_events", () => {
     it("filters by source, priority and unread, newest first", () => {
         const d = deps([

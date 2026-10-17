@@ -71,6 +71,12 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 .plan-day small,.plan-aside small{color:var(--muted)}
 .plan-conflict{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px}
 .plan-conflict button{margin:4px 4px 0 0}
+.sort-table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+.sort-table th{text-align:left;font-weight:500;color:var(--muted);padding:6px 8px 6px 0;border-bottom:1px solid var(--border)}
+.sort-table td{padding:6px 8px 6px 0;border-bottom:1px solid var(--border)}
+.sort-new{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.sort-new input,.sort-new select,#sort-perso{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font:inherit}
+#sort-perso{display:block;width:100%;margin:4px 0}
 #digest-close{margin-top:14px}
 /* command bar */
 #cmdbar{padding:10px 20px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)}
@@ -176,6 +182,7 @@ textarea{width:100%;min-height:52px;margin-bottom:10px;resize:vertical}
   <span id="badge">0</span>
   <div class="spacer"></div>
   <button onclick="openPlanning()">Planning</button>
+  <button onclick="openSort()">Tri des mails</button>
   <button onclick="openProposals()">Propositions</button>
   <button onclick="openFreeSlots()">Créneaux libres</button>
   <button onclick="openDigest()">Digest</button>
@@ -314,6 +321,90 @@ async function gesture(btn,ev){
     if(!r.ok){btn.disabled=false;return;}
   }catch(e){btn.disabled=false;return;}
   load();
+}
+
+// Sorting mail: the classes (in the box, read by a model, rings), the personal senders, the rules that classify, what
+// was kept out of the box. No model anywhere here. Ids and keys read from the clicked element. From here to
+// renderSort's end, pure: the tests run it as shipped.
+const CLASS_NAMES=[['pro','Pro','tes règles'],['perso','Perso','expéditeurs perso'],['notification','Notifications','Gmail : réseaux, mises à jour, forums ; listes de diffusion'],['pub','Pub','Gmail : promotions'],['inconnu','Non classé','le reste']];
+function ruleWhen(r){const c=(r.conditions||[])[0]||{};const v=esc(c.value||c.name||'');if(c.field==='from')return c.op==='domain'?\`l'expéditeur est du domaine « \${v} »\`:\`l'expéditeur \${c.op==='equals'?'est':'contient'} « \${v} »\`;if(c.field==='subject')return \`le sujet contient « \${v} »\`;if(c.field==='snippet')return \`le texte contient « \${v} »\`;if(c.field==='label')return \`le libellé Gmail est « \${v} »\`;return esc(c.field||'');}
+function keptWhy(entry,rules){const id=entry.ruleId||'';if(id.startsWith('class:')){const n=(CLASS_NAMES.find(c=>c[0]===id.slice(6))||[,id.slice(6)])[1];return 'classe '+n+' (masquée)';}const r=rules.find(x=>x.id===id);return r?'règle « '+r.name+' »':'règle supprimée';}
+function renderSort(cfg,rules,journal){
+  const box=(c,k)=>\`<input type="checkbox" data-class="\${c}" data-key="\${k}" \${cfg.classes[c][k]?'checked':''} onchange="setClass(this)" aria-label="\${c} \${k}">\`;
+  const rows=CLASS_NAMES.map(([c,label,how])=>\`<tr><td>\${label}</td><td><small>\${how}</small></td><td>\${box(c,'visible')}</td><td>\${box(c,'ai')}</td><td>\${box(c,'rings')}</td><td><small>\${(cfg.counts||{})[c]??0}</small></td></tr>\`).join('');
+  const classify=rules.filter(r=>(r.actions||[]).some(a=>a.type==='classify'));
+  const ruleRows=classify.map(r=>{const a=r.actions.find(x=>x.type==='classify');const n=(CLASS_NAMES.find(c=>c[0]===a.mailClass)||[,a.mailClass])[1];return \`<tr class="sort-rule" data-id="\${esc(r.id)}"><td>\${ruleWhen(r)}</td><td>\${esc(n)}</td><td><input type="checkbox" \${r.enabled?'checked':''} onchange="toggleRule(this)" aria-label="Règle active"></td><td><button onclick="deleteRule(this)">Supprimer</button></td></tr>\`;}).join('')||'<tr><td colspan="4"><small>Aucune règle qui classe — un geste « Classer… » sur un mail en crée une.</small></td></tr>';
+  const kept=(journal.entries||[]).map(e=>\`<div class="trash-row" data-key="\${esc(e.event.dedupeKey)}"><span>\${esc(e.event.title)} — \${esc((e.event.meta||{}).from||'')} <small>· \${esc(keptWhy(e,rules))}</small></span><button onclick="restoreKept(this)">Restaurer</button></div>\`).join('')||'<p><small>Rien n’est gardé hors de la boîte.</small></p>';
+  const opts=CLASS_NAMES.slice(0,4).map(([c,l])=>\`<option value="\${c}">\${l}</option>\`).join('');
+  return \`<div class="plan">
+<p>Classé à l'arrivée sans aucune IA. Une classe « hors IA » n'est lue par aucun modèle : l'assistant, le digest, les propositions, le hub.</p>
+<h4>Classes</h4>
+<table class="sort-table"><thead><tr><th>Classe</th><th>Reconnue par</th><th>Dans la boîte</th><th>Lu par l'IA</th><th>Sonne</th><th>7 jours</th></tr></thead><tbody>\${rows}</tbody></table>
+<p><small>Retiré de la boîte = gardé à part, restaurable. Un VIP n'est jamais retiré.</small> <span id="sort-msg"></span></p>
+<h4>Expéditeurs perso</h4>
+<label><small>Un par ligne — un nom, une adresse ou une partie</small><textarea id="sort-perso" rows="4">\${esc((cfg.personalSenders||[]).join('\\n'))}</textarea></label>
+<button onclick="savePerso()">Enregistrer</button>
+<h4>Règles qui classent</h4>
+<table class="sort-table"><thead><tr><th>Quand</th><th>Classer</th><th>Active</th><th></th></tr></thead><tbody>\${ruleRows}</tbody></table>
+<div class="sort-new"><select id="sort-field"><option value="domain">le domaine de l'expéditeur est</option><option value="from">l'expéditeur contient</option><option value="subject">le sujet contient</option></select><input id="sort-value" type="text" placeholder="exemple.fr"><select id="sort-class">\${opts}</select><button onclick="previewSortRule()">Aperçu</button><button onclick="addSortRule()">Ajouter</button> <span id="sort-preview"></span></div>
+<p><small>Les autres règles (retirer, priorité, gestes dans Gmail) restent au panel du hub.</small></p>
+<h4>Gardés hors de la boîte <small>· \${journal.total??0}</small></h4>\${kept}</div>\`;
+}
+let sortRules=[];
+async function openSort(){
+  const d=document.getElementById('digest');
+  document.getElementById('digest-title').textContent='Tri des mails';
+  document.getElementById('digest-box').classList.add('wide');
+  const box=document.getElementById('digest-text');
+  d.classList.add('open');
+  box.textContent='Loading…';
+  try{
+    const [cfg,rules,journal]=await Promise.all([req('/api/config/mail-classes').then(r=>r.json()),req('/api/guard/rules').then(r=>r.json()),req('/api/guard/journal?limit=50').then(r=>r.json())]);
+    if(!cfg.classes){box.textContent=cfg.error||'Tri des mails indisponible.';return;}
+    sortRules=rules.rules||[];
+    box.innerHTML=renderSort(cfg,sortRules,journal);
+  }catch(e){box.textContent='Error: '+e.message;}
+}
+async function setClass(input){
+  const patch={classes:{[input.dataset.class]:{[input.dataset.key]:input.checked}}};
+  const r=await req('/api/config/mail-classes',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}).catch(()=>null);
+  const msg=document.getElementById('sort-msg');
+  if(!r||!r.ok){input.checked=!input.checked;if(msg)msg.textContent='Pas enregistré.';return;}
+  if(msg)msg.textContent='Enregistré.';
+}
+async function savePerso(){
+  const list=document.getElementById('sort-perso').value.split('\\n').map(s=>s.trim()).filter(Boolean);
+  const r=await req('/api/config/mail-classes',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({personalSenders:list})}).catch(()=>null);
+  document.getElementById('sort-msg').textContent=r&&r.ok?'Enregistré.':'Pas enregistré.';
+}
+async function toggleRule(input){
+  const id=input.closest('.sort-rule').dataset.id;
+  const r=await req('/api/guard/rules/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:input.checked})}).catch(()=>null);
+  if(!r||!r.ok)input.checked=!input.checked;
+}
+async function putRules(list){
+  const r=await req('/api/guard/rules',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:list})}).catch(()=>null);
+  if(r&&r.ok)openSort();else document.getElementById('sort-preview').textContent='Pas enregistré.';
+}
+function deleteRule(btn){const id=btn.closest('.sort-rule').dataset.id;putRules(sortRules.filter(r=>r.id!==id));}
+function sortCandidate(){
+  const field=document.getElementById('sort-field').value,value=document.getElementById('sort-value').value.trim(),mailClass=document.getElementById('sort-class').value;
+  if(!value)return null;
+  const condition=field==='domain'?{field:'from',op:'domain',value}:field==='from'?{field:'from',op:'contains',value}:{field:'subject',op:'contains',value};
+  return {name:'Classer « '+value+' »',enabled:true,conditions:[condition],actions:[{type:'classify',mailClass}]};
+}
+async function previewSortRule(){
+  const c=sortCandidate(),out=document.getElementById('sort-preview');
+  if(!c){out.textContent='Une valeur d’abord.';return;}
+  const r=await req('/api/guard/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:[c]})}).then(x=>x.json()).catch(()=>null);
+  out.textContent=r?(r.wouldClassify??0)+' mail(s) de la boîte changeraient de classe.':'Aperçu indisponible.';
+}
+function addSortRule(){const c=sortCandidate();if(!c){document.getElementById('sort-preview').textContent='Une valeur d’abord.';return;}putRules([...sortRules,c]);}
+async function restoreKept(btn){
+  const row=btn.closest('.trash-row');
+  btn.disabled=true;
+  const r=await req('/api/guard/journal/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dedupeKey:row.dataset.key})}).catch(()=>null);
+  if(r&&r.ok){row.remove();load();}else btn.disabled=false;
 }
 
 // The planning: the week, the tasks, what is late — « Fait » at Google Tasks, a conflict's way out chosen here as in

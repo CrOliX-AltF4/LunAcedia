@@ -68,6 +68,9 @@ import type { EmailClassificationConfig } from "../types/email_classification.js
 import type { GoogleConnectorKey, GoogleTokenStore } from "../auth/google_token_store.js";
 import type { GuardServices } from "../guards/guard_services.js";
 import { validateRules } from "../guards/guard_rules_store.js";
+import { classOf, DEFAULT_CLASSES, MAIL_CLASSES, readableByAi } from "../guards/mail_class.js";
+import { reclassify } from "../guards/mail_reclass.js";
+import { validateMailClassPatch, type MailClassPatch } from "../guards/mail_class_store.js";
 import {
     findGoogleOAuthConnector,
     buildGoogleAuthUrl,
@@ -160,6 +163,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *                                    tier: null removes the override
  *   GET  /api/config/email-rules   → EmailClassificationConfig
  *   PATCH /api/config/email-rules  body: Partial<EmailClassificationConfig>
+ *   GET  /api/config/mail-classes  → { classes, personalSenders }  each class: { visible, ai, rings }
+ *   PATCH /api/config/mail-classes body: { classes?: { <class>: { visible?, ai?, rings? } }, personalSenders? }
+ *   POST /api/inbox/:key/class-<class>  body: { always? }  « Classer… »: this mail, or every mail of its sender
+ *   PATCH /api/guard/rules/:id     body: { enabled }  one rule on or off
  *   GET  /api/guard/rules          → { version, rules, stats }   (ingestion guards)
  *   PUT  /api/guard/rules          body: { rules }  full list, strictly validated → 400 { error, problem } if
  *                                  invalid (problem: { code, rule?, part?, index? } — for a client to translate)
@@ -271,6 +278,23 @@ export class AcediaApiServer {
                   life,
                   ...(planning && { planningSync: planning.sync }),
                   json,
+                  readBody,
+                  aiReadable: (e) => this.aiReadable(e),
+                  ...(guards?.classes && {
+                      reclassify: (key, mailClass, always) =>
+                          reclassify(
+                              {
+                                  store,
+                                  life,
+                                  pipeline: guards.pipeline,
+                                  rules: guards.rules,
+                                  hidden: (c) => guards.classes!.table()[c].visible === false,
+                              },
+                              key,
+                              mailClass,
+                              always,
+                          ),
+                  }),
               })
             : null;
         this.conversationRoutes = topics
@@ -284,6 +308,7 @@ export class AcediaApiServer {
                   changed: (id) => this.changes?.emit("topics", id),
                   readBody,
                   json,
+                  aiReadable: (e) => this.aiReadable(e),
               })
             : null;
     }
@@ -311,6 +336,29 @@ export class AcediaApiServer {
     }
 
     /** One agent run over this server's store, calendar and tier gate, journaled. */
+    /** Mails per class over the last 7 days: in the box, and kept out of it by their class. */
+    private classCounts(): Record<string, number> {
+        const since = Date.now() - 7 * 86_400_000;
+        const counts: Record<string, number> = Object.fromEntries(MAIL_CLASSES.map((c) => [c, 0]));
+        for (const e of this.store.query({ source: "email", since, limit: Number.MAX_SAFE_INTEGER })
+            .events as AcediaEvent[]) {
+            const c = classOf(e);
+            if (c) counts[c] = (counts[c] ?? 0) + 1;
+        }
+        for (const entry of this.guards?.journal.list(500) ?? []) {
+            const c = entry.ruleId?.startsWith("class:")
+                ? entry.ruleId.slice("class:".length)
+                : undefined;
+            if (c && entry.ts >= since && c in counts) counts[c] = (counts[c] ?? 0) + 1;
+        }
+        return counts;
+    }
+
+    /** Whether a model may read a box item — its class of mail decides; every call that hands the box to one asks. */
+    private aiReadable(e: AcediaEvent): boolean {
+        return readableByAi(e, this.guards?.classes?.table() ?? DEFAULT_CLASSES);
+    }
+
     private runAgentRequest(req: AgentRequest): Promise<AgentResult> {
         // The declared caller wins over the route's default: the Core asking counts as the Core.
         return withUsageContext({ caller: callerOf(req.callerId) }, () =>
@@ -319,6 +367,7 @@ export class AcediaApiServer {
                     provider: this.ai,
                     read: {
                         store: this.store,
+                        aiReadable: (e: AcediaEvent) => this.aiReadable(e),
                         busyIntervals: () => this.calendarBusyIntervals(),
                         ...(this.planningStore &&
                             this.planningSync && {
@@ -406,6 +455,27 @@ export class AcediaApiServer {
             const result = await g.rules.replaceAll(rules);
             if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             g.stats.prune(new Set(g.rules.getRules().map((r) => r.id)));
+            return json(res, 200, rulesPayload());
+        }
+
+        const one = path.match(/^\/api\/guard\/rules\/([^/]+)$/);
+        if (method === "PATCH" && one) {
+            let body: unknown;
+            try {
+                body = await readBody(req);
+            } catch {
+                return json(res, 400, { error: "Invalid JSON" });
+            }
+            const enabled = (body as { enabled?: unknown } | null)?.enabled;
+            if (typeof enabled !== "boolean")
+                return json(res, 400, { error: "Body must be { enabled: boolean }" });
+            const id = decodeURIComponent(one[1]!);
+            const rules = g.rules.getRules();
+            if (!rules.some((r) => r.id === id)) return json(res, 404, { error: "No such rule" });
+            const result = await g.rules.replaceAll(
+                rules.map((r) => (r.id === id ? { ...r, enabled } : r)),
+            );
+            if (!result.ok) return json(res, 400, { error: result.error, problem: result.problem });
             return json(res, 200, rulesPayload());
         }
 
@@ -1170,6 +1240,26 @@ export class AcediaApiServer {
             return json(res, 200, this.emailClassificationStore.getAll());
         }
 
+        // The classes of mail and the personal senders
+        if (path === "/api/config/mail-classes") {
+            const classes = this.guards?.classes;
+            if (!classes) return json(res, 503, { error: "Not configured" });
+            if (method === "GET")
+                return json(res, 200, { ...classes.get(), counts: this.classCounts() });
+            if (method === "PATCH") {
+                let body: unknown;
+                try {
+                    body = await readBody(req);
+                } catch {
+                    return json(res, 400, { error: "Invalid JSON" });
+                }
+                const problem = validateMailClassPatch(body);
+                if (problem) return json(res, 400, { error: problem });
+                const saved = await classes.patch(body as MailClassPatch);
+                return json(res, 200, saved);
+            }
+        }
+
         // PATCH /api/config/email-rules
         if (method === "PATCH" && path === "/api/config/email-rules") {
             if (!this.emailClassificationStore) return json(res, 503, { error: "Not configured" });
@@ -1194,7 +1284,7 @@ export class AcediaApiServer {
         // The box: Master's gestures at the source, trash, journal
         if (
             this.inboxRoutes &&
-            (await this.inboxRoutes.handle(method, path, res, url.searchParams))
+            (await this.inboxRoutes.handle(method, path, res, url.searchParams, req))
         )
             return;
 
@@ -1408,7 +1498,10 @@ export class AcediaApiServer {
                     source: e.source,
                     ...(e.priorityReason && { priorityReason: e.priorityReason }),
                 }));
-            const rest = unread.filter((e) => e.priority !== "urgent").slice(0, limit);
+            // Listed for Master, not summarized: what is kept away from a model never reaches the digest's prompt.
+            const rest = unread
+                .filter((e) => e.priority !== "urgent" && this.aiReadable(e))
+                .slice(0, limit);
             const count = unread.length;
             if (rest.length === 0 || this.ai.mode === "none")
                 return json(res, 200, { response: "", count, urgent });
@@ -1430,7 +1523,9 @@ export class AcediaApiServer {
             }
             const { events } = this.store.query({ unread: true, limit: 100 });
             const relevant = (events as AcediaEvent[]).filter(
-                (e) => e.priority === "urgent" || e.type === "calendar.conflict",
+                (e) =>
+                    (e.priority === "urgent" || e.type === "calendar.conflict") &&
+                    this.aiReadable(e),
             );
             const hasConflict = relevant.some((e) => e.type === "calendar.conflict");
             const freeSlots = hasConflict

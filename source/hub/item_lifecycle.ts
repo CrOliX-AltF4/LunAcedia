@@ -17,7 +17,7 @@ export interface InboxChange {
     op: "removed" | "read" | "unread" | "updated";
     key: string;
     source: AcediaEvent["source"];
-    item?: Pick<AcediaEvent, "title" | "body" | "priority" | "ts">;
+    item?: Pick<AcediaEvent, "title" | "body" | "priority" | "ts" | "ai">;
 }
 
 /** A change message as an AcediaEvent envelope (same wire as every event, its own type). */
@@ -70,6 +70,8 @@ export interface ItemLifecycleDeps {
     rings: (event: AcediaEvent) => boolean;
     /** Rings the phone registered with LunAcedia (FCM) — a wired phone is registered with the hub instead. */
     push: (event: AcediaEvent) => void;
+    /** Whether a model may read it (its class of mail) — told to the Core with the item. Absent: readable. */
+    aiReadable?: (event: AcediaEvent) => boolean;
 }
 
 export class ItemLifecycle implements KnownItems {
@@ -92,7 +94,8 @@ export class ItemLifecycle implements KnownItems {
         this.deps.changes.emit("box", event.dedupeKey);
         if (cause === "backlog") return;
         const notify = this.deps.rings(event);
-        this.deps.broadcast({ ...event, notify });
+        const ai = this.deps.aiReadable?.(event) ?? true;
+        this.deps.broadcast({ ...event, notify, ...(!ai && { ai: false }) });
         if (notify) this.deps.push(event);
     }
 
@@ -104,11 +107,13 @@ export class ItemLifecycle implements KnownItems {
         const updated = this.deps.store.refresh(fresh);
         if (!updated || updated.meta?.["backlog"] === true) return;
         const { title, body, priority, ts } = updated;
+        // Whether a model may read it travels with every update: filing a mail in another class changes it.
+        const ai = this.deps.aiReadable?.(updated) ?? true;
         this.tell({
             op: "updated",
             key: updated.dedupeKey,
             source: updated.source,
-            item: { title, body, priority, ts },
+            item: { title, body, priority, ts, ai },
         });
     }
 

@@ -20,6 +20,8 @@ import type { ItemLifecycle } from "../hub/item_lifecycle.js";
 import type { IConnector, InboxGesture } from "../connectors/connector_interface.js";
 import type { AcediaEvent } from "../types/acedia_event.js";
 import type { TrashPage } from "../connectors/email/gmail_connector.js";
+import { isMailClass, type MailClass } from "../guards/mail_class.js";
+import type { ReclassResult } from "../guards/mail_reclass.js";
 
 const GESTURES: readonly InboxGesture[] = ["open", "read", "archive", "trash", "spam", "done"];
 const JOURNAL_SIZE = 100;
@@ -28,7 +30,7 @@ const BOX_SIZE = 200;
 export interface InboxJournalEntry {
     at: string;
     key: string;
-    gesture: InboxGesture | "restore" | "solve" | "leave";
+    gesture: InboxGesture | "restore" | "solve" | "leave" | "class";
     ok: boolean;
     error?: string;
 }
@@ -52,6 +54,11 @@ export interface InboxRouteDeps {
     /** The planning, read again once a conflict's event was moved — absent where it is not wired. */
     planningSync?: { syncNow(): Promise<void> };
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
+    /** Whether a model may read an item — said on each item of the list. Absent: all may. */
+    aiReadable?: (event: AcediaEvent) => boolean;
+    /** « Classer… »: a mail filed in another class, or every mail of its sender — absent: no classes here. */
+    reclassify?: (key: string, mailClass: MailClass, always: boolean) => Promise<ReclassResult>;
+    readBody?: (req: http.IncomingMessage) => Promise<unknown>;
 }
 
 export class InboxRoutes {
@@ -65,13 +72,18 @@ export class InboxRoutes {
         path: string,
         res: http.ServerResponse,
         query: URLSearchParams = new URLSearchParams(),
+        req?: http.IncomingMessage,
     ): Promise<boolean> {
         const { json, store } = this.deps;
         if (!path.startsWith("/api/inbox")) return false;
 
         if (method === "GET" && path === "/api/inbox") {
             const { events } = store.query({ limit: BOX_SIZE });
-            const items = events as AcediaEvent[];
+            const readable = this.deps.aiReadable ?? (() => true);
+            // `ai: false` on an item no model may read: the app hides « Traiter » and says why.
+            const items = (events as AcediaEvent[]).map((e) =>
+                readable(e) ? e : { ...e, ai: false },
+            );
             json(res, 200, { items, unread: items.filter((e) => !e.read).length });
             return true;
         }
@@ -123,6 +135,32 @@ export class InboxRoutes {
         const solve = path.match(/^\/api\/inbox\/([^/]+)\/solve-(\d+)$/);
         if (method === "POST" && solve) {
             await this.solve(res, decodeURIComponent(solve[1]!), Number(solve[2]));
+            return true;
+        }
+        // « Classer… »: body { always?: boolean } — every mail of its sender, through a new rule.
+        const classify = path.match(/^\/api\/inbox\/([^/]+)\/class-([a-z]+)$/);
+        if (method === "POST" && classify) {
+            const key = decodeURIComponent(classify[1]!);
+            const wanted = classify[2];
+            if (!this.deps.reclassify || !isMailClass(wanted)) {
+                json(res, 400, { error: `Unknown class "${wanted}"` });
+                return true;
+            }
+            let always = false;
+            if (req && this.deps.readBody) {
+                try {
+                    always =
+                        ((await this.deps.readBody(req)) as { always?: unknown } | null)?.always ===
+                        true;
+                } catch {
+                    json(res, 400, { error: "Invalid JSON" });
+                    return true;
+                }
+            }
+            const r = await this.deps.reclassify(key, wanted, always);
+            this.record(key, "class", r.ok, r.ok ? undefined : r.error);
+            if (!r.ok) json(res, r.status, { error: r.error });
+            else json(res, 200, { ok: true, change: r.change, ...(r.rule && { rule: r.rule }) });
             return true;
         }
         const leave = path.match(/^\/api\/inbox\/([^/]+)\/leave$/);
@@ -235,7 +273,7 @@ export class InboxRoutes {
 
     private record(
         key: string,
-        gesture: InboxGesture | "restore" | "solve" | "leave",
+        gesture: InboxGesture | "restore" | "solve" | "leave" | "class",
         ok: boolean,
         error?: string,
     ): void {

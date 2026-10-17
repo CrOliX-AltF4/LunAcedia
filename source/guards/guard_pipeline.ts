@@ -4,6 +4,7 @@ import type { GuardJournal } from "./guard_journal.js";
 import type { GuardRulesStore } from "./guard_rules_store.js";
 import type { GuardStats } from "./guard_stats.js";
 import { VIP_REASON, type GuardRule, type GuardVerdict } from "./guard_types.js";
+import { classifyMail, makeSenderMatcher, type ClassTable, type MailClass } from "./mail_class.js";
 
 export interface GuardOutcome {
     dropped: boolean;
@@ -18,6 +19,8 @@ export interface GuardPreview {
     wouldDrop: number;
     wouldTag: number;
     wouldChangePriority: number;
+    /** Mails a `classify` would file in another class than the one they have. */
+    wouldClassify: number;
     vipProtected: number;
     /** A few concrete examples so the effect of a rule is visible before it is activated. */
     sample: Array<{
@@ -40,7 +43,7 @@ const PREVIEW_SAMPLE = 20;
  * and the hub tells the connector to skip settled keys BEFORE it spends an API call on them.
  */
 export class GuardPipeline {
-    private readonly dropped = new Map<string, number>(); // dedupeKey → rules version at decision time
+    private readonly dropped = new Map<string, string>(); // dedupeKey → rules and classes version at decision time
     /** A non-urgent event is evaluated by both poll paths; count its rule hits once per rules version. */
     private readonly counted = new Map<string, number>();
 
@@ -51,22 +54,57 @@ export class GuardPipeline {
             stats: GuardStats;
             /** Read fresh on every call — the VIP list is edited live from the dashboard. */
             vipSenders: () => string[];
+            /** The classes of mail and the personal senders — absent: every mail is « inconnu », none hidden. */
+            classes?: {
+                table(): ClassTable;
+                personalSenders(): string[];
+                getVersion(): number;
+            };
         },
     ) {}
 
-    /** True when this key was dropped under the CURRENT rules — no need to fetch or evaluate it again. */
+    /** What a drop was decided under: the rules, and the classes (a class hidden, then shown again). */
+    private version(): string {
+        return `${this.deps.rules.getVersion()}:${this.deps.classes?.getVersion() ?? 0}`;
+    }
+
+    /** True when this key was dropped under the CURRENT rules and classes — no need to fetch or evaluate it again. */
     isSettled(key: string): boolean {
-        const version = this.dropped.get(key);
-        return version !== undefined && version === this.deps.rules.getVersion();
+        return this.dropped.get(key) === this.version();
+    }
+
+    /** A mail's class: a rule's, then the personal senders, then what Gmail knows. Other sources have none. */
+    private classify(
+        event: AcediaEvent,
+        verdict: GuardVerdict,
+        vip: boolean,
+    ): MailClass | undefined {
+        if (event.source !== "email" || !this.deps.classes) return undefined;
+        return classifyMail(event, {
+            ...(verdict.mailClass && { ruleClass: verdict.mailClass }),
+            personal: makeSenderMatcher(this.deps.classes.personalSenders())(event),
+            vip,
+        });
+    }
+
+    private withClass(event: AcediaEvent, mailClass: MailClass | undefined): AcediaEvent {
+        if (mailClass === undefined || event.meta?.["mailClass"] === mailClass) return event;
+        return { ...event, meta: { ...event.meta, mailClass } };
     }
 
     process(event: AcediaEvent): GuardOutcome {
         const key = event.dedupeKey;
-        // A user-restored event is never evaluated again: the user's decision beats the rules.
-        if (this.deps.journal.isRestored(key)) return { dropped: false, event };
-
         const isVip = makeVipMatcher(this.deps.vipSenders());
         const verdict = evaluateGuard(event, this.deps.rules.peekRules() as GuardRule[], isVip);
+        // A user-restored event is never kept out again: the user's decision beats the rules. It keeps its class — a
+        // restored personal mail is still not for a model.
+        if (this.deps.journal.isRestored(key)) {
+            const vip = event.source === "email" && isVip(event);
+            return {
+                dropped: false,
+                event: this.withClass(event, this.classify(event, verdict, vip)),
+            };
+        }
         const version = this.deps.rules.getVersion();
         if (this.counted.get(key) !== version) {
             if (this.counted.size > 5_000) this.counted.clear();
@@ -74,9 +112,16 @@ export class GuardPipeline {
             this.deps.stats.hit(verdict.matchedRuleIds);
         }
 
-        if (verdict.drop) {
-            this.deps.journal.record(event, verdict.ruleId);
-            this.dropped.set(key, this.deps.rules.getVersion());
+        const vip = event.source === "email" && isVip(event);
+        const mailClass = this.classify(event, verdict, vip);
+        // A hidden class keeps its mails out like a drop — journaled, restorable; never a VIP's.
+        const hidden =
+            mailClass !== undefined &&
+            !vip &&
+            this.deps.classes!.table()[mailClass].visible === false;
+        if (verdict.drop || hidden) {
+            this.deps.journal.record(event, verdict.drop ? verdict.ruleId : `class:${mailClass}`);
+            this.dropped.set(key, this.version());
             return { dropped: true, event };
         }
 
@@ -88,10 +133,10 @@ export class GuardPipeline {
             verdict.source && event.source === "email" && this.deps.rules.sourceActionsEnabled()
                 ? { source: verdict.source }
                 : {};
-        const vip = event.source === "email" && isVip(event);
+        const classed = this.withClass(event, mailClass);
         if (verdict.tags.length === 0 && verdict.priority === undefined && !vip)
-            return { dropped: false, event, ...source };
-        const out: AcediaEvent = this.withPriority({ ...event }, verdict, vip);
+            return { dropped: false, event: classed, ...source };
+        const out: AcediaEvent = this.withPriority({ ...classed }, verdict, vip);
         if (verdict.tags.length > 0)
             out.tags = [...new Set([...(event.tags ?? []), ...verdict.tags])];
         if (verdict.ruleId !== undefined) out.ruleId = verdict.ruleId;
@@ -117,13 +162,23 @@ export class GuardPipeline {
         return out;
     }
 
-    /** The priority alone, for an item the box already holds and the source refreshed — nothing recorded or counted. */
+    /**
+     * The priority and the class alone, for an item the box already holds and the source refreshed — nothing recorded
+     * or counted.
+     */
     prioritize(event: AcediaEvent): AcediaEvent {
         const isVip = makeVipMatcher(this.deps.vipSenders());
         const verdict = evaluateGuard(event, this.deps.rules.peekRules() as GuardRule[], isVip);
         const vip = event.source === "email" && isVip(event);
-        if (verdict.priority === undefined && !vip) return event;
-        return this.withPriority({ ...event }, verdict, vip);
+        const classed = this.withClass(event, this.classify(event, verdict, vip));
+        if (verdict.priority === undefined && !vip) return classed;
+        return this.withPriority({ ...classed }, verdict, vip);
+    }
+
+    /** Kept out by Master's own gesture (a mail filed in a class kept out of the box): journaled and settled. */
+    keepOut(event: AcediaEvent, ruleId: string): void {
+        this.deps.journal.record(event, ruleId);
+        this.dropped.set(event.dedupeKey, this.version());
     }
 
     /** User restore: takes the event back out of the journal so the caller can re-dispatch it (bypassing dedup and guard). */
@@ -140,6 +195,7 @@ export class GuardPipeline {
             wouldDrop: 0,
             wouldTag: 0,
             wouldChangePriority: 0,
+            wouldClassify: 0,
             vipProtected: 0,
             sample: [],
         };
@@ -168,6 +224,12 @@ export class GuardPipeline {
                 result.wouldTag += 1;
                 if (!v.drop && !v.vipProtected) push("tag");
             }
+            if (
+                v.mailClass !== undefined &&
+                event.source === "email" &&
+                v.mailClass !== event.meta?.["mailClass"]
+            )
+                result.wouldClassify += 1;
             if (v.priority !== undefined && v.priority !== event.priority) {
                 result.wouldChangePriority += 1;
                 if (!v.drop && v.tags.length === 0) push("priority");

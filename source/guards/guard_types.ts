@@ -1,5 +1,6 @@
 import type { AcediaEventPriority } from "../types/acedia_event.js";
 import type { RuleSourceKind } from "../types/connector_action.js";
+import type { MailClass } from "./mail_class.js";
 
 /**
  * Ingestion guards: user-editable, deterministic rules evaluated on every
@@ -38,7 +39,9 @@ export type GuardAction =
     /** Acts in Gmail itself, without asking again: the rule was confirmed once (CrOliX, 2026-10-06). Journaled. */
     | { type: "source"; action: RuleSourceKind; label?: string }
     | { type: "tag"; tag: string }
-    | { type: "set_priority"; priority: AcediaEventPriority };
+    | { type: "set_priority"; priority: AcediaEventPriority }
+    /** Files the mail in a class (pro, perso, notification, pub, inconnu) — which says if a model may read it. */
+    | { type: "classify"; mailClass: MailClass };
 
 export interface GuardRule {
     id: string;
@@ -57,6 +60,8 @@ export interface GuardVerdict {
     priority?: AcediaEventPriority;
     /** The rule that set `priority`. */
     priorityRuleId?: string;
+    /** The first matching `classify`. */
+    mailClass?: MailClass;
     /** The rule responsible for the drop; otherwise the first matching rule with a visible effect. */
     ruleId?: string;
     matchedRuleIds: string[];

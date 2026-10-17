@@ -1672,6 +1672,47 @@ describe("AcediaApiServer — POST /api/chat", () => {
     });
 });
 
+describe("AcediaApiServer — mail kept away from a model", () => {
+    it("neither the digest nor the proposals hand a personal or advertising mail to the model; the digest still lists it urgent", async () => {
+        let port = 0;
+        const store = new EventStore();
+        store.push(
+            makeEvent({
+                dedupeKey: "p1",
+                title: "De maman",
+                priority: "urgent",
+                meta: { mailClass: "perso" },
+            }),
+        );
+        store.push(
+            makeEvent({
+                dedupeKey: "n1",
+                title: "Rapport",
+                priority: "normal",
+                meta: { mailClass: "pro" },
+            }),
+        );
+        store.push(
+            makeEvent({
+                dedupeKey: "n2",
+                title: "Soldes",
+                priority: "normal",
+                meta: { mailClass: "pub" },
+            }),
+        );
+        const digest = vi.fn().mockResolvedValue("Un rapport.");
+        const chat = vi.fn().mockResolvedValue("Rien.");
+        const server = makeServer(store, [], { mode: "openai", chat, digest });
+        port = await server.start(0);
+        const res = await get(`http://localhost:${port}/api/digest`, AUTH);
+        await get(`http://localhost:${port}/api/proposals`, AUTH);
+        server.stop();
+        expect(res.body.urgent.map((u: { key: string }) => u.key)).toEqual(["p1"]);
+        expect((digest.mock.calls[0]![0] as AcediaEvent[]).map((e) => e.dedupeKey)).toEqual(["n1"]);
+        expect(String(chat.mock.calls[0]?.[0] ?? "")).not.toContain("De maman");
+    });
+});
+
 describe("AcediaApiServer — GET /api/digest", () => {
     it("nothing unread: nothing to summarize, the model is not called", async () => {
         let port = 0;

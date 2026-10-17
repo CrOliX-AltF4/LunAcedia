@@ -368,6 +368,24 @@ describe("AcediaApiServer — topics", { timeout: 15_000 }, () => {
             expect((await call("GET", `${base}/api/conversations`)).body.conversations).toEqual([]);
         });
 
+        it("never gives the agent an item kept away from it: the topic says it cannot see it", async () => {
+            const { ai, seen } = provider([{ content: "Je ne le vois pas.", toolCalls: [] }]);
+            const personal = {
+                ...mail("1", "Mon secret"),
+                meta: { messageId: "1", mailClass: "perso" },
+            };
+            const base = await start({ ai, events: [personal] });
+            const r = await call("POST", `${base}/api/conversations`, {
+                text: "traite-le",
+                about: { key: "email-1" },
+            });
+            expect(r.status).toBe(201);
+            const prompt = JSON.stringify(seen[0]);
+            expect(prompt).not.toContain("Mon secret");
+            expect(prompt).not.toContain("Mail 1");
+            expect(prompt).toContain("kept away from the assistant");
+        });
+
         it("gives the item to the agent as data and starts contaminated", async () => {
             const executed: ConnectorAction[] = [];
             const { ai, seen } = provider([

@@ -1,4 +1,5 @@
 import type { AcediaEvent, AcediaEventPriority } from "../types/acedia_event.js";
+import { classRings, type ClassTable } from "../guards/mail_class.js";
 
 const FILTER_DEFAULT: AcediaEventPriority[] = ["urgent"];
 
@@ -14,9 +15,15 @@ export function notifyFilterFromEnv(raw = process.env["ACEDIA_FCM_FILTER"]): Ace
 /**
  * Whether a new item rings the phone — the one rule, whoever sends the notification: LunAcedia itself when the phone
  * is standalone, the hub when it is wired (it relays this decision, never makes its own). A reminder rings whatever its
- * priority: reminding is what it is for, and the reminder engine already keeps the quiet hours.
+ * priority: reminding is what it is for, and the reminder engine already keeps the quiet hours. A mail whose class does
+ * not ring (notifications, advertising by default) never does.
  */
-export function rings(event: AcediaEvent, filter: readonly AcediaEventPriority[]): boolean {
+export function rings(
+    event: AcediaEvent,
+    filter: readonly AcediaEventPriority[],
+    classes?: ClassTable,
+): boolean {
     if (event.read === true) return false;
+    if (classes && !classRings(event, classes)) return false;
     return event.type === "planning.reminder" || filter.includes(event.priority);
 }

@@ -12,6 +12,13 @@ const DEVICE_ROUTES: { method: string; pattern: RegExp }[] = [
     { method: "POST", pattern: /^\/api\/inbox\/[^/]+\/[^/]+$/ },
     // The Planning screen (lot AT7): read, and « Fait » on a task.
     { method: "GET", pattern: /^\/api\/planning$/ },
+    // Sorting mail: the classes, the rules that classify, what was kept out of the box.
+    { method: "GET", pattern: /^\/api\/config\/mail-classes$/ },
+    { method: "PATCH", pattern: /^\/api\/config\/mail-classes$/ },
+    { method: "GET", pattern: /^\/api\/guard\/rules$/ },
+    { method: "PATCH", pattern: /^\/api\/guard\/rules\/[^/]+$/ },
+    { method: "GET", pattern: /^\/api\/guard\/journal$/ },
+    { method: "POST", pattern: /^\/api\/guard\/journal\/restore$/ },
     { method: "POST", pattern: /^\/api\/planning\/tasks\/[^/]+\/done$/ },
     // A one-turn chat with the assistant — kept: it may serve the standalone assistant's chat window. The legacy
     // event list is closed: the app reads the box (/api/inbox) since the box screen shipped.
