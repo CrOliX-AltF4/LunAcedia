@@ -13,8 +13,10 @@ export function notifyFilterFromEnv(raw = process.env["ACEDIA_FCM_FILTER"]): Ace
 
 /**
  * Whether a new item rings the phone — the one rule, whoever sends the notification: LunAcedia itself when the phone
- * is standalone, the hub when it is wired (it relays this decision, never makes its own).
+ * is standalone, the hub when it is wired (it relays this decision, never makes its own). A reminder rings whatever its
+ * priority: reminding is what it is for, and the reminder engine already keeps the quiet hours.
  */
 export function rings(event: AcediaEvent, filter: readonly AcediaEventPriority[]): boolean {
-    return event.read !== true && filter.includes(event.priority);
+    if (event.read === true) return false;
+    return event.type === "planning.reminder" || filter.includes(event.priority);
 }

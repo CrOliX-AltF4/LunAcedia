@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { AcediaEvent, AcediaEventPriority } from "../types/acedia_event.js";
-import { notifyFilterFromEnv } from "./notify_policy.js";
+import { notifyFilterFromEnv, rings } from "./notify_policy.js";
 
 function resolveTokenPath(): string {
     const storageDir = process.env["STORAGE_DIR"] ?? path.join(os.homedir(), ".lunacedia");
@@ -92,7 +92,7 @@ export class FcmSender {
 
     async send(event: AcediaEvent): Promise<void> {
         if (!this.token) return;
-        if (!this.filter.includes(event.priority)) return;
+        if (!rings(event, this.filter)) return;
 
         try {
             await getMessaging().send({
