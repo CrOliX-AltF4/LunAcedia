@@ -134,7 +134,7 @@ describe("AcediaApiServer — inbox routes", () => {
         return { base: `http://localhost:${port}`, store, emitted, hub };
     }
 
-    // « Classer… » (ADR-041 D0): a mail filed by hand, or every mail of its sender through a rule.
+    // « Classer… »: a mail filed by hand, or every mail of its sender through a rule.
     async function sortingGuards() {
         const rules = new GuardRulesStore(path.join(dir, "rules.json"));
         const journal = new GuardJournal(path.join(dir, "journal.jsonl"));
