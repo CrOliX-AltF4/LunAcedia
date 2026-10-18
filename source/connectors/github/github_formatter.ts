@@ -4,6 +4,8 @@ interface GitHubThread {
     id: string;
     reason: string;
     unread: boolean;
+    /** GitHub's date of the thread's last activity — the item's date, whenever it is listed. */
+    updated_at?: string;
     subject: { title: string; type: string; url?: string };
     repository: { full_name: string };
 }
@@ -14,6 +16,16 @@ interface CheckRun {
     conclusion: string | null;
     html_url: string;
     check_suite: { id: number };
+    completed_at?: string | null;
+}
+
+/**
+ * The date GitHub gives, never the moment it was listed (Y2): a full listing — after a restart, or whenever GitHub has
+ * something new — would otherwise make every held item look changed and bring it back on top of the box, dated today.
+ */
+function githubDate(iso: string | null | undefined): number {
+    const at = iso ? Date.parse(iso) : NaN;
+    return Number.isNaN(at) ? Date.now() : at;
 }
 
 const REASON_PRIORITY: Record<string, AcediaEventPriority> = {
@@ -47,7 +59,7 @@ export function formatThread(thread: GitHubThread): AcediaEvent | null {
 
     return {
         type: typeMap[reason] ?? "github.push",
-        ts: Date.now(),
+        ts: githubDate(thread.updated_at),
         source: "github",
         title: `[${repo}] ${thread.subject.title}`,
         body: `${reason} — ${thread.subject.type}`,
@@ -89,7 +101,7 @@ export function formatFailedCheckRun(
 ): AcediaEvent {
     return {
         type: "github.ci.failed",
-        ts: Date.now(),
+        ts: githubDate(run.completed_at),
         source: "github",
         title: `CI rouge : ${run.name} — ${repo}`,
         body: `conclusion: ${run.conclusion}`,
