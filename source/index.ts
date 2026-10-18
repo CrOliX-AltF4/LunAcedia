@@ -49,6 +49,8 @@ import {
 } from "./planning/reminder_settings.js";
 import { BOX_PLANNING_TYPES, reminderEvent } from "./planning/reminder_delivery.js";
 import { CONFLICT_HORIZON_DAYS, conflictItems, syncConflicts } from "./planning/conflict_watch.js";
+import { DossierStore, defaultDossierPath } from "./dossiers/dossier_store.js";
+import { memberFor } from "./dossiers/dossier_index.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -224,6 +226,9 @@ const reminders = new ReminderEngine({
     filePath: defaultReminderJournalPath(),
 });
 await reminders.load();
+// The dossiers: a thread, a project label, Master's hand — grouped without any model.
+const dossiers = new DossierStore(defaultDossierPath());
+await dossiers.load();
 const api = new AcediaApiServer(
     store,
     connectors,
@@ -256,6 +261,15 @@ const api = new AcediaApiServer(
         engine: reminders,
         onSnoozed: (key) => void lifecycle.changed(key, "removed", "snoozed"),
     },
+);
+
+api.attachDossiers(dossiers, (ref) =>
+    memberFor(ref, {
+        item: (key) => store.get(key),
+        readable: (event) => readableByAi(event, mailClasses.table()),
+        event: (id) => planningStore.getEvent(id),
+        task: (id) => planningStore.getTask(id),
+    }),
 );
 
 if (fcm) await fcm.load();
@@ -319,6 +333,26 @@ const conflictTimer = planningActive ? setInterval(syncPlanningConflicts, 60_000
 
 const inboxSyncTimer = setInterval(() => void inboxSync.reconcile(), INBOX_SYNC_MS);
 
+// The dossiers follow the box and the planning: indexed now, then every 2 minutes — deterministic, no model, a write
+// only when something changed.
+const indexDossiersNow = (): void => {
+    const now = Date.now();
+    const snap = planningStore.snapshot(
+        now - 7 * DAY_MS,
+        now + 92 * DAY_MS,
+        planningSync.configured(),
+    );
+    dossiers.index({
+        items: store.query({ limit: 1000 }).events as AcediaEvent[],
+        readable: (event) => readableByAi(event, mailClasses.table()),
+        events: snap.events,
+        tasks: snap.tasks,
+        now,
+    });
+};
+indexDossiersNow();
+const dossierTimer = setInterval(indexDossiersNow, 2 * 60_000);
+
 console.warn(
     `[LunAcedia] Running — ${connectors.map((c) => c.name).join(", ") || "no connectors"} — AI: ${ai.mode}`,
 );
@@ -331,6 +365,7 @@ async function flushGuards(): Promise<void> {
         store.flush(),
         planningStore.flush(),
         reminders.flush(),
+        dossiers.flush(),
     ]);
 }
 
@@ -340,6 +375,7 @@ process.on("SIGINT", () => {
     reminders.stop();
     if (conflictTimer) clearInterval(conflictTimer);
     clearInterval(inboxSyncTimer);
+    clearInterval(dossierTimer);
     ws.stop();
     api.stop();
     // Pending journal / counter writes must land before the process goes away.
@@ -351,6 +387,7 @@ process.on("SIGTERM", () => {
     reminders.stop();
     if (conflictTimer) clearInterval(conflictTimer);
     clearInterval(inboxSyncTimer);
+    clearInterval(dossierTimer);
     ws.stop();
     api.stop();
     // Pending journal / counter writes must land before the process goes away.

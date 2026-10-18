@@ -16,6 +16,14 @@ import { googleClientFor } from "../../auth/google_oauth_flow.js";
 
 const GCAL_API = "https://www.googleapis.com/calendar/v3";
 
+/** The other participants of an event, by address — in the response already read, no request more. */
+function attendeesOf(ev: CalEvent): { attendees?: string[] } {
+    const list = (ev.attendees ?? [])
+        .filter((a) => !a.self && typeof a.email === "string" && a.email !== "")
+        .map((a) => a.email!.toLowerCase());
+    return list.length > 0 ? { attendees: list } : {};
+}
+
 interface CalEvent {
     id: string;
     summary?: string;
@@ -27,6 +35,7 @@ interface CalEvent {
     status?: "confirmed" | "tentative" | "cancelled";
     recurringEventId?: string;
     updated?: string;
+    attendees?: Array<{ email?: string; self?: boolean }>;
 }
 
 interface CalListResponse {
@@ -227,6 +236,7 @@ export class GcalConnector implements IConnector {
                     ...(ev.location && { location: ev.location }),
                     ...(ev.description && { description: ev.description }),
                     recurring: ev.recurringEventId !== undefined,
+                    ...attendeesOf(ev),
                     ...(ev.htmlLink && { url: ev.htmlLink }),
                     updatedAt: ev.updated ? Date.parse(ev.updated) : 0,
                 });

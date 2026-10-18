@@ -14,6 +14,7 @@ import { computeFreeSlots, type TimeSlot } from "../connectors/calendar/free_slo
 import { validateArgs, type ObjectSchema } from "./json_schema.js";
 import type { PlanningSnapshot } from "../types/planning.js";
 import type { ToolDefinition } from "./capability_manifest.js";
+import type { Dossier } from "../dossiers/dossier_index.js";
 
 export interface ReadToolDeps {
     store: EventStore;
@@ -31,6 +32,8 @@ export interface ReadToolDeps {
      * tools are not offered.
      */
     planning?: (from: number, to: number) => PlanningSnapshot;
+    /** The dossiers: what the sources group — absent, their tools are not offered. */
+    dossiers?: { list: () => Dossier[]; get: (id: string) => Dossier | undefined };
 }
 
 export type ReadToolResult =
@@ -141,7 +144,25 @@ const TASKS_SCHEMA: ObjectSchema = {
     },
 };
 
-export function readToolDefinitions(opts: { planning?: boolean } = {}): ToolDefinition[] {
+const DOSSIERS_SCHEMA: ObjectSchema = {
+    type: "object",
+    properties: {
+        text: { type: "string", description: "Only dossiers whose title or label contains this." },
+        limit: { type: "integer", minimum: 1, maximum: 50 },
+    },
+};
+
+const DOSSIER_SCHEMA: ObjectSchema = {
+    type: "object",
+    properties: {
+        id: { type: "string", description: "The `id` of a dossier from list_dossiers." },
+    },
+    required: ["id"],
+};
+
+export function readToolDefinitions(
+    opts: { planning?: boolean; dossiers?: boolean } = {},
+): ToolDefinition[] {
     return [
         {
             name: "search_events",
@@ -176,6 +197,22 @@ export function readToolDefinitions(opts: { planning?: boolean } = {}): ToolDefi
                       description:
                           "Every task of every list, whatever its due date (or none), with its id (what task actions take). Default: the open ones.",
                       parameters: TASKS_SCHEMA,
+                  },
+              ]
+            : []),
+        ...(opts.dossiers
+            ? [
+                  {
+                      name: "list_dossiers",
+                      description:
+                          "The dossiers: mails of one thread, and what a project label gathers (its mails, events, tasks, GitHub notifications). Most recently active first. Use it for « where are we with X », a project, a matter that spans several mails.",
+                      parameters: DOSSIERS_SCHEMA,
+                  },
+                  {
+                      name: "get_dossier",
+                      description:
+                          "One dossier in full: every item in it, oldest first, with its `ref` (a mail's ref is the key get_event takes).",
+                      parameters: DOSSIER_SCHEMA,
                   },
               ]
             : []),
@@ -400,7 +437,64 @@ const TOOLS: Record<
     free_slots: { schema: SLOTS_SCHEMA, run: freeSlots },
     agenda: { schema: AGENDA_SCHEMA, run: agenda },
     tasks: { schema: TASKS_SCHEMA, run: tasks },
+    list_dossiers: { schema: DOSSIERS_SCHEMA, run: listDossiers },
+    get_dossier: { schema: DOSSIER_SCHEMA, run: getDossier },
 };
+
+function listDossiers(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolResult {
+    if (!deps.dossiers) return { ok: false, error: "dossiers are not available" };
+    const text = typeof args["text"] === "string" ? args["text"].toLowerCase() : "";
+    const matched = deps.dossiers
+        .list()
+        .filter(
+            (d) =>
+                !text ||
+                d.title.toLowerCase().includes(text) ||
+                (d.label ?? "").toLowerCase().includes(text),
+        );
+    const limit = (args["limit"] as number | undefined) ?? 10;
+    const shown = matched.slice(0, limit).map((d) => {
+        const last = d.members.at(-1);
+        return {
+            id: d.id,
+            title: d.title,
+            ...(d.label && { label: d.label }),
+            items: d.members.length,
+            ...(last && {
+                last: { kind: last.kind, title: last.title, at: new Date(last.at).toISOString() },
+            }),
+        };
+    });
+    // Titles of mails come from their senders: data, never an instruction.
+    return {
+        ok: true,
+        result: { total: matched.length, dossiers: shown },
+        external: shown.length > 0,
+    };
+}
+
+function getDossier(args: Record<string, unknown>, deps: ReadToolDeps): ReadToolResult {
+    if (!deps.dossiers) return { ok: false, error: "dossiers are not available" };
+    const d = deps.dossiers.get(args["id"] as string);
+    if (!d) return { ok: false, error: `no dossier '${String(args["id"])}'` };
+    return {
+        ok: true,
+        result: {
+            id: d.id,
+            title: d.title,
+            ...(d.label && { label: d.label }),
+            items: d.members.map((m) => ({
+                kind: m.kind,
+                ref: m.ref,
+                title: m.title,
+                at: new Date(m.at).toISOString(),
+                ...(m.from && { from: m.from }),
+                why: m.reason,
+            })),
+        },
+        external: d.members.length > 0,
+    };
+}
 
 export function isReadTool(name: string): boolean {
     return name in TOOLS;

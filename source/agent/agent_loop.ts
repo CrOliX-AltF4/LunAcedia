@@ -224,7 +224,10 @@ export async function runAgent(req: AgentRequest, deps: AgentDeps): Promise<Agen
     }
 
     const allowWrites = deps.allowWrites ?? true;
-    const readTools = readToolDefinitions({ planning: deps.read.planning !== undefined });
+    const readTools = readToolDefinitions({
+        planning: deps.read.planning !== undefined,
+        dossiers: deps.read.dossiers !== undefined,
+    });
     const tools = req.readOnly
         ? readTools
         : [...readTools, ...actionToolDefinitions({ includeWrites: allowWrites })];

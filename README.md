@@ -61,6 +61,14 @@ GitHub notification, a Google task) — `POST /api/inbox/:key/:gesture`. Gmail's
 days. The box is reconciled with the sources every minute and clients are told what changed. Gestures are your own
 hand: they run directly, and are journaled (`GET /api/inbox/journal`).
 
+**Dossiers** — what your sources say about one matter, grouped without any model: two mails of one thread make a
+dossier; a project you label « ACME » gathers the mails a guard rule tags ACME, the events and tasks whose title names
+it, and the GitHub notifications of the repositories you give it. You attach and detach by hand — a detached item never
+comes back on its own; a person alone only _proposes_ (an event shared with a dossier's correspondents). A dossier
+keeps references and headers, never a mail's body, and holds nothing a model may not read. `GET /api/dossiers`,
+`GET /api/dossiers/:id`, `POST /api/dossiers`, `POST /api/dossiers/:id/attach|detach|dismiss`; the agent reads them
+(`list_dossiers`, `get_dossier`); the dashboard shows them.
+
 **Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
 enabled one by one, classified by rules, never by a model.
 

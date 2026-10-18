@@ -546,3 +546,76 @@ describe("dashboard mail sorting", () => {
         expect(DASHBOARD_HTML).toContain('onclick="openSort()"');
     });
 });
+
+// The dossiers on the dashboard: rendered by the shipped code itself, on a sample.
+describe("dashboard dossiers", () => {
+    const script = [...DASHBOARD_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+        .map((m) => m[1]!)
+        .join("\n");
+    const pure = script.slice(
+        script.indexOf("const DOSSIER_KIND="),
+        script.indexOf("async function openDossiers"),
+    );
+    const esc = extractEscFn();
+    const fns = new Function("esc", `${pure}; return { renderDossiers, renderDossier };`)(esc) as {
+        renderDossiers: (list: unknown[]) => string;
+        renderDossier: (d: unknown, proposals: unknown[]) => string;
+    };
+
+    it("lists each dossier with its count, its latest item and its proposals — escaped", () => {
+        const html = fns.renderDossiers([
+            {
+                id: "dos_1",
+                title: "<b>Devis</b>",
+                label: "ACME",
+                repos: [],
+                count: 3,
+                updatedAt: 1,
+                proposals: 1,
+                last: { kind: "mail", title: "Re: Devis", at: Date.parse("2026-10-17T10:00:00Z") },
+            },
+        ]);
+        expect(html).toContain("&lt;b&gt;Devis&lt;/b&gt;");
+        expect(html).toContain("3 élément(s)");
+        expect(html).toContain("1 proposition(s)");
+        expect(html).toContain('data-id="dos_1" onclick="openDossier(this.dataset.id)"');
+        expect(html).toContain("Nouveau projet");
+    });
+
+    it("shows a dossier's items with why they are there, and its proposals with their ways out", () => {
+        const html = fns.renderDossier(
+            {
+                id: "dos_1",
+                title: "ACME",
+                label: "ACME",
+                repos: ["acme/site"],
+                members: [
+                    {
+                        kind: "event",
+                        ref: "primary/e1",
+                        title: "Réunion ACME",
+                        at: 0,
+                        reason: "label",
+                    },
+                ],
+            },
+            [
+                {
+                    dossierId: "dos_1",
+                    member: { kind: "event", ref: "primary/e2", title: "Point", at: 0 },
+                    why: "même participant : lea@acme.fr",
+                },
+            ],
+        );
+        expect(html).toContain("étiquette");
+        expect(html).toContain('data-ref="primary/e1"');
+        expect(html).toContain("dossierGesture(this,'detach')");
+        expect(html).toContain("même participant : lea@acme.fr");
+        expect(html).toContain("dossierGesture(this,'attach')");
+        expect(html).toContain("dossierGesture(this,'dismiss')");
+    });
+
+    it("opens from the header", () => {
+        expect(DASHBOARD_HTML).toContain('onclick="openDossiers()"');
+    });
+});
