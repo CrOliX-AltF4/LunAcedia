@@ -4,6 +4,7 @@ import {
     formatThread,
     formatFailedCheckRun,
 } from "../../../source/connectors/github/github_formatter.js";
+import { EventStore } from "../../../source/store/event_store.js";
 import type { AcediaEvent } from "../../../source/types/acedia_event.js";
 
 // A GitHub notification lives in the box, read or unread, until it is done at GitHub — like a mail
@@ -94,6 +95,53 @@ describe("GitHub events keep their notification thread", () => {
             "42",
         );
         expect(e.meta).toMatchObject({ threadId: "42", repo: "o/r" });
+    });
+});
+
+// Y2: a full listing (after a restart, or whenever GitHub has something new) used to date every notification at the
+// moment it was read, so each held item looked changed and came back on top of the box dated today.
+describe("a notification is dated by GitHub, not by when it was read (Y2)", () => {
+    const thread = {
+        id: "42",
+        unread: false,
+        reason: "author",
+        updated_at: "2026-10-13T09:30:00Z",
+        subject: { title: "feat: something", type: "PullRequest", url: undefined },
+        repository: { full_name: "o/r" },
+    };
+    const run = {
+        id: 7,
+        name: "build",
+        conclusion: "failure",
+        html_url: "u",
+        check_suite: { id: 9 },
+        completed_at: "2026-10-12T18:00:00Z",
+    };
+
+    afterEach(() => vi.useRealTimers());
+
+    it("a thread carries GitHub's date, a failed run its completion", () => {
+        expect(formatThread(thread)!.ts).toBe(Date.parse("2026-10-13T09:30:00Z"));
+        expect(formatFailedCheckRun(run, "o/r", "42").ts).toBe(Date.parse("2026-10-12T18:00:00Z"));
+    });
+
+    it("listing them again later changes no item the box holds", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-10-14T08:00:00Z"));
+        const store = new EventStore();
+        store.push(formatThread(thread)!);
+        store.push(formatFailedCheckRun(run, "o/r", "42"));
+
+        vi.setSystemTime(new Date("2026-10-18T22:06:00Z"));
+        expect(store.refresh(formatThread(thread)!)).toBeNull();
+        expect(store.refresh(formatFailedCheckRun(run, "o/r", "42"))).toBeNull();
+    });
+
+    it("new activity on the thread is a real change", () => {
+        const store = new EventStore();
+        store.push(formatThread(thread)!);
+        const later = formatThread({ ...thread, updated_at: "2026-10-15T10:00:00Z" })!;
+        expect(store.refresh(later)?.ts).toBe(Date.parse("2026-10-15T10:00:00Z"));
     });
 });
 

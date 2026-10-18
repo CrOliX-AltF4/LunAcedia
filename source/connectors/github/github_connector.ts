@@ -30,6 +30,7 @@ interface GitHubThread {
     id: string;
     reason: string;
     unread: boolean;
+    updated_at?: string;
     subject: { title: string; type: string; url?: string };
     repository: { full_name: string };
 }
@@ -217,6 +218,7 @@ export class GitHubConnector implements IConnector {
                     conclusion: string | null;
                     html_url: string;
                     check_suite: { id: number };
+                    completed_at?: string | null;
                 }>;
             };
 
