@@ -16,6 +16,7 @@ import { ConversationRoutes } from "./conversation_routes.js";
 import {
     callerOf,
     withUsageContext,
+    withUsagePurpose,
     type UsageContext,
     type UsageLedger,
 } from "../usage/llm_usage.js";
@@ -84,6 +85,7 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 import { DossierRoutes } from "./dossier_routes.js";
 import type { DossierStore } from "../dossiers/dossier_store.js";
 import type { DossierMember } from "../dossiers/dossier_index.js";
+import { digestDossiers } from "../dossiers/dossier_digest.js";
 import { serveChanges, type ChangeFeed } from "../changes/change_feed.js";
 import {
     BULK_LIMIT,
@@ -340,7 +342,34 @@ export class AcediaApiServer {
      */
     attachDossiers(store: DossierStore, resolve: (ref: string) => DossierMember | undefined): void {
         this.dossierStore = store;
-        this.dossierRoutes = new DossierRoutes({ store, resolve, readBody, json });
+        this.dossierRoutes = new DossierRoutes({
+            store,
+            resolve,
+            digest: (ids) => this.digestDossiers({ ids }),
+            readBody,
+            json,
+        });
+    }
+
+    /**
+     * The daily pass over the dossiers (`ids`: « Résumer maintenant » on these). Uses the model in place now — it can be
+     * swapped from the dashboard — and names the calls `dossier_digest` in the usage ledger.
+     */
+    async digestDossiers(
+        opts: { ids?: string[] } = {},
+    ): Promise<{ digested: string[]; failed: string[] }> {
+        const store = this.dossierStore;
+        if (!store || this.ai.mode === "none") return { digested: [], failed: opts.ids ?? [] };
+        return digestDossiers(
+            {
+                list: () => store.list(),
+                setDigest: (id, digest, facts) => store.setDigest(id, digest, facts),
+                chat: (prompt) => withUsagePurpose("dossier_digest", () => this.ai.chat(prompt)),
+                item: (ref) => this.store.get(ref),
+                now: () => Date.now(),
+            },
+            opts,
+        );
     }
 
     private readonly inboxRoutes: InboxRoutes | null;

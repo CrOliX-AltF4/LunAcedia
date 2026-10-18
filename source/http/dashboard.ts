@@ -428,8 +428,9 @@ async function restoreKept(btn){
 const DOSSIER_KIND={mail:'✉',event:'📅',task:'☑',github:'🐙'};
 const DOSSIER_WHY={thread:'même fil',label:'étiquette',manual:'à la main'};
 function dossierDate(ms){return new Date(ms).toLocaleDateString('fr-FR',{day:'numeric',month:'short'});}
-function renderDossiers(list){
-  const form='<div class="dossier-new"><input id="dossier-label" placeholder="Étiquette du projet (ex. ACME)" maxlength="60"><input id="dossier-repos" placeholder="Dépôts GitHub owner/nom, séparés par des virgules"><button onclick="createDossier()">Nouveau projet</button></div>'
+function renderDossiers(list,settings){
+  const pass='<p><label><input type="checkbox" onchange="toggleDossierDigest(this.checked)"'+(settings&&settings.digestEnabled?' checked':'')+'> Résumé quotidien des dossiers (02:30) — un appel au modèle par dossier qui a bougé, 10 au plus ; les faits tirés sont proposés à Natsume, jamais écrits seuls</label></p>';
+  const form=pass+'<div class="dossier-new"><input id="dossier-label" placeholder="Étiquette du projet (ex. ACME)" maxlength="60"><input id="dossier-repos" placeholder="Dépôts GitHub owner/nom, séparés par des virgules"><button onclick="createDossier()">Nouveau projet</button></div>'
     +'<p><small>Un projet rassemble les mails qu’une règle étiquette du même nom, les rendez-vous et tâches qui le nomment, les notifications de ses dépôts. Deux mails d’un même fil font un dossier tout seuls.</small></p>';
   if(!list.length)return form+'<p><small>Aucun dossier pour l’instant.</small></p>';
   return form+list.map(d=>'<div class="trash-row dossier-row" data-id="'+esc(d.id)+'" onclick="openDossier(this.dataset.id)"><span><strong>'+esc(d.title)+'</strong>'+(d.label?' <small>· étiquette '+esc(d.label)+'</small>':'')+'<br><small>'+d.count+' élément(s)'+(d.last?' · dernier : '+(DOSSIER_KIND[d.last.kind]||'')+' '+esc(d.last.title)+', '+dossierDate(d.last.at):'')+(d.proposals?' · '+d.proposals+' proposition(s)':'')+'</small></span></div>').join('');
@@ -438,7 +439,9 @@ function renderDossier(d,proposals){
   const head='<p><button onclick="openDossiers()">← Dossiers</button> <strong>'+esc(d.title)+'</strong>'+(d.label?' <small>· étiquette '+esc(d.label)+'</small>':'')+(d.repos.length?' <small>· '+d.repos.map(esc).join(', ')+'</small>':'')+'</p>';
   const items=d.members.length?d.members.map(m=>'<div class="trash-row" data-id="'+esc(d.id)+'" data-ref="'+esc(m.ref)+'"><span>'+(DOSSIER_KIND[m.kind]||'')+' '+esc(m.title)+' <small>· '+dossierDate(m.at)+(m.from?' · '+esc(m.from):'')+' · '+(DOSSIER_WHY[m.reason]||'')+'</small></span><button onclick="dossierGesture(this,\\'detach\\')">Détacher</button></div>').join(''):'<p><small>Vide.</small></p>';
   const props=proposals.length?'<h4>Propositions</h4>'+proposals.map(p=>'<div class="trash-row" data-id="'+esc(d.id)+'" data-ref="'+esc(p.member.ref)+'"><span>'+(DOSSIER_KIND[p.member.kind]||'')+' '+esc(p.member.title)+' <small>· '+esc(p.why)+'</small></span><button onclick="dossierGesture(this,\\'attach\\')">Rattacher</button><button onclick="dossierGesture(this,\\'dismiss\\')">Ignorer</button></div>').join(''):'';
-  return head+items+props;
+  const digest=(d.digest?'<p><strong>Où on en est :</strong> '+esc(d.digest.state)+'<br><small>'+esc(d.digest.summary)+' · résumé le '+dossierDate(d.digest.at)+'</small></p>':'')
+    +'<p><button data-id="'+esc(d.id)+'" onclick="digestDossier(this)">Résumer maintenant</button></p>';
+  return head+digest+items+props;
 }
 async function openDossiers(){
   const d=document.getElementById('digest');
@@ -447,7 +450,7 @@ async function openDossiers(){
   const box=document.getElementById('digest-text');
   d.classList.add('open');
   box.textContent='Loading…';
-  try{const r=await req('/api/dossiers').then(r=>r.json());box.innerHTML=renderDossiers(r.dossiers||[]);}
+  try{const [r,s]=await Promise.all([req('/api/dossiers').then(r=>r.json()),req('/api/dossiers/settings').then(r=>r.json())]);box.innerHTML=renderDossiers(r.dossiers||[],s);}
   catch(e){box.textContent='Error: '+e.message;}
 }
 async function openDossier(id){
@@ -459,6 +462,14 @@ async function dossierGesture(btn,gesture){
   const row=btn.closest('[data-ref]');btn.disabled=true;
   const r=await req('/api/dossiers/'+encodeURIComponent(row.dataset.id)+'/'+gesture,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ref:row.dataset.ref})}).catch(()=>null);
   if(r&&r.ok)openDossier(row.dataset.id);else btn.disabled=false;
+}
+async function digestDossier(btn){
+  btn.disabled=true;btn.textContent='Résumé en cours…';
+  const r=await req('/api/dossiers/'+encodeURIComponent(btn.dataset.id)+'/digest',{method:'POST'}).catch(()=>null);
+  if(r&&r.ok)openDossier(btn.dataset.id);else{btn.disabled=false;btn.textContent=r?((await r.json()).error||'Échec'):'Injoignable';}
+}
+async function toggleDossierDigest(on){
+  await req('/api/dossiers/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({digestEnabled:on})}).catch(()=>null);
 }
 async function createDossier(){
   const label=document.getElementById('dossier-label').value.trim();
