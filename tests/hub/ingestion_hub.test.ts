@@ -269,10 +269,13 @@ describe("IngestionHub — what left the box", () => {
 describe("IngestionHub — the first sweep of a fresh box is backlog", () => {
     let hub: IngestionHub;
     let dir: string;
+    let store: EventStore;
 
     afterEach(async () => {
         hub.stop();
-        await fs.rm(dir, { recursive: true, force: true });
+        // The box writes in the background: wait for its last write, or the folder is removed under it (ENOTEMPTY).
+        await store.flush();
+        await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
     async function boxAt(existing: boolean): Promise<EventStore> {
@@ -280,7 +283,7 @@ describe("IngestionHub — the first sweep of a fresh box is backlog", () => {
         const file = path.join(dir, "inbox_store.json");
         if (existing)
             await fs.writeFile(file, JSON.stringify({ version: 2, items: [], gone: {} }), "utf-8");
-        const store = new EventStore(1000, file);
+        store = new EventStore(1000, file);
         await store.load();
         return store;
     }

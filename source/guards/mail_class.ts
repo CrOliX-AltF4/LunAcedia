@@ -56,19 +56,35 @@ export function makeSenderMatcher(senders: string[]): (event: AcediaEvent) => bo
     };
 }
 
+/** One of Master's boxes (forwarded to the main one): its address, and the class its mail gets unless something says
+ *  otherwise. */
+export interface Mailbox {
+    address: string;
+    mailClass: MailClass | null;
+}
+
+/** The box a mail came to: the first of Master's boxes among its recipients. */
+export function mailboxOf(event: AcediaEvent, boxes: Mailbox[]): Mailbox | undefined {
+    const recipients = event.meta?.["recipients"];
+    if (!Array.isArray(recipients) || boxes.length === 0) return undefined;
+    const set = new Set(recipients.map((r) => String(r).toLowerCase()));
+    return boxes.find((b) => set.has(b.address.toLowerCase()));
+}
+
 export function classifyMail(
     event: AcediaEvent,
-    opts: { ruleClass?: MailClass; personal: boolean; vip: boolean },
+    opts: { ruleClass?: MailClass; personal: boolean; vip: boolean; boxClass?: MailClass | null },
 ): MailClass {
     if (opts.ruleClass) return opts.ruleClass;
     if (opts.personal) return "perso";
     // A VIP is never filed away as bulk mail, whatever Gmail's category says.
-    if (opts.vip) return "inconnu";
+    if (opts.vip) return opts.boxClass ?? "inconnu";
     const labels = labelsOf(event);
     if (labels.includes(PROMOTIONS)) return "pub";
     if (labels.some((l) => NOTIFICATION_LABELS.has(l)) || hasUnsubscribe(event))
         return "notification";
-    return "inconnu";
+    // Advertising stays advertising whatever box it came to; the rest takes its box's class.
+    return opts.boxClass ?? "inconnu";
 }
 
 /** The class a mail was given at collection — « inconnu » for one collected before the classes; other sources have none. */

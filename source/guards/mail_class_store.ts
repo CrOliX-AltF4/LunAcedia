@@ -7,20 +7,25 @@ import {
     type ClassSettings,
     type ClassTable,
     type MailClass,
+    type Mailbox,
 } from "./mail_class.js";
 
 const MAX_SENDERS = 500;
 const MAX_SENDER = 200;
+const MAX_BOXES = 20;
 
 export interface MailClassConfig {
     classes: ClassTable;
     /** Senders whose mail is personal (family, friends): a name, an address or a part of one. */
     personalSenders: string[];
+    /** Master's boxes forwarded to the main one, each with the class its mail gets by default. */
+    mailboxes: Mailbox[];
 }
 
 export type MailClassPatch = {
     classes?: Partial<Record<MailClass, Partial<ClassSettings>>>;
     personalSenders?: string[];
+    mailboxes?: Mailbox[];
 };
 
 function defaultPath(): string {
@@ -57,6 +62,22 @@ export function validateMailClassPatch(input: unknown): string | null {
             return `personalSenders must be a list of texts (${MAX_SENDER} characters at most)`;
         if (s.length > MAX_SENDERS) return `At most ${MAX_SENDERS} personal senders`;
     }
+    if (p["mailboxes"] !== undefined) {
+        const b = p["mailboxes"];
+        if (!Array.isArray(b) || b.length > MAX_BOXES)
+            return `mailboxes must be a list of ${MAX_BOXES} at most`;
+        for (const box of b as unknown[]) {
+            const r = box as Record<string, unknown> | null;
+            if (
+                typeof r?.["address"] !== "string" ||
+                !/^[^\s@]+@[^\s@]+$/.test(r["address"].trim())
+            )
+                return "Each mailbox needs an address";
+            const c = r["mailClass"];
+            if (c !== null && !(MAIL_CLASSES as readonly unknown[]).includes(c))
+                return `Unknown class "${String(c)}"`;
+        }
+    }
     return null;
 }
 
@@ -66,7 +87,11 @@ export function validateMailClassPatch(input: unknown): string | null {
  * the old settings is looked at again.
  */
 export class MailClassStore {
-    private config: MailClassConfig = { classes: copyTable(DEFAULT_CLASSES), personalSenders: [] };
+    private config: MailClassConfig = {
+        classes: copyTable(DEFAULT_CLASSES),
+        personalSenders: [],
+        mailboxes: [],
+    };
     private version = 0;
 
     constructor(private readonly file: string = defaultPath()) {}
@@ -88,6 +113,10 @@ export class MailClassStore {
         return this.config.personalSenders;
     }
 
+    mailboxes(): Mailbox[] {
+        return this.config.mailboxes;
+    }
+
     getVersion(): number {
         return this.version;
     }
@@ -96,6 +125,7 @@ export class MailClassStore {
         return {
             classes: copyTable(this.config.classes),
             personalSenders: [...this.config.personalSenders],
+            mailboxes: this.config.mailboxes.map((b) => ({ ...b })),
         };
     }
 
@@ -115,6 +145,11 @@ export class MailClassStore {
             personalSenders:
                 patch.personalSenders?.map((s) => s.trim()).filter((s) => s !== "") ??
                 this.config.personalSenders,
+            mailboxes:
+                patch.mailboxes?.map((b) => ({
+                    address: b.address.trim().toLowerCase(),
+                    mailClass: b.mailClass,
+                })) ?? this.config.mailboxes,
         };
     }
 

@@ -4,7 +4,14 @@ import type { GuardJournal } from "./guard_journal.js";
 import type { GuardRulesStore } from "./guard_rules_store.js";
 import type { GuardStats } from "./guard_stats.js";
 import { VIP_REASON, type GuardRule, type GuardVerdict } from "./guard_types.js";
-import { classifyMail, makeSenderMatcher, type ClassTable, type MailClass } from "./mail_class.js";
+import {
+    classifyMail,
+    mailboxOf,
+    makeSenderMatcher,
+    type ClassTable,
+    type MailClass,
+    type Mailbox,
+} from "./mail_class.js";
 
 export interface GuardOutcome {
     dropped: boolean;
@@ -59,6 +66,8 @@ export class GuardPipeline {
                 table(): ClassTable;
                 personalSenders(): string[];
                 getVersion(): number;
+                /** Master's boxes — absent on an older store: none. */
+                mailboxes?(): Mailbox[];
             };
         },
     ) {}
@@ -80,16 +89,24 @@ export class GuardPipeline {
         vip: boolean,
     ): MailClass | undefined {
         if (event.source !== "email" || !this.deps.classes) return undefined;
+        const box = mailboxOf(event, this.deps.classes.mailboxes?.() ?? []);
         return classifyMail(event, {
             ...(verdict.mailClass && { ruleClass: verdict.mailClass }),
             personal: makeSenderMatcher(this.deps.classes.personalSenders())(event),
             vip,
+            boxClass: box?.mailClass ?? null,
         });
     }
 
+    /** Its class, and the box it came to (shown with it). */
     private withClass(event: AcediaEvent, mailClass: MailClass | undefined): AcediaEvent {
-        if (mailClass === undefined || event.meta?.["mailClass"] === mailClass) return event;
-        return { ...event, meta: { ...event.meta, mailClass } };
+        if (mailClass === undefined) return event;
+        const mailbox = mailboxOf(event, this.deps.classes?.mailboxes?.() ?? [])?.address;
+        if (event.meta?.["mailClass"] === mailClass && event.meta?.["mailbox"] === mailbox)
+            return event;
+        const meta: Record<string, unknown> = { ...event.meta };
+        delete meta["mailbox"];
+        return { ...event, meta: { ...meta, mailClass, ...(mailbox && { mailbox }) } };
     }
 
     process(event: AcediaEvent): GuardOutcome {
