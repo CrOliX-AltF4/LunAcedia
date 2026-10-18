@@ -483,6 +483,7 @@ function getDossier(args: Record<string, unknown>, deps: ReadToolDeps): ReadTool
             id: d.id,
             title: d.title,
             ...(d.label && { label: d.label }),
+            ...(d.digest && { summary: d.digest.summary, state: d.digest.state }),
             items: d.members.map((m) => ({
                 kind: m.kind,
                 ref: m.ref,

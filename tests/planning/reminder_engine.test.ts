@@ -153,7 +153,7 @@ describe("ReminderEngine", () => {
         expect(e.tick().map((r) => r.title)).toEqual(["Toujours sans date, depuis 7 j — Ranger"]);
     });
 
-    it("takes down the reminders the planning no longer calls for — a task done, a date moved (O21)", () => {
+    it("takes down the reminders the planning no longer calls for — a task done, a date moved", () => {
         const clock = { now: local(2026, 10, 30, 9, 0) };
         const world = {
             events: [] as PlanningEvent[],

@@ -30,6 +30,8 @@ export interface DossierMember {
     from?: string;
     /** A mail's Gmail thread. */
     thread?: string;
+    /** A mail's class when it was gathered — what makes a dossier worth a summary. */
+    mailClass?: string;
     reason: MemberReason;
 }
 
@@ -45,6 +47,8 @@ export interface Dossier {
     detached: string[];
     /** Proposals Master declined: never proposed again. */
     dismissed: string[];
+    /** The last summary of the daily pass. */
+    digest?: { summary: string; state: string; at: number };
     createdAt: number;
     updatedAt: number;
 }
@@ -104,6 +108,7 @@ export function subjectOf(title: string): string {
 export function mailMember(e: AcediaEvent, reason: MemberReason): DossierMember {
     const from = typeof e.meta?.["from"] === "string" ? e.meta["from"] : undefined;
     const thread = typeof e.meta?.["threadId"] === "string" ? e.meta["threadId"] : undefined;
+    const mailClass = typeof e.meta?.["mailClass"] === "string" ? e.meta["mailClass"] : undefined;
     return {
         kind: "mail",
         ref: e.dedupeKey,
@@ -111,6 +116,7 @@ export function mailMember(e: AcediaEvent, reason: MemberReason): DossierMember 
         at: e.ts,
         ...(from && { from }),
         ...(thread && { thread }),
+        ...(mailClass && { mailClass }),
         reason,
     };
 }

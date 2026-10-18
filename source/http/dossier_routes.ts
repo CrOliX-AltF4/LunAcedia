@@ -9,6 +9,11 @@
  *                                               not read
  *   POST  /api/dossiers/:id/detach              { ref } — out, never brought back on its own
  *   POST  /api/dossiers/:id/dismiss             { ref } — a proposal declined, never proposed again
+ *   POST  /api/dossiers/:id/digest              « Résumer maintenant »: summed up now, whatever the daily switch
+ *   GET   /api/dossiers/candidates?after=<n>    { candidates: FactCandidate[], cursor } — the facts the daily pass drew,
+ *                                               after the hub's cursor; the hub keeps the cursor it is given back
+ *   GET   /api/dossiers/settings                { digestEnabled }
+ *   PATCH /api/dossiers/settings                { digestEnabled }
  */
 import type http from "node:http";
 import type { DossierStore } from "../dossiers/dossier_store.js";
@@ -31,6 +36,8 @@ export interface DossierRouteDeps {
     store: DossierStore;
     /** The item a ref names, as a member — undefined when nothing does, or when a model may not read it. */
     resolve: (ref: string) => DossierMember | undefined;
+    /** « Résumer maintenant » — absent without a model: the gesture answers 503. */
+    digest?: (ids: string[]) => Promise<{ digested: string[]; failed: string[] }>;
     readBody: (req: http.IncomingMessage) => Promise<unknown>;
     json: (res: http.ServerResponse, status: number, body: unknown) => void;
 }
@@ -87,6 +94,45 @@ export class DossierRoutes {
                 return true;
             }
             return false;
+        }
+
+        if (path === "/api/dossiers/candidates" && method === "GET") {
+            const after = Number(
+                new URL(req.url ?? "/", "http://localhost").searchParams.get("after") ?? 0,
+            );
+            json(res, 200, store.candidatesAfter(Number.isFinite(after) ? after : 0));
+            return true;
+        }
+        if (path === "/api/dossiers/settings") {
+            if (method === "GET") {
+                json(res, 200, store.settings());
+                return true;
+            }
+            if (method === "PATCH") {
+                const body = await this.body(req, res);
+                if (body === undefined) return true;
+                const enabled = (body as Record<string, unknown>)["digestEnabled"];
+                if (typeof enabled !== "boolean") {
+                    json(res, 400, { error: "digestEnabled must be true or false" });
+                    return true;
+                }
+                json(res, 200, store.setSettings({ digestEnabled: enabled }));
+                return true;
+            }
+            return false;
+        }
+
+        const digestNow = path.match(/^\/api\/dossiers\/([^/]+)\/digest$/);
+        if (digestNow && method === "POST") {
+            const id = decodeURIComponent(digestNow[1]!);
+            if (!store.get(id)) json(res, 404, { error: "No such dossier" });
+            else if (!this.deps.digest) json(res, 503, { error: "No model configured" });
+            else {
+                const r = await this.deps.digest([id]);
+                if (r.digested.includes(id)) json(res, 200, store.get(id));
+                else json(res, 502, { error: "The model gave no usable summary" });
+            }
+            return true;
         }
 
         const m = path.match(/^\/api\/dossiers\/([^/]+)(?:\/(attach|detach|dismiss))?$/);

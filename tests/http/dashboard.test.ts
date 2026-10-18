@@ -558,7 +558,7 @@ describe("dashboard dossiers", () => {
     );
     const esc = extractEscFn();
     const fns = new Function("esc", `${pure}; return { renderDossiers, renderDossier };`)(esc) as {
-        renderDossiers: (list: unknown[]) => string;
+        renderDossiers: (list: unknown[], settings?: unknown) => string;
         renderDossier: (d: unknown, proposals: unknown[]) => string;
     };
 
@@ -617,5 +617,29 @@ describe("dashboard dossiers", () => {
 
     it("opens from the header", () => {
         expect(DASHBOARD_HTML).toContain('onclick="openDossiers()"');
+    });
+
+    it("shows where a dossier stands, « Résumer maintenant », and the daily switch as it is", () => {
+        const html = fns.renderDossier(
+            {
+                id: "dos_1",
+                title: "ACME",
+                repos: [],
+                members: [],
+                digest: {
+                    summary: "Un <i>devis</i>.",
+                    state: "Réponse attendue",
+                    at: Date.parse("2026-10-18T03:00:00Z"),
+                },
+            },
+            [],
+        );
+        expect(html).toContain("Où on en est :</strong> Réponse attendue");
+        expect(html).toContain("Un &lt;i&gt;devis&lt;/i&gt;.");
+        expect(html).toContain('data-id="dos_1" onclick="digestDossier(this)"');
+        expect(fns.renderDossiers([], { digestEnabled: true })).toContain(
+            'onchange="toggleDossierDigest(this.checked)" checked',
+        );
+        expect(fns.renderDossiers([], { digestEnabled: false })).not.toContain(" checked");
     });
 });

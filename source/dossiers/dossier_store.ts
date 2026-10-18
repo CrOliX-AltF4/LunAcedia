@@ -8,8 +8,8 @@ import {
     type DossierMember,
     type DossierProposal,
     type IndexInput,
-    type MemberKind,
 } from "./dossier_index.js";
+import type { DossierDigest, FactDraft } from "./dossier_digest.js";
 
 /** Where the dossiers live — STORAGE_DIR, kept across image updates. */
 export function defaultDossierPath(): string {
@@ -20,11 +20,31 @@ export function defaultDossierPath(): string {
 const MAX_TITLE = 120;
 const MAX_LABEL = 60;
 const MAX_REPOS = 20;
-const MEMBER_KINDS: readonly MemberKind[] = ["mail", "event", "task", "github"];
+/** Candidates kept for the hub to ask for — the oldest go first past this. */
+const MAX_CANDIDATES = 500;
+
+/** A fact the daily pass drew from a dossier, waiting for the hub: it only ever proposes it to its owner. */
+export interface FactCandidate extends FactDraft {
+    /** Rising number: the hub asks for what came after the last one it took. */
+    seq: number;
+    dossierId: string;
+    dossierTitle: string;
+    at: number;
+}
+
+export interface DossierSettings {
+    /** The daily pass (summaries and facts) — off until Master turns it on. « Résumer maintenant » works either way. */
+    digestEnabled: boolean;
+}
 
 interface DossierFile {
     version: 1;
     dossiers: Dossier[];
+    candidates?: FactCandidate[];
+    seq?: number;
+    settings?: DossierSettings;
+    /** The day (YYYY-MM-DD, local) of the last daily pass. */
+    lastPassDay?: string;
 }
 
 export type DossierEdit = { title?: string; label?: string | null; repos?: string[] };
@@ -58,18 +78,6 @@ export function validateDossierEdit(input: unknown, creating = false): string | 
     return null;
 }
 
-/** Why a member to attach is refused, or null. */
-export function validateMember(input: unknown): string | null {
-    if (typeof input !== "object" || input === null) return "Body must be an object";
-    const p = input as Record<string, unknown>;
-    if (!MEMBER_KINDS.includes(p["kind"] as MemberKind))
-        return `kind must be one of ${MEMBER_KINDS.join(", ")}`;
-    if (typeof p["ref"] !== "string" || !p["ref"]) return "ref is required";
-    if (typeof p["title"] !== "string") return "title is required";
-    if (typeof p["at"] !== "number") return "at is required";
-    return null;
-}
-
 /**
  * The dossiers, on disk: one file, rewritten atomically; writes chained so they land in order. Indexing
  * (`dossier_index.ts`) adds what the sources group; Master's gestures attach, detach, decline a proposal, label.
@@ -78,6 +86,10 @@ export function validateMember(input: unknown): string | null {
 export class DossierStore {
     private dossiers: Dossier[] = [];
     private proposals: DossierProposal[] = [];
+    private candidates: FactCandidate[] = [];
+    private seq = 0;
+    private settingsValue: DossierSettings = { digestEnabled: false };
+    private lastPassDayValue: string | undefined;
     private chain: Promise<void> = Promise.resolve();
 
     constructor(private readonly filePath?: string) {}
@@ -90,6 +102,10 @@ export class DossierStore {
                 await fs.readFile(this.filePath, "utf-8"),
             ) as Partial<DossierFile>;
             this.dossiers = Array.isArray(parsed.dossiers) ? parsed.dossiers : [];
+            this.candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
+            this.seq = typeof parsed.seq === "number" ? parsed.seq : 0;
+            this.settingsValue = { digestEnabled: parsed.settings?.digestEnabled === true };
+            this.lastPassDayValue = parsed.lastPassDay;
         } catch {
             this.dossiers = [];
         }
@@ -112,6 +128,53 @@ export class DossierStore {
         return structuredClone(
             id ? this.proposals.filter((p) => p.dossierId === id) : this.proposals,
         );
+    }
+
+    settings(): DossierSettings {
+        return { ...this.settingsValue };
+    }
+
+    setSettings(patch: Partial<DossierSettings>): DossierSettings {
+        if (typeof patch.digestEnabled === "boolean")
+            this.settingsValue.digestEnabled = patch.digestEnabled;
+        this.persist();
+        return this.settings();
+    }
+
+    lastPassDay(): string | undefined {
+        return this.lastPassDayValue;
+    }
+
+    markPass(day: string): void {
+        this.lastPassDayValue = day;
+        this.persist();
+    }
+
+    /** A summary of the daily pass, and the facts it drew — candidates for the hub, numbered in order. */
+    setDigest(id: string, digest: DossierDigest, facts: FactDraft[]): boolean {
+        const d = this.dossiers.find((x) => x.id === id);
+        if (!d) return false;
+        d.digest = digest;
+        for (const fact of facts)
+            this.candidates.push({
+                ...fact,
+                seq: ++this.seq,
+                dossierId: d.id,
+                dossierTitle: d.title,
+                at: digest.at,
+            });
+        if (this.candidates.length > MAX_CANDIDATES)
+            this.candidates = this.candidates.slice(-MAX_CANDIDATES);
+        this.persist();
+        return true;
+    }
+
+    /** What came after `cursor` — the hub keeps the cursor it is given back. */
+    candidatesAfter(cursor: number): { candidates: FactCandidate[]; cursor: number } {
+        return {
+            candidates: structuredClone(this.candidates.filter((c) => c.seq > cursor)),
+            cursor: this.seq,
+        };
     }
 
     /** Brings the dossiers up to date with the box and the planning; writes only when something changed. */
@@ -195,7 +258,14 @@ export class DossierStore {
     private persist(): void {
         if (!this.filePath) return;
         const file = this.filePath;
-        const body: DossierFile = { version: 1, dossiers: this.dossiers };
+        const body: DossierFile = {
+            version: 1,
+            dossiers: this.dossiers,
+            candidates: this.candidates,
+            seq: this.seq,
+            settings: this.settingsValue,
+            ...(this.lastPassDayValue && { lastPassDay: this.lastPassDayValue }),
+        };
         const text = JSON.stringify(body);
         this.chain = this.chain
             .then(async () => {

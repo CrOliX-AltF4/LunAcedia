@@ -51,6 +51,7 @@ import { BOX_PLANNING_TYPES, reminderEvent } from "./planning/reminder_delivery.
 import { CONFLICT_HORIZON_DAYS, conflictItems, syncConflicts } from "./planning/conflict_watch.js";
 import { DossierStore, defaultDossierPath } from "./dossiers/dossier_store.js";
 import { memberFor } from "./dossiers/dossier_index.js";
+import { passDue } from "./dossiers/dossier_digest.js";
 
 const wsPort = parseInt(process.env["PORT"] ?? "4000", 10);
 const httpPort = parseInt(process.env["HTTP_PORT"] ?? "4001", 10);
@@ -350,8 +351,31 @@ const indexDossiersNow = (): void => {
         now,
     });
 };
+// The daily pass over the dossiers (summaries, facts for the hub): after 02:30, once a day, only when Master turned it on.
+// Indexed first, so the pass sees what came in. A day missed while LunAcedia was off is done when it comes back.
+let dossierPassRunning = false;
+const dossierPassIfDue = async (): Promise<void> => {
+    if (dossierPassRunning || !dossiers.settings().digestEnabled) return;
+    const day = passDue(Date.now(), dossiers.lastPassDay());
+    if (!day) return;
+    dossierPassRunning = true;
+    try {
+        indexDossiersNow();
+        const r = await api.digestDossiers();
+        dossiers.markPass(day);
+        if (r.digested.length + r.failed.length > 0)
+            console.warn(
+                `[Dossiers] Daily pass: ${r.digested.length} summed up, ${r.failed.length} failed`,
+            );
+    } finally {
+        dossierPassRunning = false;
+    }
+};
 indexDossiersNow();
-const dossierTimer = setInterval(indexDossiersNow, 2 * 60_000);
+const dossierTimer = setInterval(() => {
+    indexDossiersNow();
+    void dossierPassIfDue();
+}, 2 * 60_000);
 
 console.warn(
     `[LunAcedia] Running — ${connectors.map((c) => c.name).join(", ") || "no connectors"} — AI: ${ai.mode}`,

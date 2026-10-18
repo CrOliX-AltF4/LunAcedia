@@ -69,6 +69,13 @@ keeps references and headers, never a mail's body, and holds nothing a model may
 `GET /api/dossiers/:id`, `POST /api/dossiers`, `POST /api/dossiers/:id/attach|detach|dismiss`; the agent reads them
 (`list_dossiers`, `get_dossier`); the dashboard shows them.
 
+**The daily pass over the dossiers** (off until you turn it on, dashboard › Dossiers) — after 02:30, one model call per
+dossier that moved and holds a mail that is not bulk (or a label), ten at most: what the matter is, where it stands, and
+up to five facts worth remembering about the people, organisations and projects in it. The model reads headers and
+200-character previews, never a full body; its answer is checked by the code. The summary stays on the dossier
+(« Résumer maintenant » on one, whatever the switch); wired, the facts wait as candidates the hub asks for
+(`GET /api/dossiers/candidates?after=`) and only ever proposes to you. Calls are counted as `dossier_digest`.
+
 **Connectors** — GitHub notifications, Gmail (OAuth2), Google Calendar, Google Tasks, RSS/Atom, Home Assistant —
 enabled one by one, classified by rules, never by a model.
 

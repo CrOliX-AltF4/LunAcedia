@@ -83,7 +83,7 @@ describe("PlanningStore", () => {
         });
     });
 
-    it("sees a due date added to a task as a change (the case the box missed, O21)", () => {
+    it("sees a due date added to a task as a change (the case the box missed)", () => {
         const store = new PlanningStore();
         store.replaceTasks([task("t1")], 100);
         expect(store.replaceTasks([task("t1", { due: "2026-10-30" })], 200).changed).toEqual([
