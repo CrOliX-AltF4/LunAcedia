@@ -49,6 +49,43 @@ afterEach(() => {
     );
 });
 
+describe("GcalConnector.readPlanning — participants", () => {
+    it("keeps the other participants' addresses, Master's own left out, and none when alone", async () => {
+        vi.stubGlobal(
+            "fetch",
+            makeFetch({
+                primary: [
+                    {
+                        items: [
+                            {
+                                id: "e1",
+                                summary: "Point devis",
+                                start: { dateTime: "2026-10-20T10:00:00Z" },
+                                end: { dateTime: "2026-10-20T11:00:00Z" },
+                                attendees: [
+                                    { email: "me@x.fr", self: true },
+                                    { email: "Lea@Acme.fr" },
+                                    { displayName: "no address" },
+                                ],
+                            },
+                            {
+                                id: "e2",
+                                summary: "Seul",
+                                start: { dateTime: "2026-10-21T10:00:00Z" },
+                                end: { dateTime: "2026-10-21T11:00:00Z" },
+                            },
+                        ],
+                    },
+                ],
+                work: [{}],
+            }),
+        );
+        const events = await new GcalConnector().readPlanning(FROM, TO);
+        expect(events!.find((e) => e.id === "primary/e1")!.attendees).toEqual(["lea@acme.fr"]);
+        expect(events!.find((e) => e.id === "primary/e2")).not.toHaveProperty("attendees");
+    });
+});
+
 describe("GcalConnector.readPlanning", () => {
     it("reads every calendar over the period as planning objects", async () => {
         const fetchMock = makeFetch({

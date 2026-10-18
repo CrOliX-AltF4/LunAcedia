@@ -19,6 +19,8 @@ export interface PlanningEvent {
     description?: string;
     /** An occurrence of a recurring series (Google unfolds them). */
     recurring: boolean;
+    /** The other participants' addresses (Master's own left out) — what a dossier proposes an event by. */
+    attendees?: string[];
     url?: string;
     /** When the source last changed it (ms). */
     updatedAt: number;

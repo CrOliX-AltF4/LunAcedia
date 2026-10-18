@@ -81,6 +81,9 @@ import {
     OAuthStates,
 } from "../auth/google_oauth_flow.js";
 import { DASHBOARD_HTML } from "./dashboard.js";
+import { DossierRoutes } from "./dossier_routes.js";
+import type { DossierStore } from "../dossiers/dossier_store.js";
+import type { DossierMember } from "../dossiers/dossier_index.js";
 import { serveChanges, type ChangeFeed } from "../changes/change_feed.js";
 import {
     BULK_LIMIT,
@@ -328,6 +331,17 @@ export class AcediaApiServer {
     readonly conversationRoutes: ConversationRoutes | null;
 
     private readonly life: ItemLifecycle;
+    private dossierRoutes: DossierRoutes | null = null;
+    private dossierStore: DossierStore | null = null;
+
+    /**
+     * The dossiers: their routes, and the agent's tools to read them. Given after construction — this
+     * constructor already takes too much; new route families come in this way.
+     */
+    attachDossiers(store: DossierStore, resolve: (ref: string) => DossierMember | undefined): void {
+        this.dossierStore = store;
+        this.dossierRoutes = new DossierRoutes({ store, resolve, readBody, json });
+    }
 
     private readonly inboxRoutes: InboxRoutes | null;
 
@@ -378,6 +392,12 @@ export class AcediaApiServer {
                                         this.planningSync!.configured(),
                                     ),
                             }),
+                        ...(this.dossierStore && {
+                            dossiers: {
+                                list: () => this.dossierStore!.list(),
+                                get: (id: string) => this.dossierStore!.get(id),
+                            },
+                        }),
                         now: () => Date.now(),
                         // Natsume read it in full: it is read at the source, and the item follows.
                         markRead: async (event) => {
@@ -1296,6 +1316,9 @@ export class AcediaApiServer {
         if (await this.planningRoutes?.handle(method, path, url, res)) return;
         if (this.reminderRoutes && (await this.reminderRoutes.handle(method, path, url, req, res)))
             return;
+
+        // The dossiers: what the sources group (admin only)
+        if (this.dossierRoutes && (await this.dossierRoutes.handle(method, path, req, res))) return;
 
         // The pocket app's topics
         if (
